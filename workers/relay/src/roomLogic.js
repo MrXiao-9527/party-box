@@ -25,6 +25,10 @@ export const ACK_REASONS = {
 export function ledgerEntrySummary(entry) {
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
   if (entry.kind === 'undo') return entry.fromName || '撤销'
+  if (entry.kind === 'seatAdjust') {
+    const n = entry.amount
+    return `${entry.fromName} ${n > 0 ? '+' : ''}${n}`
+  }
   return `${entry.fromName}→${entry.toName} +${entry.amount}`
 }
 
@@ -356,8 +360,23 @@ export function createRoomStore() {
         }
         const denom = op.denom ?? 0
         if (denom <= 0) return fail(ACK_REASONS.INVALID)
+        const before = target.balance
         const delta = op.type === '+denom' ? denom : -denom
         target.balance = Math.max(0, target.balance + delta)
+        const actual = target.balance - before
+        if (actual !== 0) {
+          ledger.push({
+            id: uid('led'),
+            kind: 'seatAdjust',
+            fromSeatId: target.seatId,
+            fromName: target.name,
+            toSeatId: '',
+            toName: '',
+            amount: actual,
+            at: Date.now(),
+          })
+          if (ledger.length > 100) ledger = ledger.slice(-100)
+        }
         break
       }
       case '+batch':
@@ -369,8 +388,23 @@ export function createRoomStore() {
         }
         const amount = op.amount ?? 0
         if (amount <= 0) return fail(ACK_REASONS.INVALID)
+        const before = target.balance
         const delta = op.type === '+batch' ? amount : -amount
         target.balance = Math.max(0, target.balance + delta)
+        const actual = target.balance - before
+        if (actual !== 0) {
+          ledger.push({
+            id: uid('led'),
+            kind: 'seatAdjust',
+            fromSeatId: target.seatId,
+            fromName: target.name,
+            toSeatId: '',
+            toName: '',
+            amount: actual,
+            at: Date.now(),
+          })
+          if (ledger.length > 100) ledger = ledger.slice(-100)
+        }
         break
       }
       case 'set': {
@@ -502,6 +536,14 @@ export function createRoomStore() {
           for (const s of seats) {
             if (byId.has(s.seatId)) s.balance = byId.get(s.seatId)
           }
+        } else if (entry.kind === 'seatAdjust') {
+          const seat = seats.find((s) => s.seatId === entry.fromSeatId)
+          if (!seat) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          const delta = entry.amount
+          if (!Number.isInteger(delta) || delta === 0) {
+            return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          }
+          seat.balance = Math.max(0, seat.balance - delta)
         } else {
           const sender = seats.find((s) => s.seatId === entry.fromSeatId)
           const receiver = seats.find((s) => s.seatId === entry.toSeatId)

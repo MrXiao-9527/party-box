@@ -1,6 +1,6 @@
 /**
- * UI smoke: host 撤销上一笔 — entry, preview, settle, ledger, empty toast.
- * Assumes LocalStore preview/dev on :45321.
+ * UI smoke: host 撤销上一笔 — seatAdjust + buy-in, preview, ledger, empty toast.
+ * Needs Vite :45321 + relay :45322.
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
@@ -75,12 +75,33 @@ try {
   await shot('undo-menu-entry')
   await clickText('撤销上一笔')
   await page.waitForFunction(() =>
-    [...document.querySelectorAll('.toast, [class*="toast"]')].some((el) =>
+    [...document.querySelectorAll('.toast')].some((el) =>
       (el.textContent || '').includes('没有可撤销的记录'),
     ),
   )
 
-  // Buy-in to create undoable ledger row
+  // 本席加减: denom 100 → ledger seatAdjust → undo
+  await page.click('.denom-100')
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.hero-balance')
+    return el && Number(el.textContent) >= 100
+  })
+  await new Promise((r) => setTimeout(r, 400))
+
+  await openMenu()
+  await clickText('撤销上一笔')
+  await page.waitForSelector('[aria-label="撤销上一笔"]')
+  await page.waitForFunction(() =>
+    (document.body.textContent || '').includes('将撤销：地主 +100'),
+  )
+  await shot('undo-seat-adjust-preview')
+  await clickText('确认撤销')
+  await page.waitForFunction(() => {
+    const el = document.querySelector('.hero-balance')
+    return el && Number(el.textContent) === 0
+  })
+
+  // Buy-in then undo
   await openMenu()
   await clickText('全员买入')
   await page.waitForSelector('.buyin-amount-input')
@@ -92,7 +113,6 @@ try {
     return el && Number(el.textContent) === 50
   })
 
-  // Undo with confirm preview
   await openMenu()
   await clickText('撤销上一笔')
   await page.waitForSelector('[aria-label="撤销上一笔"]')
@@ -106,18 +126,24 @@ try {
     return el && Number(el.textContent) === 0
   })
 
-  // Ledger shows 撤销 · …
+  // Ledger shows both 撤销 rows
   await page.evaluate(() => {
     const t = [...document.querySelectorAll('button')].find((b) =>
       (b.textContent || '').includes('流水'),
     )
     t?.click()
   })
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll('.ledger-row')].some((r) =>
-      (r.textContent || '').includes('撤销 · 全员买入 50'),
-    ),
-  )
+  await page.waitForFunction(() => {
+    const text = [...document.querySelectorAll('.ledger-row')]
+      .map((r) => r.textContent || '')
+      .join('\n')
+    return (
+      text.includes('撤销 · 全员买入 50') &&
+      text.includes('撤销 · 地主 +100') &&
+      text.includes('地主') &&
+      text.includes('+100')
+    )
+  })
   await shot('undo-ledger-row')
 
   console.log('e2e-undo-ui: OK')

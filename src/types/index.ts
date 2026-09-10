@@ -16,8 +16,8 @@ export type ChipOpType =
   | 'uniformBuyIn'
   | 'undoLast'
 
-/** Ledger row kind — omit / transfer = seat→seat; uniformBuyIn = summary; undo = 撤销. */
-export type LedgerKind = 'transfer' | 'uniformBuyIn' | 'undo'
+/** Ledger row kind — omit / transfer = seat→seat; seatAdjust = 本席加减; uniformBuyIn / undo. */
+export type LedgerKind = 'transfer' | 'seatAdjust' | 'uniformBuyIn' | 'undo'
 
 /** Successful chip ledger row — failed attempts never appear. */
 export interface LedgerEntry {
@@ -28,6 +28,10 @@ export interface LedgerEntry {
   fromName: string
   toSeatId: string
   toName: string
+  /**
+   * transfer / uniformBuyIn: positive amount.
+   * seatAdjust: signed delta (买码 +, 下分 −).
+   */
   amount: number
   at: number
   /** uniformBuyIn: balances before set — required to reverse on undo. */
@@ -79,6 +83,10 @@ export interface ChipOp {
 export function ledgerEntrySummary(entry: LedgerEntry): string {
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
   if (entry.kind === 'undo') return entry.fromName || '撤销'
+  if (entry.kind === 'seatAdjust') {
+    const n = entry.amount
+    return `${entry.fromName} ${n > 0 ? '+' : ''}${n}`
+  }
   return `${entry.fromName}→${entry.toName} +${entry.amount}`
 }
 
@@ -118,7 +126,7 @@ export interface TableSnapshot {
   snapshotAt: number
   seats: SnapshotSeat[]
   denoms: number[]
-  /** In-table ledger (successful settles: transfers, buy-in, undos). */
+  /** In-table ledger (settles: seat ±, transfers, buy-in, undos). */
   ledger: LedgerEntry[]
 }
 

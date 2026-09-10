@@ -164,19 +164,79 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
 
       switch (op.type) {
         case '+denom':
-          if (target && op.denom) target.balance = Math.max(0, target.balance + op.denom)
+          if (target && op.denom) {
+            const before = target.balance
+            target.balance = Math.max(0, target.balance + op.denom)
+            const actual = target.balance - before
+            if (actual !== 0) {
+              ledger.push({
+                id: `led_opt_${op.opId}_adj`,
+                kind: 'seatAdjust',
+                fromSeatId: target.seatId,
+                fromName: target.name,
+                toSeatId: '',
+                toName: '',
+                amount: actual,
+                at: Date.now(),
+              })
+            }
+          }
           break
         case '-denom':
           if (target && op.denom) {
+            const before = target.balance
             target.balance = Math.max(0, target.balance - op.denom)
+            const actual = target.balance - before
+            if (actual !== 0) {
+              ledger.push({
+                id: `led_opt_${op.opId}_adj`,
+                kind: 'seatAdjust',
+                fromSeatId: target.seatId,
+                fromName: target.name,
+                toSeatId: '',
+                toName: '',
+                amount: actual,
+                at: Date.now(),
+              })
+            }
           }
           break
         case '+batch':
-          if (target && op.amount) target.balance = Math.max(0, target.balance + op.amount)
+          if (target && op.amount) {
+            const before = target.balance
+            target.balance = Math.max(0, target.balance + op.amount)
+            const actual = target.balance - before
+            if (actual !== 0) {
+              ledger.push({
+                id: `led_opt_${op.opId}_adj`,
+                kind: 'seatAdjust',
+                fromSeatId: target.seatId,
+                fromName: target.name,
+                toSeatId: '',
+                toName: '',
+                amount: actual,
+                at: Date.now(),
+              })
+            }
+          }
           break
         case '-batch':
           if (target && op.amount) {
+            const before = target.balance
             target.balance = Math.max(0, target.balance - op.amount)
+            const actual = target.balance - before
+            if (actual !== 0) {
+              ledger.push({
+                id: `led_opt_${op.opId}_adj`,
+                kind: 'seatAdjust',
+                fromSeatId: target.seatId,
+                fromName: target.name,
+                toSeatId: '',
+                toName: '',
+                amount: actual,
+                at: Date.now(),
+              })
+            }
           }
           break
         case 'set':
@@ -268,6 +328,12 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             for (const s of seats) {
               if (byId.has(s.seatId)) s.balance = byId.get(s.seatId)!
             }
+          } else if (entry.kind === 'seatAdjust') {
+            const seat = seats.find((s) => s.seatId === entry.fromSeatId)
+            if (!seat) return base
+            const delta = entry.amount
+            if (!Number.isInteger(delta) || delta === 0) return base
+            seat.balance = Math.max(0, seat.balance - delta)
           } else {
             const sender = seats.find((s) => s.seatId === entry.fromSeatId)
             const receiver = seats.find((s) => s.seatId === entry.toSeatId)

@@ -361,6 +361,16 @@ export function ChipTable({
                       <span className="ledger-who">全员买入 {row.amount}</span>
                       <span className="ledger-amt ledger-amt-set">={row.amount}</span>
                     </>
+                  ) : row.kind === 'seatAdjust' ? (
+                    <>
+                      <span className="ledger-who">{row.fromName}</span>
+                      <span
+                        className={`ledger-amt${row.amount < 0 ? ' ledger-amt-set' : ''}`}
+                      >
+                        {row.amount > 0 ? '+' : ''}
+                        {row.amount}
+                      </span>
+                    </>
                   ) : (
                     <>
                       <span className="ledger-who">
