@@ -2,27 +2,26 @@
 
 ## Old bug (repro)
 
-1. Device A: open app → **开一桌** → enter nickname → lobby shows room code `ABCD`.
-2. Device B (other browser / phone): **加入** with `ABCD`, or open `/r/ABCD`.
-3. **Observed:** toast / redirect with「房间不存在或已解散」.
+1. Device A: **开一桌** → nickname → lobby code `ABCD`.
+2. Device B: **加入** `ABCD` or `/r/ABCD`.
+3. **Observed:** 「房间不存在或已解散」.
 
-**Cause:** `RoomState` lived only in `LocalStoreTransport` / `localStorage` on the host device (`party-box:room:CODE`). Device B has no shared store, so `loadRoom` returns null.
-
-LAN-only tricks (same Wi-Fi localStorage) do not help mobile share links.
+**Cause:** `RoomState` only in host `localStorage` (`LocalStoreTransport`).
 
 ## Fix
 
-- Add `server/` Node HTTP+WebSocket relay: in-memory rooms, host-authoritative `ChipOp` / ack / snapshot (same rules as `localRoom.applyChipOp`).
-- Frontend: when `VITE_RELAY_URL` is set, create/join/mutations/ops use `SharedRelayTransport` + `roomApi`; WebSocket keeps lobby/table in sync. Cache still writes through to localStorage for UI.
-- When `VITE_RELAY_URL` is unset, keep `LocalStoreTransport` for solo/dev.
+- Shared relay (Node `server/` and/or Cloudflare Worker + Durable Object `workers/relay/`)
+- `VITE_RELAY_URL` → `SharedRelayTransport` + `roomApi`
+- Unset → `LocalStoreTransport` (solo/dev)
+- Toasts: missing →「房间不存在或已解散」; network →「连不上房间服务，请重试」
 
-## Verify
+## Verify（真·双端验）
 
 ```bash
 npm install
-npm run relay          # terminal 1
-npm run test:relay     # create → GET → join → op
+npm run relay && npm run test:relay
 npm run build
+npm run dev:all   # then: node scripts/e2e-two-browser.mjs
 ```
 
-Manual: `npm run dev:all` → two browsers, create on A, join code on B.
+Cloudflare: `cd workers/relay && npm i && npx wrangler deploy`

@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { A2HSHint } from '../components/A2HSHint'
 import { ToastStack } from '../components/Toast'
-import { createEmptyHostRoom, loadRoom, syncRoomFromRelay } from '../sync/roomApi'
-import { parseRoomCode } from '../types'
+import { createEmptyHostRoom, syncRoomFromRelay, syncStatusToast } from '../sync/roomApi'
+import { ACK_REASONS, parseRoomCode } from '../types'
 
 const TOOLS = [
   {
@@ -58,7 +58,7 @@ export function HomePage() {
         const { session } = await createEmptyHostRoom()
         navigate(`/r/${session.roomCode}`)
       } catch {
-        toast('无法创建房间，请检查网络或中继服务')
+        toast(ACK_REASONS.RELAY_UNREACHABLE)
       }
     })()
   }
@@ -70,9 +70,9 @@ export function HomePage() {
       return
     }
     void (async () => {
-      const remote = await syncRoomFromRelay(parsed.code)
-      if (!remote && !loadRoom(parsed.code)) {
-        toast('房间不存在或已解散')
+      const synced = await syncRoomFromRelay(parsed.code)
+      if (synced.status !== 'ok') {
+        toast(syncStatusToast(synced.status)!)
         return
       }
       navigate(`/r/${parsed.code}`)

@@ -22,3 +22,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+workers/relay/node_modules
+workers/relay/.wrangler

@@ -20,8 +20,10 @@ import {
   type Session,
 } from '../store/localRoom'
 import type { Phase } from '../types'
+import { ACK_REASONS } from '../types'
 import {
   isRelayEnabled,
+  RelayNetworkError,
   relayClaimHostSeat,
   relayCreateEmptyHostRoom,
   relayDeleteRoom,
@@ -35,20 +37,35 @@ import {
   relaySetPhase,
 } from './relayClient'
 
-export { isRelayEnabled, loadRoom }
+export { isRelayEnabled, loadRoom, RelayNetworkError }
 
-/** Pull shared room into localStorage (no-op when relay off / 404). */
+export type SyncRoomResult =
+  | { status: 'ok'; data: PersistedRoom }
+  | { status: 'missing' }
+  | { status: 'network' }
+
+/** Pull shared room into localStorage. Distinguishes missing vs network. */
 export async function syncRoomFromRelay(
   roomCode: string,
-): Promise<PersistedRoom | null> {
-  if (!isRelayEnabled()) return loadRoom(roomCode)
+): Promise<SyncRoomResult> {
+  if (!isRelayEnabled()) {
+    const local = loadRoom(roomCode)
+    return local ? { status: 'ok', data: local } : { status: 'missing' }
+  }
   try {
     const remote = await relayGetRoom(roomCode)
-    if (remote) return remote
-  } catch {
-    /* fall through to local cache */
+    if (remote) return { status: 'ok', data: remote }
+    return { status: 'missing' }
+  } catch (e) {
+    if (e instanceof RelayNetworkError) return { status: 'network' }
+    return { status: 'network' }
   }
-  return loadRoom(roomCode)
+}
+
+export function syncStatusToast(status: SyncRoomResult['status']): string | null {
+  if (status === 'missing') return ACK_REASONS.ROOM_MISSING
+  if (status === 'network') return ACK_REASONS.RELAY_UNREACHABLE
+  return null
 }
 
 export async function createEmptyHostRoom(): Promise<{

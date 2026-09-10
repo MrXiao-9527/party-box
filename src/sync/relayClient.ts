@@ -4,8 +4,16 @@
  */
 
 import type { ChipAck, ChipOp, Phase, TableSnapshot } from '../types'
+import { ACK_REASONS } from '../types'
 import type { PersistedRoom, Session } from '../store/localRoom'
 import { saveRoom } from '../store/localRoom'
+
+export class RelayNetworkError extends Error {
+  constructor(message = ACK_REASONS.RELAY_UNREACHABLE) {
+    super(message)
+    this.name = 'RelayNetworkError'
+  }
+}
 
 export function getRelayBaseUrl(): string | null {
   const raw = (import.meta.env.VITE_RELAY_URL as string | undefined)?.trim()
@@ -35,13 +43,18 @@ async function api<T>(
   path: string,
   init?: RequestInit,
 ): Promise<{ ok: true; body: T } | { ok: false; status: number; body: unknown }> {
-  const res = await fetch(`${httpBase()}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-  })
+  let res: Response
+  try {
+    res = await fetch(`${httpBase()}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+    })
+  } catch {
+    throw new RelayNetworkError()
+  }
   let body: unknown = null
   try {
     body = await res.json()
@@ -91,7 +104,10 @@ export async function relayGetRoom(
   const result = await api<{ data: PersistedRoom }>(
     `/rooms/${encodeURIComponent(roomCode.toUpperCase())}`,
   )
-  if (!result.ok) return null
+  if (!result.ok) {
+    if (result.status === 404) return null
+    throw new RelayNetworkError()
+  }
   return cache(result.body.data)
 }
 
@@ -103,7 +119,7 @@ export async function relayCreateEmptyHostRoom(preferredSeatId?: string): Promis
     method: 'POST',
     body: JSON.stringify(preferredSeatId ? { seatId: preferredSeatId } : {}),
   })
-  if (!result.ok) throw new Error('无法创建房间')
+  if (!result.ok) throw new RelayNetworkError()
   cache(result.body.data)
   return result.body
 }

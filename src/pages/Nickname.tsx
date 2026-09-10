@@ -1,12 +1,11 @@
 import { useState } from 'react'
 import {
-  loadRoom,
   loadSession,
   type Session,
 } from '../store/localRoom'
 import type { PersistedRoom } from '../store/localRoom'
-import { claimHostSeat, joinRoom, syncRoomFromRelay } from '../sync/roomApi'
-import { parseRoomCode } from '../types'
+import { claimHostSeat, joinRoom, syncRoomFromRelay, syncStatusToast } from '../sync/roomApi'
+import { ACK_REASONS, parseRoomCode } from '../types'
 import { saveIdentity } from '../sync/seatRestore'
 
 interface NicknameGateProps {
@@ -51,12 +50,12 @@ export function NicknameGate({
     void (async () => {
       setBusy(true)
       try {
-        await syncRoomFromRelay(parsed.code)
-        const existing = loadRoom(parsed.code)
-        if (!existing) {
-          fail('房间已结束')
+        const synced = await syncRoomFromRelay(parsed.code)
+        if (synced.status !== 'ok') {
+          fail(syncStatusToast(synced.status)!)
           return
         }
+        const existing = synced.data
 
         const session = loadSession()
         // First claim after「开一桌」(host seat reserved on create)
@@ -98,7 +97,7 @@ export function NicknameGate({
         })
         onReady(result.session, result.data)
       } catch {
-        fail('网络异常，请重试')
+        fail(ACK_REASONS.RELAY_UNREACHABLE)
       } finally {
         setBusy(false)
       }

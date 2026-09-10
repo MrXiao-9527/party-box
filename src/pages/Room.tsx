@@ -13,7 +13,7 @@ import {
   restoreSeat,
   syncRoomFromRelay,
 } from '../sync/roomApi'
-import { MAX_SEATS, parseRoomCode } from '../types'
+import { ACK_REASONS, MAX_SEATS, parseRoomCode } from '../types'
 import {
   decideRestore,
   hasHadSeat,
@@ -153,7 +153,14 @@ export function RoomPage() {
     const run = async () => {
       // Cross-device: pull shared RoomState before restore / nick gate.
       const synced = await syncRoomFromRelay(roomCode)
-      const roomDataNow = synced ?? loadRoom(roomCode)
+      if (synced.status === 'network') {
+        roomApi.pushToast(ACK_REASONS.RELAY_UNREACHABLE)
+        navigate('/', { replace: true })
+        setGate({ type: 'gone' })
+        return
+      }
+      const roomDataNow =
+        synced.status === 'ok' ? synced.data : loadRoom(roomCode)
       const roomViewNow = roomDataNow
         ? {
             roomCode: roomDataNow.room.roomCode,

@@ -81,6 +81,7 @@ export const ACK_REASONS = {
   ROLLBACK: '操作未生效，已回滚',
   INVALID: '操作无效',
   ROOM_MISSING: '房间不存在或已解散',
+  RELAY_UNREACHABLE: '连不上房间服务，请重试',
   ROOM_CODE_INVALID: '房码无效',
   TABLE_FULL: '本桌已满（最多8人）',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
