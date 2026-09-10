@@ -20,25 +20,25 @@ npm run dev:all
 npm run build && npm run preview
 ```
 
-跨设备 preview：
+**真·双端验 preview**（构建时必须带中继地址，并另开中继进程）：
 
 ```bash
 npm run relay
 VITE_RELAY_URL=http://127.0.0.1:45322 npm run build && npm run preview
 ```
 
-两浏览器冒烟：`npm run test:relay`；UI：`node scripts/e2e-two-browser.mjs`（需 `dev:all`）。
+两浏览器冒烟：`npm run test:relay`；UI：`node scripts/e2e-two-browser.mjs`（需 `dev:all` 或 preview+relay）。
 
 ## 共享房间中继（P0 hotfix）
 
 **旧 bug**：房间只在开房设备 `localStorage`。另一设备同码 →「房间不存在或已解散」。
 
-**修复**：共享中继保存 `RoomState`；`VITE_RELAY_URL` 启用后走 `SharedRelayTransport`。未配置则 LocalStore（solo/dev）。
+**修复**：共享中继保存 `RoomState`；`VITE_RELAY_URL` 启用后走 `RemoteStoreTransport`。未配置则 LocalStore（solo/dev）。
 
-| Toast | 何时 |
-|-------|------|
+| Toast（勿混用） | 何时 |
+|----------------|------|
 | `房间不存在或已解散` | 中继 404 / 房间确实不存在 |
-| `连不上房间服务，请重试` | 中继网络/超时失败 |
+| `连不上房间服务，请重试` | 中继网络/超时/5xx |
 
 ### 环境变量
 

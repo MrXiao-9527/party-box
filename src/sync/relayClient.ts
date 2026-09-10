@@ -98,6 +98,21 @@ export function onRelayRoomUpdate(
   return () => window.removeEventListener(ROOM_EVENT, listener)
 }
 
+function errorFromBody(
+  body: unknown,
+  fallback: string,
+): string {
+  if (
+    body &&
+    typeof body === 'object' &&
+    'error' in body &&
+    typeof (body as { error: unknown }).error === 'string'
+  ) {
+    return (body as { error: string }).error
+  }
+  return fallback
+}
+
 export async function relayGetRoom(
   roomCode: string,
 ): Promise<PersistedRoom | null> {
@@ -136,7 +151,12 @@ export async function relayClaimHostSeat(
       body: JSON.stringify({ seatId, name }),
     },
   )
-  if (!result.ok) return null
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return null
+  }
   return cache(result.body.data)
 }
 
@@ -152,14 +172,18 @@ export async function relayJoinRoom(
     },
   )
   if (!result.ok) {
-    const err =
-      result.body &&
-      typeof result.body === 'object' &&
-      'error' in result.body &&
-      typeof (result.body as { error: unknown }).error === 'string'
-        ? (result.body as { error: string }).error
-        : '房间不存在或已解散'
-    return { error: err }
+    // 404 → room truly missing; 5xx / empty → network; 400 → server reason (满座等)
+    if (result.status === 404) {
+      return {
+        error: errorFromBody(result.body, ACK_REASONS.ROOM_MISSING),
+      }
+    }
+    if (result.status >= 500 || result.status === 0) {
+      return { error: ACK_REASONS.RELAY_UNREACHABLE }
+    }
+    return {
+      error: errorFromBody(result.body, ACK_REASONS.RELAY_UNREACHABLE),
+    }
   }
   cache(result.body.data)
   return result.body
@@ -220,14 +244,12 @@ export async function relayPickNewHost(
     },
   )
   if (!result.ok) {
-    const err =
-      result.body &&
-      typeof result.body === 'object' &&
-      'error' in result.body &&
-      typeof (result.body as { error: unknown }).error === 'string'
-        ? (result.body as { error: string }).error
-        : '操作无效'
-    return { error: err }
+    if (result.status >= 500 || result.status === 0) {
+      return { error: ACK_REASONS.RELAY_UNREACHABLE }
+    }
+    return {
+      error: errorFromBody(result.body, ACK_REASONS.INVALID),
+    }
   }
   return cache(result.body.data)!
 }
@@ -240,14 +262,17 @@ export async function relayFillSeatsToMax(
     { method: 'POST', body: '{}' },
   )
   if (!result.ok) {
-    const err =
-      result.body &&
-      typeof result.body === 'object' &&
-      'error' in result.body &&
-      typeof (result.body as { error: unknown }).error === 'string'
-        ? (result.body as { error: string }).error
-        : '房间不存在或已解散'
-    return { error: err }
+    if (result.status === 404) {
+      return {
+        error: errorFromBody(result.body, ACK_REASONS.ROOM_MISSING),
+      }
+    }
+    if (result.status >= 500 || result.status === 0) {
+      return { error: ACK_REASONS.RELAY_UNREACHABLE }
+    }
+    return {
+      error: errorFromBody(result.body, ACK_REASONS.RELAY_UNREACHABLE),
+    }
   }
   return cache(result.body.data)!
 }
