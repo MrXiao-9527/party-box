@@ -181,20 +181,21 @@ export function decideRestore(args: {
     return { kind: 'silent', identity }
   }
 
-  // seatId recorded but seat row gone / replaced → treat as taken
-  const nameTakenByOther = args.room.members.some(
-    (m) => m.name === identity.name && m.seatId !== identity.seatId,
-  )
-  if (nameTakenByOther || !stillThere) {
-    return {
-      kind: 'seat_taken',
-      toast: RESTORE_COPY.SEAT_TAKEN,
-      prefillName: identity.name,
-      identity,
-    }
+  // seatId gone from room (replaced / cleared) → new seat with nick prefill
+  return {
+    kind: 'seat_taken',
+    toast: RESTORE_COPY.SEAT_TAKEN,
+    prefillName: identity.name,
+    identity,
   }
+}
 
-  return { kind: 'identity_lost', toast: RESTORE_COPY.IDENTITY_LOST }
+/** Prefer live room hostSeatId over cached identity.role. */
+export function roleForSeat(
+  hostSeatId: string,
+  seatId: string,
+): SeatRole {
+  return hostSeatId === seatId ? 'host' : 'player'
 }
 
 export function newTabId(): string {

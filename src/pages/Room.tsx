@@ -22,6 +22,7 @@ import {
   newTabId,
   openSeatTabChannel,
   RESTORE_COPY,
+  roleForSeat,
   saveIdentity,
   type SeatIdentity,
   type TabMessage,
@@ -55,6 +56,12 @@ export function RoomPage() {
   const tabIdRef = useRef(newTabId())
   const channelRef = useRef<ReturnType<typeof openSeatTabChannel> | null>(null)
   const holdingSeatRef = useRef<string | null>(null)
+  const readOnlyRef = useRef(false)
+
+  const setTabReadOnly = (next: boolean) => {
+    readOnlyRef.current = next
+    setReadOnly(next)
+  }
 
   // BroadcastChannel: claim / kick / ping-pong for dual-tab
   useEffect(() => {
@@ -63,7 +70,11 @@ export function RoomPage() {
       if (msg.roomCode !== roomCode) return
       if (msg.tabId === tabIdRef.current) return
 
-      if (msg.type === 'ping' && holdingSeatRef.current === msg.seatId && !readOnly) {
+      if (
+        msg.type === 'ping' &&
+        holdingSeatRef.current === msg.seatId &&
+        !readOnlyRef.current
+      ) {
         ch.post({
           type: 'pong',
           roomCode,
@@ -74,9 +85,9 @@ export function RoomPage() {
       if (
         msg.type === 'kick' &&
         holdingSeatRef.current === msg.seatId &&
-        !readOnly
+        !readOnlyRef.current
       ) {
-        setReadOnly(true)
+        setTabReadOnly(true)
         holdingSeatRef.current = null
         roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
       }
@@ -134,7 +145,7 @@ export function RoomPage() {
             ch.close()
             resolve(false)
           }
-        }, 180)
+        }, 280)
       })
 
     const run = async () => {
@@ -186,14 +197,25 @@ export function RoomPage() {
       if (decision.kind === 'silent') {
         const data = restoreSeat(roomCode, decision.identity.seatId)
         if (data) {
+          const member = data.room.members.find(
+            (m) => m.seatId === decision.identity.seatId,
+          )
           const session: Session = {
             seatId: decision.identity.seatId,
-            name: decision.identity.name,
+            name: member?.name ?? decision.identity.name,
             roomCode,
           }
+          const nextIdentity: SeatIdentity = {
+            roomCode,
+            seatId: session.seatId,
+            name: session.name,
+            role: roleForSeat(data.room.hostSeatId, session.seatId),
+          }
           saveSession(session)
+          saveIdentity(nextIdentity)
           roomApi.bindSession(session)
           roomApi.setPersisted(data)
+          setTabReadOnly(false)
           holdingSeatRef.current = session.seatId
           channelRef.current?.post({
             type: 'claim',
@@ -240,7 +262,7 @@ export function RoomPage() {
 
   const claimHold = (session: Session) => {
     holdingSeatRef.current = session.seatId
-    setReadOnly(false)
+    setTabReadOnly(false)
     channelRef.current?.post({
       type: 'claim',
       roomCode: session.roomCode.toUpperCase(),
@@ -276,13 +298,20 @@ export function RoomPage() {
       setGate({ type: 'nick', prefill: id.name, notice: RESTORE_COPY.SEAT_TAKEN })
       return
     }
+    const member = data.room.members.find((m) => m.seatId === id.seatId)
     const session: Session = {
       seatId: id.seatId,
-      name: id.name,
+      name: member?.name ?? id.name,
       roomCode,
     }
+    const nextIdentity: SeatIdentity = {
+      roomCode,
+      seatId: session.seatId,
+      name: session.name,
+      role: roleForSeat(data.room.hostSeatId, session.seatId),
+    }
     saveSession(session)
-    saveIdentity(id)
+    saveIdentity(nextIdentity)
     roomApi.bindSession(session)
     roomApi.setPersisted(data)
     claimHold(session)

@@ -205,7 +205,8 @@ export function joinRoom(
     return { error: ACK_REASONS.ROOM_MISSING }
   }
 
-  // No seat restore this week — always allocate a new seatId (same nick OK).
+  // Always allocate a new seatId (restore / takeover paths bind an existing seat
+  // before NicknameGate; nick after seat_taken / identity_lost lands here).
   if (existing.room.members.length >= MAX_SEATS) {
     return { error: ACK_REASONS.TABLE_FULL }
   }
