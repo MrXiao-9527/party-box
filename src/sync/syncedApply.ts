@@ -1,4 +1,4 @@
-import type { TableSnapshot } from '../types'
+import type { Phase, TableSnapshot } from '../types'
 
 /** Host TableSnapshot sanitize — pot always numeric (same path as seat balances). */
 export function sanitizeTableSnapshot(snap: TableSnapshot): TableSnapshot {
@@ -18,9 +18,35 @@ export function sanitizeTableSnapshot(snap: TableSnapshot): TableSnapshot {
 export function canApplyHostSnapshot(
   currentSnapshotAt: number | null | undefined,
   incomingSnapshotAt: number,
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; allowEqual?: boolean },
 ): boolean {
   if (opts?.force) return true
   if (currentSnapshotAt == null) return true
+  if (opts?.allowEqual) return incomingSnapshotAt >= currentSnapshotAt
   return incomingSnapshotAt > currentSnapshotAt
+}
+
+/**
+ * Room+table apply gate for poll/WS.
+ * - Hard-block playing → lobby (even if snapshotAt is newer/equal/older)
+ * - Allow equal-age when phase advances lobby → playing
+ * - Otherwise require strictly newer snapshotAt
+ */
+export function canApplySyncedRoom(
+  current: {
+    snapshotAt?: number | null
+    phase?: Phase | null
+  },
+  incoming: { snapshotAt: number; phase: Phase },
+  opts?: { force?: boolean },
+): boolean {
+  if (opts?.force) return true
+  if (current.phase === 'playing' && incoming.phase === 'lobby') {
+    return false
+  }
+  const phaseAdvance =
+    current.phase === 'lobby' && incoming.phase === 'playing'
+  return canApplyHostSnapshot(current.snapshotAt, incoming.snapshotAt, {
+    allowEqual: phaseAdvance,
+  })
 }

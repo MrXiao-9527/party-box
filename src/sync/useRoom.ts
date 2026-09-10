@@ -31,7 +31,11 @@ import {
   onRelayRoomUpdate,
   subscribeRelayRoom,
 } from './relayClient'
-import { canApplyHostSnapshot, sanitizeTableSnapshot } from './syncedApply'
+import {
+  canApplyHostSnapshot,
+  canApplySyncedRoom,
+  sanitizeTableSnapshot,
+} from './syncedApply'
 
 export interface ToastMessage {
   id: string
@@ -94,6 +98,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     () => transport.getConnectionState(),
   )
   const snapshotRef = useRef<TableSnapshot | null>(null)
+  const roomRef = useRef<RoomState | null>(null)
   /** Drop same-key denom taps while awaiting ack. */
   const inflightKeysRef = useRef<Set<string>>(new Set())
   const pendingOpsRef = useRef<Set<string>>(new Set())
@@ -131,17 +136,34 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   )
 
   /**
-   * Room + table share one snapshotAt gate: only apply when newer (or force).
-   * Rejecting the table also skips setRoom — stale poll/WS cannot revert
-   * phase playing → lobby after 开桌.
+   * Room + table move together under canApplySyncedRoom:
+   * hard-block playing→lobby; equal-age ok only for lobby→playing; else newer.
    */
   const applySyncedRoom = useCallback(
     (data: PersistedRoom, opts?: { force?: boolean }) => {
-      if (!applyHostSnapshot(data.table, opts)) return false
+      if (
+        !canApplySyncedRoom(
+          {
+            snapshotAt: snapshotRef.current?.snapshotAt,
+            phase: roomRef.current?.phase,
+          },
+          {
+            snapshotAt: data.table.snapshotAt,
+            phase: data.room.phase,
+          },
+          opts,
+        )
+      ) {
+        return false
+      }
+      const sanitized = sanitizeTableSnapshot(data.table)
+      setTable(sanitized)
+      snapshotRef.current = sanitized
       setRoom(data.room)
+      roomRef.current = data.room
       return true
     },
-    [applyHostSnapshot],
+    [],
   )
 
   const refresh = useCallback(() => {
@@ -149,6 +171,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     const data = loadRoom(roomCode)
     if (!data) {
       setRoom(null)
+      roomRef.current = null
       setTable(null)
       snapshotRef.current = null
       return
@@ -170,6 +193,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     const unsubRelayEvent = onRelayRoomUpdate(roomCode, (data) => {
       if (!data) {
         setRoom(null)
+        roomRef.current = null
         setTable(null)
         snapshotRef.current = null
         return
@@ -595,16 +619,39 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   )
 
   const startPlaying = useCallback(() => {
-    if (!roomCode || !session) return
+    if (!roomCode || !session) {
+      pushToast('开桌失败，请重开一桌或检查网络')
+      return
+    }
     void (async () => {
+      const prevPhase = roomRef.current?.phase ?? 'lobby'
+      // Optimistic: enter ChipTable immediately; phase anti-regression holds it.
+      setRoom((prev) => {
+        if (!prev || prev.phase === 'playing') return prev
+        const next = { ...prev, phase: 'playing' as const }
+        roomRef.current = next
+        return next
+      })
       try {
         const data = await setPhase(roomCode, 'playing')
         if (data) {
           applySyncedRoom(data, { force: true })
           return
         }
+        setRoom((prev) => {
+          if (!prev) return prev
+          const next = { ...prev, phase: prevPhase }
+          roomRef.current = next
+          return next
+        })
         pushToast('开桌失败，请重开一桌或检查网络')
       } catch (e) {
+        setRoom((prev) => {
+          if (!prev) return prev
+          const next = { ...prev, phase: prevPhase }
+          roomRef.current = next
+          return next
+        })
         pushToast(
           e instanceof RelayNetworkError
             ? ACK_REASONS.RELAY_UNREACHABLE
