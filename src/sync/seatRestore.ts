@@ -133,11 +133,35 @@ export function saveIdentity(
 /**
  * Drop stale seatId from localStorage after seat_taken, but keep the
  * room-scoped had-seat mark so a later wipe still counts as identity_lost.
+ * Also clears party-box:session when it still points at the invalidated seat
+ * so a refresh cannot silent-restore / collide on the old seatId.
  */
 export function invalidateStoredSeatId(roomCode?: string): void {
   const prev = loadIdentity()
   if (roomCode) markHadSeat(roomCode)
   else if (prev) markHadSeat(prev.roomCode)
+
+  try {
+    const raw = localStorage.getItem('party-box:session')
+    if (raw) {
+      const session = JSON.parse(raw) as {
+        seatId?: string
+        roomCode?: string
+      }
+      const sameRoom =
+        !roomCode ||
+        !session.roomCode ||
+        session.roomCode.toUpperCase() === roomCode.toUpperCase()
+      const sameSeat =
+        prev?.seatId && session.seatId && session.seatId === prev.seatId
+      if (sameRoom || sameSeat || !session.seatId) {
+        localStorage.removeItem('party-box:session')
+      }
+    }
+  } catch {
+    localStorage.removeItem('party-box:session')
+  }
+
   localStorage.removeItem(IDENTITY_KEY)
 }
 

@@ -66,6 +66,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   const snapshotRef = useRef<TableSnapshot | null>(null)
   /** Drop same-key denom taps while awaiting ack. */
   const inflightKeysRef = useRef<Set<string>>(new Set())
+  /** Dual-tab: kicked tab must not send ChipOp even if UI misses the guard. */
+  const allowOpsRef = useRef(true)
 
   const pushToast = useCallback((text: string) => {
     const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
@@ -79,6 +81,30 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
 
+  /** Apply host table snapshot. Never keep stale local balances over host. */
+  const applyHostSnapshot = useCallback(
+    (snap: TableSnapshot, opts?: { force?: boolean }) => {
+      const sanitized: TableSnapshot = {
+        ...snap,
+        seats: snap.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) })),
+      }
+      const cur = snapshotRef.current
+      // Reject only if we somehow held a newer *host* ack; optimistic keeps base.snapshotAt
+      // so it never outranks host. force=true on silent restore / takeover.
+      if (
+        !opts?.force &&
+        cur &&
+        sanitized.snapshotAt < cur.snapshotAt
+      ) {
+        return false
+      }
+      setTable(sanitized)
+      snapshotRef.current = sanitized
+      return true
+    },
+    [],
+  )
+
   const refresh = useCallback(() => {
     if (!roomCode) return
     const data = loadRoom(roomCode)
@@ -89,10 +115,9 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       return
     }
     setRoom(data.room)
-    // Host snapshot is authoritative (localStorage host in this slice).
-    setTable(data.table)
-    snapshotRef.current = data.table
-  }, [roomCode])
+    // Host snapshot is authoritative — never keep stale local over host.
+    applyHostSnapshot(data.table, { force: true })
+  }, [roomCode, applyHostSnapshot])
 
   useEffect(() => {
     refresh()
@@ -155,7 +180,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           if (target) target.locked = false
           break
       }
-      return { ...base, seats, snapshotAt: Date.now() }
+      // Keep host snapshotAt — optimistic UI must not outrank host on compare.
+      return { ...base, seats, snapshotAt: base.snapshotAt }
     },
     [],
   )
@@ -164,19 +190,13 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     if (!roomCode) return
     const snap = await transport.requestSnapshot(roomCode)
     if (snap) {
-      const sanitized: TableSnapshot = {
-        ...snap,
-        seats: snap.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) })),
-      }
-      // Always take host snapshot — never keep stale optimistic local balances.
-      setTable(sanitized)
-      snapshotRef.current = sanitized
+      applyHostSnapshot(snap, { force: true })
       const data = loadRoom(roomCode)
       if (data) setRoom(data.room)
     } else {
       refresh()
     }
-  }, [roomCode, transport, refresh])
+  }, [roomCode, transport, refresh, applyHostSnapshot])
 
   const submitOp = useCallback(
     async (
@@ -184,6 +204,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       targetSeatId: string,
       extra?: { denom?: number; amount?: number },
     ) => {
+      if (!allowOpsRef.current) return
       if (!session || !roomCode || !snapshotRef.current) return
 
       const key = denomKey(type, extra)
@@ -210,6 +231,10 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       setPendingOps((prev) => new Set(prev).add(op.opId))
 
       try {
+        if (!allowOpsRef.current) {
+          await forceSnapshot()
+          return
+        }
         const ack = await transport.sendOp(op)
         setPendingOps((prev) => {
           const next = new Set(prev)
@@ -342,6 +367,10 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     setSession(null)
   }, [])
 
+  const setAllowOps = useCallback((allow: boolean) => {
+    allowOpsRef.current = allow
+  }, [])
+
   const seats: Seat[] =
     table && session ? seatsFromSnapshot(table, session.seatId) : []
 
@@ -378,14 +407,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     fillSeats,
     bindSession,
     clearSession,
+    setAllowOps,
     setOffline,
     setPersisted: (data: PersistedRoom) => {
-      // Silent restore / takeover: bind host snapshotAt balances, drop optimistic.
+      // Silent restore / takeover: force host snapshotAt balances, drop optimistic.
       setPendingOps(new Set())
       inflightKeysRef.current.clear()
       setRoom(data.room)
-      setTable(data.table)
-      snapshotRef.current = data.table
+      applyHostSnapshot(data.table, { force: true })
     },
   }
 }

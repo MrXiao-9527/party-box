@@ -91,9 +91,12 @@ export function deleteRoom(roomCode: string): void {
 }
 
 /**
- * Silent restore: seatId still in room → mark connected, return snapshot.
+ * Silent restore: seatId still in room → return host PersistedRoom snapshot.
+ * Balances come from host table.snapshotAt — callers must bind via setPersisted
+ * (force host) and must not merge stale local seat balances.
+ *
  * Host reopening a paused table stays disconnected until「重开一桌」so the
- * member list stays consistent with「桌主已离开 · 桌子已暂停」.
+ * member list stays consistent with「桌主已离开 · 桌子已暂停」. Never auto-resume.
  */
 export function restoreSeat(
   roomCode: string,
@@ -106,6 +109,7 @@ export function restoreSeat(
     existing.room.phase === 'paused' &&
     seatId === existing.room.hostSeatId
   ) {
+    // Paused silent restore: keep phase paused, host connected=false.
     return existing
   }
   return setMemberConnected(roomCode, seatId, true)

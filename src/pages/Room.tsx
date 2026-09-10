@@ -67,6 +67,8 @@ export function RoomPage() {
   const setTabReadOnly = (next: boolean) => {
     readOnlyRef.current = next
     setReadOnly(next)
+    // Belt-and-suspenders: useRoom.submitOp also checks allowOpsRef.
+    roomApi.setAllowOps(!next)
   }
 
   // BroadcastChannel: claim / kick / ping-pong for dual-tab
@@ -217,8 +219,9 @@ export function RoomPage() {
       }
 
       if (decision.kind === 'silent') {
-        // Host snapshot via restoreSeat → setPersisted (balances + phase).
-        // Paused host stays disconnected — do NOT auto「重开一桌」.
+        // Host snapshot via restoreSeat → setPersisted(force).
+        // Paused host: restoreSeat leaves phase=paused + connected=false —
+        // do NOT call resumeTable / 重开一桌.
         const data = restoreSeat(roomCode, decision.identity.seatId)
         if (data) {
           const member = data.room.members.find(
@@ -238,6 +241,7 @@ export function RoomPage() {
           saveSession(session)
           saveIdentity(nextIdentity)
           roomApi.bindSession(session)
+          // Force host table.snapshotAt — never merge stale local balances.
           roomApi.setPersisted(data)
           setTabReadOnly(false)
           holdingSeatRef.current = session.seatId
