@@ -140,8 +140,10 @@ try {
     return (
       text.includes('撤销 · 全员买入 50') &&
       text.includes('撤销 · 地主 +100') &&
-      text.includes('地主') &&
-      text.includes('+100')
+      // success row copy: nickname + signed amount in who
+      [...document.querySelectorAll('.ledger-who')].some(
+        (el) => (el.textContent || '').trim() === '地主 +100',
+      )
     )
   })
   await shot('undo-ledger-row')

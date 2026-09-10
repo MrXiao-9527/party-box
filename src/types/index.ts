@@ -79,7 +79,9 @@ export interface ChipOp {
   targetSeatIds?: string[]
 }
 
-/** Human summary of a ledger row (for preview / 撤销 · …). */
+/** Human summary of a ledger row (for preview / 撤销 · … / 流水文案).
+ * seatAdjust 产品文案：`昵称 +N` / `昵称 -N`（例：「甲 +10」「甲 -5」）.
+ */
 export function ledgerEntrySummary(entry: LedgerEntry): string {
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
   if (entry.kind === 'undo') return entry.fromName || '撤销'

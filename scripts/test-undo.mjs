@@ -48,8 +48,33 @@ function op(partial) {
   assert(bal(hostId) === 0 && bal(aId) === 0 && bal(bId) === 0, 'empty no bal')
 }
 
-// 2) 本席加减 (+batch / -denom): ledger row + undo reverses
+// 2) 本席加减文案锁定：「甲 +10」/「甲 -5」+ undo 同队列
 {
+  const rAddJia = op({
+    opId: 'adj_jia_plus',
+    type: '+batch',
+    amount: 10,
+    targetSeatId: aId,
+  })
+  assert(rAddJia.ack.ok, '甲 +10 ok')
+  assert(bal(aId) === 10, '甲 bal 10')
+  const rowJia = rAddJia.data.table.ledger.at(-1)
+  assert(rowJia.kind === 'seatAdjust' && rowJia.amount === 10, 'kind/amount')
+  assert(ledgerEntrySummary(rowJia) === '甲 +10', 'copy 甲 +10')
+
+  const rSubJia = op({
+    opId: 'adj_jia_minus',
+    type: '-denom',
+    denom: 5,
+    targetSeatId: aId,
+  })
+  assert(rSubJia.ack.ok, '甲 -5 ok')
+  assert(bal(aId) === 5, '甲 bal 5')
+  const rowJiaSub = rSubJia.data.table.ledger.at(-1)
+  assert(rowJiaSub.amount === -5, 'amount -5')
+  assert(ledgerEntrySummary(rowJiaSub) === '甲 -5', 'copy 甲 -5')
+
+  // Host self adjust still nickname + signed
   const rAdd = op({
     opId: 'adj1',
     type: '+batch',
@@ -74,31 +99,34 @@ function op(partial) {
   assert(subRow.kind === 'seatAdjust' && subRow.amount === -25, 'seatAdjust -25')
   assert(ledgerEntrySummary(subRow) === '地主 -25', 'summary 地主 -25')
 
-  // No-op subtract at floor: balance 0 seat −batch → no new seatAdjust for 甲
+  // No-op subtract at floor: balance 0 seat 乙 −batch → no new seatAdjust
   const ledLenBefore = store.get(code).table.ledger.length
   const rFloor = op({
     opId: 'adj3',
     type: '-batch',
     amount: 10,
-    targetSeatId: aId,
+    targetSeatId: bId,
   })
   assert(rFloor.ack.ok, '-batch on 0 ok')
-  assert(bal(aId) === 0, '甲 still 0')
+  assert(bal(bId) === 0, '乙 still 0')
   assert(store.get(code).table.ledger.length === ledLenBefore, 'no ledger when actual delta 0')
-  assert(
-    !store.get(code).table.ledger.some((e) => e.kind === 'seatAdjust' && e.fromSeatId === aId),
-    '甲 no seatAdjust rows',
-  )
 
-  const uSub = op({ opId: 'u_adj_sub', type: 'undoLast' })
-  assert(uSub.ack.ok, 'undo -25')
-  assert(bal(hostId) === 100, 'restored to 100')
-  assert(uSub.data.table.ledger.at(-1).fromName === '地主 -25', 'undo summary -25')
+  // Walk-back undo queue: latest 地主 -25 → 地主 +100 → 甲 -5 → 甲 +10
+  const u1 = op({ opId: 'u_adj_1', type: 'undoLast' })
+  assert(u1.ack.ok && u1.data.table.ledger.at(-1).fromName === '地主 -25', 'undo 地主 -25')
+  assert(bal(hostId) === 100, 'host 100')
 
-  const uAdd = op({ opId: 'u_adj_add', type: 'undoLast' })
-  assert(uAdd.ack.ok, 'undo +100')
-  assert(bal(hostId) === 0, 'restored to 0')
-  assert(uAdd.data.table.ledger.at(-1).fromName === '地主 +100', 'undo summary +100')
+  const u2 = op({ opId: 'u_adj_2', type: 'undoLast' })
+  assert(u2.ack.ok && u2.data.table.ledger.at(-1).fromName === '地主 +100', 'undo 地主 +100')
+  assert(bal(hostId) === 0, 'host 0')
+
+  const u3 = op({ opId: 'u_adj_3', type: 'undoLast' })
+  assert(u3.ack.ok && u3.data.table.ledger.at(-1).fromName === '甲 -5', 'undo 甲 -5')
+  assert(bal(aId) === 10, '甲 back to 10')
+
+  const u4 = op({ opId: 'u_adj_4', type: 'undoLast' })
+  assert(u4.ack.ok && u4.data.table.ledger.at(-1).fromName === '甲 +10', 'undo 甲 +10')
+  assert(bal(aId) === 0, '甲 back to 0')
 }
 
 // 3) Transfer then undo
