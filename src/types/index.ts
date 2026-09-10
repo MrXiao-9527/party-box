@@ -83,7 +83,7 @@ export const ACK_REASONS = {
   ROOM_MISSING: '房间不存在或已解散',
   ROOM_CODE_INVALID: '房码无效',
   TABLE_FULL: '本桌已满（最多 8 人）',
-  TABLE_PAUSED: '牌桌已暂停，请等待桌主重开或选出新桌主',
+  TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */

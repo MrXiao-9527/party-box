@@ -260,7 +260,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       setRoom(next.room)
       setTable(next.table)
       snapshotRef.current = next.table
-      pushToast('桌主已离开，牌桌已暂停')
+      pushToast('桌主已离开 · 桌子已暂停')
     }
   }, [roomCode, session, room, pushToast])
 

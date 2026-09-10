@@ -22,8 +22,7 @@ export function PausedTable({
 
   return (
     <div className="page paused">
-      <p className="eyebrow">牌桌已暂停</p>
-      <h1>桌主已离开</h1>
+      <h1>桌主已离开 · 桌子已暂停</h1>
       <p className="hint">
         不会自动转让桌主。请等待
         {host ? `「${host.name}」` : '桌主'}
@@ -42,10 +41,13 @@ export function PausedTable({
                 {m.name}
                 {m.seatId === session.seatId ? '（我）' : ''}
               </span>
-              {isHostSeat && <span className="host-badge">桌主</span>}
-              <span className={showOnline ? 'online-dot' : 'offline-dot'}>
-                {showOnline ? '在线' : '已离开'}
-              </span>
+              {isHostSeat ? (
+                <span className="offline-dot">桌主 · 已离开</span>
+              ) : (
+                <span className={showOnline ? 'online-dot' : 'offline-dot'}>
+                  {showOnline ? '在线' : '已离开'}
+                </span>
+              )}
             </li>
           )
         })}
@@ -54,11 +56,11 @@ export function PausedTable({
       <div className="paused-actions">
         {isHost ? (
           <button type="button" className="btn primary wide" onClick={onResume}>
-            重开牌桌
+            重开一桌
           </button>
         ) : (
           <button type="button" className="btn primary wide" onClick={onPickHost}>
-            我来当桌主
+            选新桌主
           </button>
         )}
         <button type="button" className="btn ghost wide" onClick={onExit}>

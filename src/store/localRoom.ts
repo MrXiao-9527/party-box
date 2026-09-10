@@ -92,8 +92,8 @@ export function deleteRoom(roomCode: string): void {
 
 /**
  * Silent restore: seatId still in room → mark connected, return snapshot.
- * Host reopening a paused table stays disconnected until「重开牌桌」so the
- * member list stays consistent with「桌主已离开」.
+ * Host reopening a paused table stays disconnected until「重开一桌」so the
+ * member list stays consistent with「桌主已离开 · 桌子已暂停」.
  */
 export function restoreSeat(
   roomCode: string,
@@ -283,7 +283,7 @@ export function setMemberConnected(
   )
 
   // Host disconnect while playing → pause. Never auto-transfer host.
-  // Host reconnect does NOT auto-resume — keep paused until「重开牌桌」.
+  // Host reconnect does NOT auto-resume — keep paused until「重开一桌」.
   let phase = existing.room.phase
   const isHost = seatId === existing.room.hostSeatId
   if (isHost && !connected && phase === 'playing') {
