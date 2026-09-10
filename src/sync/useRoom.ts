@@ -20,6 +20,7 @@ import type {
   TableSnapshot,
 } from '../types'
 import { defaultTransport, type ChipTransport } from './transport'
+import { loadIdentity, roleForSeat, saveIdentity } from './seatRestore'
 
 export interface ToastMessage {
   id: string
@@ -88,6 +89,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       return
     }
     setRoom(data.room)
+    // Host snapshot is authoritative (localStorage host in this slice).
     setTable(data.table)
     snapshotRef.current = data.table
   }, [roomCode])
@@ -166,6 +168,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         ...snap,
         seats: snap.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) })),
       }
+      // Always take host snapshot — never keep stale optimistic local balances.
       setTable(sanitized)
       snapshotRef.current = sanitized
       const data = loadRoom(roomCode)
@@ -290,6 +293,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       setRoom(result.room)
       setTable(result.table)
       snapshotRef.current = result.table
+      // Keep party-box:identity.role in sync with hostSeatId after handoff.
+      const id = loadIdentity()
+      if (id && id.roomCode.toUpperCase() === roomCode.toUpperCase()) {
+        saveIdentity({
+          ...id,
+          role: roleForSeat(result.room.hostSeatId, id.seatId),
+        })
+      }
       pushToast(
         seatId === session.seatId ? '你已成为新桌主' : '已选出新桌主',
       )
@@ -369,6 +380,9 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     clearSession,
     setOffline,
     setPersisted: (data: PersistedRoom) => {
+      // Silent restore / takeover: bind host snapshotAt balances, drop optimistic.
+      setPendingOps(new Set())
+      inflightKeysRef.current.clear()
       setRoom(data.room)
       setTable(data.table)
       snapshotRef.current = data.table

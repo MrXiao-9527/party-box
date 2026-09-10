@@ -205,7 +205,8 @@ export function joinRoom(
     return { error: ACK_REASONS.ROOM_MISSING }
   }
 
-  // No seat restore this week — always allocate a new seatId (same nick OK).
+  // Always allocate a new seatId (restore / takeover paths bind an existing seat
+  // before NicknameGate; nick after seat_taken / identity_lost lands here).
   if (existing.room.members.length >= MAX_SEATS) {
     return { error: ACK_REASONS.TABLE_FULL }
   }
@@ -282,19 +283,13 @@ export function setMemberConnected(
     m.seatId === seatId ? { ...m, connected } : m,
   )
 
-  // Host disconnect while playing → pause. Never auto-transfer host.
-  // Host reconnect does NOT auto-resume — keep paused until「重开一桌」.
-  let phase = existing.room.phase
-  const isHost = seatId === existing.room.hostSeatId
-  if (isHost && !connected && phase === 'playing') {
-    phase = 'paused'
-  }
-
+  // Connection flag only. Host-leave pause is explicit via setPhase('paused')
+  // (DevPanel / signalHostDisconnect). Auto-pausing here would turn same-tab
+  // refresh into「桌主已离开」and break silent 回席 while playing.
   const data: PersistedRoom = {
     room: {
       ...existing.room,
       members,
-      phase,
       maxSeats: MAX_SEATS,
     },
     table: { ...existing.table, snapshotAt: Date.now() },

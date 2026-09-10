@@ -418,6 +418,11 @@ input {
   padding: 0.65rem 0.85rem;
   border-radius: var(--radius);
   font-size: 0.85rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
 .seats-rail {

@@ -37,6 +37,8 @@ export const RESTORE_COPY = {
   ROOM_GONE: '房间已结束',
   OTHER_TAB: '该席已在其他标签打开',
   TAKEN_OVER: '已在其他标签接管',
+  /** Locked copy — same as ACK_REASONS.TABLE_FULL. */
+  TABLE_FULL: '本桌已满（最多8人）',
 } as const
 
 export const IDENTITY_KEY = 'party-box:identity'
@@ -128,6 +130,17 @@ export function saveIdentity(
   )
 }
 
+/**
+ * Drop stale seatId from localStorage after seat_taken, but keep the
+ * room-scoped had-seat mark so a later wipe still counts as identity_lost.
+ */
+export function invalidateStoredSeatId(roomCode?: string): void {
+  const prev = loadIdentity()
+  if (roomCode) markHadSeat(roomCode)
+  else if (prev) markHadSeat(prev.roomCode)
+  localStorage.removeItem(IDENTITY_KEY)
+}
+
 export interface RestoreRoomView {
   roomCode: string
   hostSeatId: string
@@ -181,20 +194,21 @@ export function decideRestore(args: {
     return { kind: 'silent', identity }
   }
 
-  // seatId recorded but seat row gone / replaced → treat as taken
-  const nameTakenByOther = args.room.members.some(
-    (m) => m.name === identity.name && m.seatId !== identity.seatId,
-  )
-  if (nameTakenByOther || !stillThere) {
-    return {
-      kind: 'seat_taken',
-      toast: RESTORE_COPY.SEAT_TAKEN,
-      prefillName: identity.name,
-      identity,
-    }
+  // seatId gone from room (replaced / cleared) → new seat with nick prefill
+  return {
+    kind: 'seat_taken',
+    toast: RESTORE_COPY.SEAT_TAKEN,
+    prefillName: identity.name,
+    identity,
   }
+}
 
-  return { kind: 'identity_lost', toast: RESTORE_COPY.IDENTITY_LOST }
+/** Prefer live room hostSeatId over cached identity.role. */
+export function roleForSeat(
+  hostSeatId: string,
+  seatId: string,
+): SeatRole {
+  return hostSeatId === seatId ? 'host' : 'player'
 }
 
 export function newTabId(): string {
