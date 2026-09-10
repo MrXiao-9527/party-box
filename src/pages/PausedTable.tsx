@@ -31,18 +31,24 @@ export function PausedTable({
       </p>
 
       <ul className="member-list paused-members">
-        {room.members.map((m) => (
-          <li key={m.seatId} className={m.seatId === session.seatId ? 'self' : ''}>
-            <span>
-              {m.name}
-              {m.seatId === session.seatId ? '（我）' : ''}
-            </span>
-            {m.isHost && <span className="host-badge">桌主</span>}
-            <span className={m.connected ? 'online-dot' : 'offline-dot'}>
-              {m.connected ? '在线' : '离线'}
-            </span>
-          </li>
-        ))}
+        {room.members.map((m) => {
+          // Pause reason is host-left: host (and any disconnected seats) must
+          // not show「在线」, even if the host reopened the page to resume.
+          const isHostSeat = m.seatId === room.hostSeatId || m.isHost
+          const showOnline = m.connected && !isHostSeat
+          return (
+            <li key={m.seatId} className={m.seatId === session.seatId ? 'self' : ''}>
+              <span>
+                {m.name}
+                {m.seatId === session.seatId ? '（我）' : ''}
+              </span>
+              {isHostSeat && <span className="host-badge">桌主</span>}
+              <span className={showOnline ? 'online-dot' : 'offline-dot'}>
+                {showOnline ? '在线' : '已离开'}
+              </span>
+            </li>
+          )
+        })}
       </ul>
 
       <div className="paused-actions">

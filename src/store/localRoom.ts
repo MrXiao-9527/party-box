@@ -90,7 +90,11 @@ export function deleteRoom(roomCode: string): void {
   localStorage.removeItem(ROOM_PREFIX + roomCode.toUpperCase())
 }
 
-/** Silent restore: seatId still in room → mark connected, return snapshot. */
+/**
+ * Silent restore: seatId still in room → mark connected, return snapshot.
+ * Host reopening a paused table stays disconnected until「重开牌桌」so the
+ * member list stays consistent with「桌主已离开」.
+ */
 export function restoreSeat(
   roomCode: string,
   seatId: string,
@@ -98,6 +102,12 @@ export function restoreSeat(
   const existing = loadRoom(roomCode)
   if (!existing) return null
   if (!existing.room.members.some((m) => m.seatId === seatId)) return null
+  if (
+    existing.room.phase === 'paused' &&
+    seatId === existing.room.hostSeatId
+  ) {
+    return existing
+  }
   return setMemberConnected(roomCode, seatId, true)
 }
 
