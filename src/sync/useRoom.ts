@@ -1,14 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  fillSeatsToMax,
   loadRoom,
   loadSession,
   newOpId,
-  pickNewHost,
-  resumeAsHost,
   saveSession,
-  setMemberConnected,
-  setPhase,
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
@@ -21,6 +16,18 @@ import type {
 } from '../types'
 import { defaultTransport, type ChipTransport } from './transport'
 import { loadIdentity, roleForSeat, saveIdentity } from './seatRestore'
+import {
+  fillSeatsToMax,
+  pickNewHost,
+  resumeAsHost,
+  setMemberConnected,
+  setPhase,
+} from './roomApi'
+import {
+  isRelayEnabled,
+  onRelayRoomUpdate,
+  subscribeRelayRoom,
+} from './relayClient'
 
 export interface ToastMessage {
   id: string
@@ -89,7 +96,6 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       return
     }
     setRoom(data.room)
-    // Host snapshot is authoritative (localStorage host in this slice).
     setTable(data.table)
     snapshotRef.current = data.table
   }, [roomCode])
@@ -97,16 +103,36 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   useEffect(() => {
     refresh()
     if (!roomCode) return
+
     const onStorage = (e: StorageEvent) => {
       if (e.key === `party-box:room:${roomCode.toUpperCase()}`) {
         refresh()
       }
     }
     window.addEventListener('storage', onStorage)
-    const poll = window.setInterval(refresh, 800)
+
+    const unsubRelayEvent = onRelayRoomUpdate(roomCode, (data) => {
+      if (!data) {
+        setRoom(null)
+        setTable(null)
+        snapshotRef.current = null
+        return
+      }
+      setRoom(data.room)
+      setTable(data.table)
+      snapshotRef.current = data.table
+    })
+
+    const unsubWs = isRelayEnabled()
+      ? subscribeRelayRoom(roomCode)
+      : () => {}
+
+    const poll = window.setInterval(refresh, isRelayEnabled() ? 2000 : 800)
     return () => {
       window.removeEventListener('storage', onStorage)
       window.clearInterval(poll)
+      unsubRelayEvent()
+      unsubWs()
     }
   }, [roomCode, refresh])
 
@@ -168,7 +194,6 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         ...snap,
         seats: snap.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) })),
       }
-      // Always take host snapshot — never keep stale optimistic local balances.
       setTable(sanitized)
       snapshotRef.current = sanitized
       const data = loadRoom(roomCode)
@@ -188,7 +213,6 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
 
       const key = denomKey(type, extra)
       if (key && inflightKeysRef.current.has(key)) {
-        // Drop same-key tap while awaiting ack
         return
       }
       if (key) inflightKeysRef.current.add(key)
@@ -240,12 +264,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
 
   const startPlaying = useCallback(() => {
     if (!roomCode || !session) return
-    const data = setPhase(roomCode, 'playing')
-    if (data) {
-      setRoom(data.room)
-      setTable(data.table)
-      snapshotRef.current = data.table
-    }
+    void (async () => {
+      const data = await setPhase(roomCode, 'playing')
+      if (data) {
+        setRoom(data.room)
+        setTable(data.table)
+        snapshotRef.current = data.table
+      }
+    })()
   }, [roomCode, session])
 
   const signalHostDisconnect = useCallback(() => {
@@ -254,38 +280,68 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       pushToast('仅桌主可模拟离线')
       return
     }
-    // Mark host disconnected; force pause for QA even from lobby.
-    setMemberConnected(roomCode, session.seatId, false)
-    const data = setPhase(roomCode, 'paused')
-    if (data) {
-      const refreshed = loadRoom(roomCode)
-      const next = refreshed ?? data
-      setRoom(next.room)
-      setTable(next.table)
-      snapshotRef.current = next.table
-      pushToast('桌主已离开 · 桌子已暂停')
-    }
+    void (async () => {
+      await setMemberConnected(roomCode, session.seatId, false)
+      const data = await setPhase(roomCode, 'paused')
+      if (data) {
+        const refreshed = loadRoom(roomCode)
+        const next = refreshed ?? data
+        setRoom(next.room)
+        setTable(next.table)
+        snapshotRef.current = next.table
+        pushToast('桌主已离开 · 桌子已暂停')
+      }
+    })()
   }, [roomCode, session, room, pushToast])
 
   const resumeTable = useCallback(() => {
     if (!roomCode || !session) return
-    const data = resumeAsHost(roomCode, session.seatId)
-    if (!data) {
-      pushToast('仅桌主可执行此操作')
-      return
-    }
-    const connected = setMemberConnected(roomCode, session.seatId, true)
-    const next = connected ?? data
-    setRoom(next.room)
-    setTable(next.table)
-    snapshotRef.current = next.table
+    void (async () => {
+      const data = await resumeAsHost(roomCode, session.seatId)
+      if (!data) {
+        pushToast('仅桌主可执行此操作')
+        return
+      }
+      const connected = await setMemberConnected(roomCode, session.seatId, true)
+      const next = connected ?? data
+      setRoom(next.room)
+      setTable(next.table)
+      snapshotRef.current = next.table
+    })()
   }, [roomCode, session, pushToast])
 
   const claimHost = useCallback(
     (newHostSeatId?: string) => {
       if (!roomCode || !session) return
       const seatId = newHostSeatId ?? session.seatId
-      const result = pickNewHost(roomCode, seatId)
+      void (async () => {
+        const result = await pickNewHost(roomCode, seatId)
+        if ('error' in result) {
+          pushToast(result.error)
+          return
+        }
+        setRoom(result.room)
+        setTable(result.table)
+        snapshotRef.current = result.table
+        const id = loadIdentity()
+        if (id && id.roomCode.toUpperCase() === roomCode.toUpperCase()) {
+          saveIdentity({
+            ...id,
+            role: roleForSeat(result.room.hostSeatId, id.seatId),
+          })
+        }
+        pushToast(
+          seatId === session.seatId ? '你已成为新桌主' : '已选出新桌主',
+        )
+      })()
+    },
+    [roomCode, session, pushToast],
+  )
+
+  const fillSeats = useCallback(() => {
+    if (!roomCode) return
+    void (async () => {
+      const result = await fillSeatsToMax(roomCode)
       if ('error' in result) {
         pushToast(result.error)
         return
@@ -293,38 +349,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       setRoom(result.room)
       setTable(result.table)
       snapshotRef.current = result.table
-      // Keep party-box:identity.role in sync with hostSeatId after handoff.
-      const id = loadIdentity()
-      if (id && id.roomCode.toUpperCase() === roomCode.toUpperCase()) {
-        saveIdentity({
-          ...id,
-          role: roleForSeat(result.room.hostSeatId, id.seatId),
-        })
-      }
-      pushToast(
-        seatId === session.seatId ? '你已成为新桌主' : '已选出新桌主',
-      )
-    },
-    [roomCode, session, pushToast],
-  )
-
-  const fillSeats = useCallback(() => {
-    if (!roomCode) return
-    const result = fillSeatsToMax(roomCode)
-    if ('error' in result) {
-      pushToast(result.error)
-      return
-    }
-    setRoom(result.room)
-    setTable(result.table)
-    snapshotRef.current = result.table
-    pushToast(`已填满 ${result.room.members.length} 席`)
+      pushToast(`已填满 ${result.room.members.length} 席`)
+    })()
   }, [roomCode, pushToast])
 
   useEffect(() => {
     if (!roomCode || !session?.name) return
     const onPageHide = () => {
-      setMemberConnected(roomCode, session.seatId, false)
+      void setMemberConnected(roomCode, session.seatId, false)
     }
     window.addEventListener('pagehide', onPageHide)
     return () => {
@@ -350,7 +382,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   const setOffline = useCallback(
     (offline: boolean) => {
       if ('setOffline' in transport && typeof transport.setOffline === 'function') {
-        transport.setOffline(offline)
+        ;(transport as { setOffline: (v: boolean) => void }).setOffline(offline)
       }
       setConnectionState(offline ? 'offline' : 'online')
       if (offline) pushToast('以桌主为准')
@@ -380,7 +412,6 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     clearSession,
     setOffline,
     setPersisted: (data: PersistedRoom) => {
-      // Silent restore / takeover: bind host snapshotAt balances, drop optimistic.
       setPendingOps(new Set())
       inflightKeysRef.current.clear()
       setRoom(data.room)

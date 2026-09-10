@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { A2HSHint } from '../components/A2HSHint'
 import { ToastStack } from '../components/Toast'
-import { createEmptyHostRoom, loadRoom } from '../store/localRoom'
+import { createEmptyHostRoom, loadRoom, syncRoomFromRelay } from '../sync/roomApi'
 import { parseRoomCode } from '../types'
 
 const TOOLS = [
@@ -53,8 +53,14 @@ export function HomePage() {
   }
 
   const openTable = () => {
-    const { session } = createEmptyHostRoom()
-    navigate(`/r/${session.roomCode}`)
+    void (async () => {
+      try {
+        const { session } = await createEmptyHostRoom()
+        navigate(`/r/${session.roomCode}`)
+      } catch {
+        toast('无法创建房间，请检查网络或中继服务')
+      }
+    })()
   }
 
   const joinTable = () => {
@@ -63,11 +69,14 @@ export function HomePage() {
       toast(parsed.reason)
       return
     }
-    if (!loadRoom(parsed.code)) {
-      toast('房间不存在或已解散')
-      return
-    }
-    navigate(`/r/${parsed.code}`)
+    void (async () => {
+      const remote = await syncRoomFromRelay(parsed.code)
+      if (!remote && !loadRoom(parsed.code)) {
+        toast('房间不存在或已解散')
+        return
+      }
+      navigate(`/r/${parsed.code}`)
+    })()
   }
 
   const onTool = (id: (typeof TOOLS)[number]['id'], ready: boolean) => {

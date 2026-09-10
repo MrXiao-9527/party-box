@@ -1,12 +1,11 @@
 import { useState } from 'react'
 import {
-  claimHostSeat,
-  joinRoom,
   loadRoom,
   loadSession,
   type Session,
 } from '../store/localRoom'
 import type { PersistedRoom } from '../store/localRoom'
+import { claimHostSeat, joinRoom, syncRoomFromRelay } from '../sync/roomApi'
 import { parseRoomCode } from '../types'
 import { saveIdentity } from '../sync/seatRestore'
 
@@ -25,6 +24,7 @@ export function NicknameGate({
 }: NicknameGateProps) {
   const [name, setName] = useState(prefillName)
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const fail = (msg: string) => {
     setError(msg)
@@ -48,49 +48,61 @@ export function NicknameGate({
       return
     }
 
-    const existing = loadRoom(parsed.code)
-    if (!existing) {
-      fail('房间已结束')
-      return
-    }
+    void (async () => {
+      setBusy(true)
+      try {
+        await syncRoomFromRelay(parsed.code)
+        const existing = loadRoom(parsed.code)
+        if (!existing) {
+          fail('房间已结束')
+          return
+        }
 
-    const session = loadSession()
-    // First claim after「开一桌」
-    if (
-      existing.room.members.length === 0 &&
-      session?.roomCode === parsed.code &&
-      session.seatId === existing.room.hostSeatId &&
-      !session.name
-    ) {
-      const data = claimHostSeat(parsed.code, session.seatId, trimmed)
-      if (data) {
-        const next = {
-          seatId: session.seatId,
-          name: trimmed,
-          roomCode: parsed.code,
+        const session = loadSession()
+        // First claim after「开一桌」(host seat reserved on create)
+        if (
+          session?.roomCode === parsed.code &&
+          session.seatId === existing.room.hostSeatId &&
+          (!session.name ||
+            !existing.room.members.some((m) => m.seatId === session.seatId))
+        ) {
+          const data = await claimHostSeat(parsed.code, session.seatId, trimmed)
+          if (data) {
+            const next = {
+              seatId: session.seatId,
+              name: trimmed,
+              roomCode: parsed.code,
+            }
+            saveIdentity({
+              ...next,
+              role: 'host',
+            })
+            onReady(next, data)
+            return
+          }
+        }
+
+        const result = await joinRoom(parsed.code, trimmed)
+        if ('error' in result) {
+          fail(result.error)
+          return
         }
         saveIdentity({
-          ...next,
-          role: 'host',
+          roomCode: result.session.roomCode,
+          seatId: result.session.seatId,
+          name: result.session.name,
+          role:
+            result.data.room.hostSeatId === result.session.seatId
+              ? 'host'
+              : 'player',
         })
-        onReady(next, data)
-        return
+        onReady(result.session, result.data)
+      } catch {
+        fail('网络异常，请重试')
+      } finally {
+        setBusy(false)
       }
-    }
-
-    const result = joinRoom(parsed.code, trimmed)
-    if ('error' in result) {
-      fail(result.error)
-      return
-    }
-    saveIdentity({
-      roomCode: result.session.roomCode,
-      seatId: result.session.seatId,
-      name: result.session.name,
-      role:
-        result.data.room.hostSeatId === result.session.seatId ? 'host' : 'player',
-    })
-    onReady(result.session, result.data)
+    })()
   }
 
   return (
@@ -106,10 +118,16 @@ export function NicknameGate({
           placeholder="输入昵称"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit()}
+          onKeyDown={(e) => e.key === 'Enter' && !busy && submit()}
+          disabled={busy}
         />
         {error && <p className="error">{error}</p>}
-        <button type="button" className="btn primary wide" onClick={submit}>
+        <button
+          type="button"
+          className="btn primary wide"
+          onClick={submit}
+          disabled={busy}
+        >
           进入
         </button>
       </div>

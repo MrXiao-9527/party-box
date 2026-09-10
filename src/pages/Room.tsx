@@ -7,13 +7,12 @@ import { NicknameGate } from './Nickname'
 import { Lobby } from './Lobby'
 import { ChipTable } from './ChipTable'
 import { PausedTable } from './PausedTable'
+import { loadRoom, saveSession, type Session } from '../store/localRoom'
 import {
   deleteRoom,
-  loadRoom,
   restoreSeat,
-  saveSession,
-  type Session,
-} from '../store/localRoom'
+  syncRoomFromRelay,
+} from '../sync/roomApi'
 import { MAX_SEATS, parseRoomCode } from '../types'
 import {
   decideRestore,
@@ -112,17 +111,7 @@ export function RoomPage() {
     }
     if (!roomCode) return
 
-    const roomData = loadRoom(roomCode)
     const identity = loadIdentity()
-    const roomView = roomData
-      ? {
-          roomCode: roomData.room.roomCode,
-          hostSeatId: roomData.room.hostSeatId,
-          phase: roomData.room.phase,
-          members: roomData.room.members,
-          seats: roomData.table.seats,
-        }
-      : null
 
     // Probe other tabs for same seat before silent restore
     const probeOtherTab = (seatId: string): Promise<boolean> =>
@@ -161,27 +150,42 @@ export function RoomPage() {
       setGate({ type: 'nick', prefill, notice })
     }
 
-    const blockIfFull = (): boolean => {
-      if (!roomData || !isTableFull(roomData.room.members.length)) return false
-      invalidateStoredSeatId(roomCode)
-      saveSession(null)
-      roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
-      setGate({ type: 'blocked', reason: 'full' })
-      return true
-    }
-
     const run = async () => {
+      // Cross-device: pull shared RoomState before restore / nick gate.
+      const synced = await syncRoomFromRelay(roomCode)
+      const roomDataNow = synced ?? loadRoom(roomCode)
+      const roomViewNow = roomDataNow
+        ? {
+            roomCode: roomDataNow.room.roomCode,
+            hostSeatId: roomDataNow.room.hostSeatId,
+            phase: roomDataNow.room.phase,
+            members: roomDataNow.room.members,
+            seats: roomDataNow.table.seats,
+          }
+        : null
+
+      const blockIfFullNow = (): boolean => {
+        if (!roomDataNow || !isTableFull(roomDataNow.room.members.length)) {
+          return false
+        }
+        invalidateStoredSeatId(roomCode)
+        saveSession(null)
+        roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
+        setGate({ type: 'blocked', reason: 'full' })
+        return true
+      }
+
       // Fresh「开一桌」pending host claim (empty members + empty-name session)
       if (
-        roomData &&
-        roomData.room.members.length === 0 &&
+        roomDataNow &&
+        roomDataNow.room.members.length === 0 &&
         !identity
       ) {
         setGate({ type: 'nick' })
         return
       }
 
-      if (!roomData) {
+      if (!roomDataNow) {
         roomApi.pushToast(RESTORE_COPY.ROOM_GONE)
         saveIdentity(null, roomCode)
         navigate('/', { replace: true })
@@ -196,7 +200,7 @@ export function RoomPage() {
 
       const decision = decideRestore({
         roomCode,
-        room: roomView,
+        room: roomViewNow,
         identity,
         seatHeldByOtherTab,
         hadPriorSeat: hasHadSeat(roomCode),
@@ -219,7 +223,7 @@ export function RoomPage() {
       if (decision.kind === 'silent') {
         // Host snapshot via restoreSeat → setPersisted (balances + phase).
         // Paused host stays disconnected — do NOT auto「重开一桌」.
-        const data = restoreSeat(roomCode, decision.identity.seatId)
+        const data = await restoreSeat(roomCode, decision.identity.seatId)
         if (data) {
           const member = data.room.members.find(
             (m) => m.seatId === decision.identity.seatId,
@@ -251,7 +255,7 @@ export function RoomPage() {
           return
         }
         // Restore failed → treat as occupied
-        if (blockIfFull()) return
+        if (blockIfFullNow()) return
         roomApi.pushToast(RESTORE_COPY.SEAT_TAKEN)
         enterNickForNewSeat(decision.identity.name, RESTORE_COPY.SEAT_TAKEN)
         return
@@ -259,7 +263,7 @@ export function RoomPage() {
 
       if (decision.kind === 'seat_taken') {
         // Occupied + full → only「本桌已满（最多8人）」; do not enter nick / new seat.
-        if (blockIfFull()) return
+        if (blockIfFullNow()) return
         roomApi.pushToast(decision.toast)
         enterNickForNewSeat(decision.prefillName, decision.toast)
         return
@@ -271,7 +275,7 @@ export function RoomPage() {
       }
 
       // identity_lost — prior seat mark exists but identity key is gone
-      if (blockIfFull()) return
+      if (blockIfFullNow()) return
       roomApi.pushToast(decision.toast)
       enterNickForNewSeat(undefined, decision.toast)
     }
@@ -312,40 +316,42 @@ export function RoomPage() {
       seatId: id.seatId,
       tabId: tabIdRef.current,
     })
-    const data = restoreSeat(roomCode, id.seatId)
-    if (!data) {
-      const roomNow = loadRoom(roomCode)
-      if (roomNow && isTableFull(roomNow.room.members.length)) {
+    void (async () => {
+      const data = await restoreSeat(roomCode, id.seatId)
+      if (!data) {
+        const roomNow = loadRoom(roomCode)
+        if (roomNow && isTableFull(roomNow.room.members.length)) {
+          invalidateStoredSeatId(roomCode)
+          saveSession(null)
+          roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
+          setGate({ type: 'blocked', reason: 'full' })
+          return
+        }
+        roomApi.pushToast(RESTORE_COPY.SEAT_TAKEN)
         invalidateStoredSeatId(roomCode)
         saveSession(null)
-        roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
-        setGate({ type: 'blocked', reason: 'full' })
+        setGate({ type: 'nick', prefill: id.name, notice: RESTORE_COPY.SEAT_TAKEN })
         return
       }
-      roomApi.pushToast(RESTORE_COPY.SEAT_TAKEN)
-      invalidateStoredSeatId(roomCode)
-      saveSession(null)
-      setGate({ type: 'nick', prefill: id.name, notice: RESTORE_COPY.SEAT_TAKEN })
-      return
-    }
-    const member = data.room.members.find((m) => m.seatId === id.seatId)
-    const session: Session = {
-      seatId: id.seatId,
-      name: member?.name ?? id.name,
-      roomCode,
-    }
-    const nextIdentity: SeatIdentity = {
-      roomCode,
-      seatId: session.seatId,
-      name: session.name,
-      role: roleForSeat(data.room.hostSeatId, session.seatId),
-    }
-    saveSession(session)
-    saveIdentity(nextIdentity)
-    roomApi.bindSession(session)
-    roomApi.setPersisted(data)
-    claimHold(session)
-    setGate({ type: 'ready' })
+      const member = data.room.members.find((m) => m.seatId === id.seatId)
+      const session: Session = {
+        seatId: id.seatId,
+        name: member?.name ?? id.name,
+        roomCode,
+      }
+      const nextIdentity: SeatIdentity = {
+        roomCode,
+        seatId: session.seatId,
+        name: session.name,
+        role: roleForSeat(data.room.hostSeatId, session.seatId),
+      }
+      saveSession(session)
+      saveIdentity(nextIdentity)
+      roomApi.bindSession(session)
+      roomApi.setPersisted(data)
+      claimHold(session)
+      setGate({ type: 'ready' })
+    })()
   }
 
   const tryNewSeatFromTakeover = () => {
@@ -392,7 +398,7 @@ export function RoomPage() {
       exitLocalIdentity()
       return
     }
-    if (roomApi.isHost) deleteRoom(roomCode)
+    if (roomApi.isHost) void deleteRoom(roomCode)
     exitLocalIdentity()
   }
 

@@ -5,14 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 45321",
+    "relay": "node server/index.mjs",
+    "dev:all": "node scripts/dev-all.mjs",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview --host 127.0.0.1 --port 45321"
+    "preview": "vite preview --host 127.0.0.1 --port 45321",
+    "test:relay": "node scripts/check-relay.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-router-dom": "^7.18.3"
+    "react-router-dom": "^7.18.3",
+    "ws": "^8.18.3"
   },
   "devDependencies": {
     "@types/node": "^24.13.3",

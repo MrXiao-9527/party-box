@@ -146,18 +146,44 @@ export function claimHostSeat(
 ): PersistedRoom | null {
   const existing = loadRoom(roomCode)
   if (!existing) return null
-  if (existing.room.members.length > 0) return null
+  if (existing.room.hostSeatId !== seatId) return null
+
+  const already = existing.room.members.find((m) => m.seatId === seatId)
+  if (already) {
+    const members = existing.room.members.map((m) =>
+      m.seatId === seatId ? { ...m, name, isHost: true, connected: true } : m,
+    )
+    const seats = existing.table.seats.map((s) =>
+      s.seatId === seatId ? { ...s, name, isHost: true } : s,
+    )
+    const data: PersistedRoom = {
+      room: { ...existing.room, members, maxSeats: MAX_SEATS },
+      table: { ...existing.table, seats, snapshotAt: Date.now() },
+    }
+    saveRoom(data)
+    saveSession({ seatId, name, roomCode: existing.room.roomCode })
+    return data
+  }
+
+  if (existing.room.members.length >= MAX_SEATS) return null
+
   const data: PersistedRoom = {
     room: {
       ...existing.room,
       hostSeatId: seatId,
       maxSeats: MAX_SEATS,
-      members: [{ seatId, name, isHost: true, connected: true }],
+      members: [
+        { seatId, name, isHost: true, connected: true },
+        ...existing.room.members.map((m) => ({ ...m, isHost: false })),
+      ],
     },
     table: {
       snapshotAt: Date.now(),
       denoms: existing.table.denoms,
-      seats: [{ seatId, name, isHost: true, locked: false, balance: 0 }],
+      seats: [
+        { seatId, name, isHost: true, locked: false, balance: 0 },
+        ...existing.table.seats.map((s) => ({ ...s, isHost: false })),
+      ],
     },
   }
   saveRoom(data)
