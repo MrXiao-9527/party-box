@@ -113,7 +113,7 @@ assert(pot() === 0, 'pot starts 0')
   assert(row.kind === 'potSplit' && row.amount === 5, 'share 5')
   assert(row.splitSeatIds?.length === 2, '2 recipients')
   assert(!row.splitSeatIds.includes(aId), 'locked not in splitSeatIds')
-  assert(ledgerEntrySummary(row) === '锅均分 · 各 +5', 'copy 锅均分')
+  assert(ledgerEntrySummary(row) === '锅均分 · 在座2人 · 各 +5 · 余0留锅', 'copy 锅均分')
   op({ opId: 'unlockA', type: 'unlock', targetSeatId: aId })
 }
 
@@ -138,6 +138,12 @@ assert(pot() === 0, 'pot starts 0')
   const r = op({ opId: 'ps2', type: 'potSplit', amount: 7 })
   assert(r.ack.ok, 'split 7/3')
   assert(r.data.table.ledger.at(-1).amount === 2, 'floor share 2')
+  assert(r.data.table.ledger.at(-1).splitRemainder === 1, 'remainder 1')
+  assert(
+    ledgerEntrySummary(r.data.table.ledger.at(-1)) ===
+      '锅均分 · 在座3人 · 各 +2 · 余1留锅',
+    'copy remainder',
+  )
   assert(bal(hostId) === before.host + 2, 'h+2')
   assert(bal(aId) === before.a + 2, 'a+2')
   assert(bal(bId) === before.b + 2, 'b+2')
@@ -296,7 +302,7 @@ assert(pot() === 0, 'pot starts 0')
   // Undo split
   const u1 = op({ opId: 'undo_ps', type: 'undoLast' })
   assert(u1.ack.ok, 'undo split')
-  assert(u1.data.table.ledger.at(-1).fromName === '锅均分 · 各 +1', 'undo summary split')
+  assert(u1.data.table.ledger.at(-1).fromName === '锅均分 · 在座3人 · 各 +1 · 余0留锅', 'undo summary split')
   assert(pot() === before.pot + 6 - 2, 'pot after undo split')
 
   // Undo potOut

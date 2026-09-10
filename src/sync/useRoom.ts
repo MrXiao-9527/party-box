@@ -377,7 +377,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           if (eligible.length === 0) return base
           const share = Math.floor(amount / eligible.length)
           if (share < 1) return base
-          pot -= share * eligible.length
+          const totalOut = share * eligible.length
+          pot -= totalOut
           for (const s of eligible) s.balance += share
           ledger.push({
             id: `led_opt_${op.opId}_potSplit`,
@@ -389,6 +390,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             amount: share,
             at: Date.now(),
             splitSeatIds: eligible.map((s) => s.seatId),
+            splitRemainder: amount - totalOut,
           })
           break
         }

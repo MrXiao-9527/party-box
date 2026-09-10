@@ -686,6 +686,7 @@ export function applyChipOp(op: ChipOp): {
       for (const s of eligible) {
         s.balance += share
       }
+      const remainder = amount - totalOut
       ledger.push({
         id: uid('led'),
         kind: 'potSplit',
@@ -696,6 +697,7 @@ export function applyChipOp(op: ChipOp): {
         amount: share,
         at: Date.now(),
         splitSeatIds: eligible.map((s) => s.seatId),
+        splitRemainder: remainder,
       })
       if (ledger.length > 100) ledger = ledger.slice(-100)
       break

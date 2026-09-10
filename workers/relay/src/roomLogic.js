@@ -25,7 +25,7 @@ export const ACK_REASONS = {
 
 export function ledgerEntrySummary(entry) {
   // seatAdjust: 「甲 +10」 / 「甲 -5」
-  // pot: 「甲 → 锅 +N」 / 「锅 → 乙 +N」 / 「锅均分 · 各 +N」
+  // pot: 「甲 → 锅 +N」 / 「锅 → 乙 +N」 / 「锅均分 · 在座K人 · 各 +M · 余R留锅」
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
   if (entry.kind === 'undo') return entry.fromName || '撤销'
   if (entry.kind === 'seatAdjust') {
@@ -39,9 +39,16 @@ export function ledgerEntrySummary(entry) {
     return `锅 → ${entry.toName} +${entry.amount}`
   }
   if (entry.kind === 'potSplit') {
-    return `锅均分 · 各 +${entry.amount}`
+    const k = entry.splitSeatIds?.length ?? 0
+    const m = entry.amount
+    const r = entry.splitRemainder ?? 0
+    return `锅均分 · 在座${k}人 · 各 +${m} · 余${r}留锅`
   }
   return `${entry.fromName}→${entry.toName} +${entry.amount}`
+}
+
+export function potSplitSummary(k, m, r) {
+  return `锅均分 · 在座${k}人 · 各 +${m} · 余${r}留锅`
 }
 
 export function findLastUndoable(ledger) {
@@ -609,6 +616,7 @@ export function createRoomStore() {
         for (const s of eligible) {
           s.balance += share
         }
+        const remainder = amount - totalOut
         ledger.push({
           id: uid('led'),
           kind: 'potSplit',
@@ -619,6 +627,7 @@ export function createRoomStore() {
           amount: share,
           at: Date.now(),
           splitSeatIds: eligible.map((s) => s.seatId),
+          splitRemainder: remainder,
         })
         if (ledger.length > 100) ledger = ledger.slice(-100)
         break

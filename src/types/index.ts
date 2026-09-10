@@ -49,6 +49,8 @@ export interface LedgerEntry {
   prevBalances?: { seatId: string; balance: number }[]
   /** potSplit: seats that received the floor share (for undo). */
   splitSeatIds?: string[]
+  /** potSplit: remainder kept in pot after floor divide (N − M×K). */
+  splitRemainder?: number
   /** undo rows: id of the ledger entry this undo reversed. */
   undoneId?: string
 }
@@ -94,7 +96,7 @@ export interface ChipOp {
 
 /** Human summary of a ledger row (for preview / 撤销 · … / 流水文案).
  * seatAdjust 产品文案：`昵称 +N` / `昵称 -N`（例：「甲 +10」「甲 -5」）.
- * pot：`甲 → 锅 +N` / `锅 → 乙 +N` / `锅均分 · 各 +N`.
+ * pot：`甲 → 锅 +N` / `锅 → 乙 +N` / `锅均分 · 在座K人 · 各 +M · 余R留锅`.
  */
 export function ledgerEntrySummary(entry: LedgerEntry): string {
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
@@ -110,9 +112,17 @@ export function ledgerEntrySummary(entry: LedgerEntry): string {
     return `锅 → ${entry.toName} +${entry.amount}`
   }
   if (entry.kind === 'potSplit') {
-    return `锅均分 · 各 +${entry.amount}`
+    const k = entry.splitSeatIds?.length ?? 0
+    const m = entry.amount
+    const r = entry.splitRemainder ?? 0
+    return `锅均分 · 在座${k}人 · 各 +${m} · 余${r}留锅`
   }
   return `${entry.fromName}→${entry.toName} +${entry.amount}`
+}
+
+/** Locked pot-split preview / ledger copy. */
+export function potSplitSummary(k: number, m: number, r: number): string {
+  return `锅均分 · 在座${k}人 · 各 +${m} · 余${r}留锅`
 }
 
 /** Newest successful settle that has not yet been undone (skips undo rows). */
