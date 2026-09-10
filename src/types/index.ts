@@ -13,10 +13,16 @@ export type ChipOpType =
   | 'lock'
   | 'unlock'
   | 'transfer'
+  | 'uniformBuyIn'
 
-/** Successful chip transfer row — failed attempts never appear. */
+/** Ledger row kind — omit / transfer = seat→seat; uniformBuyIn = summary. */
+export type LedgerKind = 'transfer' | 'uniformBuyIn'
+
+/** Successful chip ledger row — failed attempts never appear. */
 export interface LedgerEntry {
   id: string
+  /** Default transfer when omitted (older snapshots). */
+  kind?: LedgerKind
   fromSeatId: string
   fromName: string
   toSeatId: string
@@ -58,7 +64,7 @@ export interface ChipOp {
   targetSeatId: string
   type: ChipOpType
   denom?: number
-  /** Transfer: positive integer amount per target (not forced to denoms). */
+  /** Transfer / uniformBuyIn: positive integer amount. */
   amount?: number
   /** Transfer one-to-many targets. If omitted, [targetSeatId]. */
   targetSeatIds?: string[]
@@ -83,7 +89,7 @@ export interface TableSnapshot {
   snapshotAt: number
   seats: SnapshotSeat[]
   denoms: number[]
-  /** In-table transfer ledger (successful settles only). */
+  /** In-table ledger (successful settles only: transfers + uniform buy-in). */
   ledger: LedgerEntry[]
 }
 
@@ -105,6 +111,7 @@ export const ACK_REASONS = {
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
   INSUFFICIENT: '余额不足',
   SELF_TRANSFER: '不能转给自己',
+  POSITIVE_INT: '请输入正整数',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */

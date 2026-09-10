@@ -629,6 +629,10 @@ button.seat {
   color: var(--seat-own);
 }
 
+.ledger-amt-set {
+  color: var(--text-secondary);
+}
+
 .ledger-time {
   color: var(--text-secondary);
 }
