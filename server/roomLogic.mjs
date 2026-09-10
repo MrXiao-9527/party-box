@@ -23,6 +23,7 @@ export const ACK_REASONS = {
 }
 
 export function ledgerEntrySummary(entry) {
+  // seatAdjust: 「甲 +10」 / 「甲 -5」
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
   if (entry.kind === 'undo') return entry.fromName || '撤销'
   if (entry.kind === 'seatAdjust') {
