@@ -525,6 +525,21 @@ button.seat {
   color: var(--text-secondary);
 }
 
+.pot-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0;
+}
+
+.pot-top {
+  font-variant-numeric: tabular-nums;
+}
+
+.pot-target-select {
+  appearance: none;
+}
+
 .transfer-box .transfer-title {
   margin: 0 0 0.35rem;
   font-family: var(--font-display);

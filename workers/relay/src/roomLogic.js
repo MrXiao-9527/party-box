@@ -17,6 +17,7 @@ export const ACK_REASONS = {
   TABLE_FULL: '本桌已满（最多8人）',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
   INSUFFICIENT: '余额不足',
+  POT_INSUFFICIENT: '锅内不足',
   SELF_TRANSFER: '不能转给自己',
   POSITIVE_INT: '请输入正整数',
   NOTHING_TO_UNDO: '没有可撤销的记录',
@@ -24,13 +25,30 @@ export const ACK_REASONS = {
 
 export function ledgerEntrySummary(entry) {
   // seatAdjust: 「甲 +10」 / 「甲 -5」
+  // pot: 「甲 → 锅 +N」 / 「锅 → 乙 +N」 / 「锅均分 · 在座K人 · 各 +M · 余R留锅」
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
   if (entry.kind === 'undo') return entry.fromName || '撤销'
   if (entry.kind === 'seatAdjust') {
     const n = entry.amount
     return `${entry.fromName} ${n > 0 ? '+' : ''}${n}`
   }
+  if (entry.kind === 'potIn') {
+    return `${entry.fromName} → 锅 +${entry.amount}`
+  }
+  if (entry.kind === 'potOut') {
+    return `锅 → ${entry.toName} +${entry.amount}`
+  }
+  if (entry.kind === 'potSplit') {
+    const k = entry.splitSeatIds?.length ?? 0
+    const m = entry.amount
+    const r = entry.splitRemainder ?? 0
+    return `锅均分 · 在座${k}人 · 各 +${m} · 余${r}留锅`
+  }
   return `${entry.fromName}→${entry.toName} +${entry.amount}`
+}
+
+export function potSplitSummary(k, m, r) {
+  return `锅均分 · 在座${k}人 · 各 +${m} · 余${r}留锅`
 }
 
 export function findLastUndoable(ledger) {
@@ -66,6 +84,12 @@ export function generateRoomCode(existing) {
   return `X${Date.now().toString(36).toUpperCase().slice(-3)}`
 }
 
+function normalizePot(raw) {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.floor(n))
+}
+
 function normalize(data) {
   return {
     ...data,
@@ -78,6 +102,7 @@ function normalize(data) {
     table: {
       ...data.table,
       seats: data.table.seats.slice(0, MAX_SEATS),
+      pot: normalizePot(data.table.pot),
       ledger: Array.isArray(data.table.ledger) ? data.table.ledger : [],
     },
   }
@@ -135,6 +160,7 @@ export function createRoomStore() {
         snapshotAt: now,
         denoms: [...DEFAULT_DENOMS],
         seats: [],
+        pot: 0,
         ledger: [],
       },
     })
@@ -330,6 +356,7 @@ export function createRoomStore() {
     const seats = existing.table.seats.map((s) => ({ ...s }))
     const target = seats.find((s) => s.seatId === op.targetSeatId)
     let ledger = [...(existing.table.ledger ?? [])]
+    let pot = normalizePot(existing.table.pot)
 
     const fail = (reason) => ({
       ack: {
@@ -346,6 +373,9 @@ export function createRoomStore() {
       op.type !== 'resetTable' &&
       op.type !== 'transfer' &&
       op.type !== 'uniformBuyIn' &&
+      op.type !== 'potIn' &&
+      op.type !== 'potOut' &&
+      op.type !== 'potSplit' &&
       op.type !== 'undoLast'
     ) {
       return fail(ACK_REASONS.INVALID)
@@ -521,6 +551,87 @@ export function createRoomStore() {
         if (ledger.length > 100) ledger = ledger.slice(-100)
         break
       }
+      case 'potIn': {
+        const amount = op.amount ?? 0
+        if (!Number.isInteger(amount) || amount <= 0) {
+          return fail(ACK_REASONS.POSITIVE_INT)
+        }
+        // Any seated player: deduct from own seat only.
+        const sender = seats.find((s) => s.seatId === op.fromSeatId)
+        if (!sender) return fail(ACK_REASONS.INVALID)
+        if (sender.locked) return fail(ACK_REASONS.SEAT_LOCKED)
+        if (sender.balance < amount) return fail(ACK_REASONS.INSUFFICIENT)
+        sender.balance -= amount
+        pot += amount
+        ledger.push({
+          id: uid('led'),
+          kind: 'potIn',
+          fromSeatId: sender.seatId,
+          fromName: sender.name,
+          toSeatId: '',
+          toName: '锅',
+          amount,
+          at: Date.now(),
+        })
+        if (ledger.length > 100) ledger = ledger.slice(-100)
+        break
+      }
+      case 'potOut': {
+        if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+        const amount = op.amount ?? 0
+        if (!Number.isInteger(amount) || amount <= 0) {
+          return fail(ACK_REASONS.POSITIVE_INT)
+        }
+        if (!target) return fail(ACK_REASONS.INVALID)
+        if (pot < amount) return fail(ACK_REASONS.POT_INSUFFICIENT)
+        pot -= amount
+        target.balance += amount
+        ledger.push({
+          id: uid('led'),
+          kind: 'potOut',
+          fromSeatId: '',
+          fromName: '锅',
+          toSeatId: target.seatId,
+          toName: target.name,
+          amount,
+          at: Date.now(),
+        })
+        if (ledger.length > 100) ledger = ledger.slice(-100)
+        break
+      }
+      case 'potSplit': {
+        if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+        const amount = op.amount ?? 0
+        if (!Number.isInteger(amount) || amount <= 0) {
+          return fail(ACK_REASONS.POSITIVE_INT)
+        }
+        if (pot < amount) return fail(ACK_REASONS.POT_INSUFFICIENT)
+        // 在座 = occupied (all table seats) AND not locked.
+        const eligible = seats.filter((s) => !s.locked)
+        if (eligible.length === 0) return fail(ACK_REASONS.INVALID)
+        const share = Math.floor(amount / eligible.length)
+        if (share < 1) return fail(ACK_REASONS.INVALID)
+        const totalOut = share * eligible.length
+        pot -= totalOut
+        for (const s of eligible) {
+          s.balance += share
+        }
+        const remainder = amount - totalOut
+        ledger.push({
+          id: uid('led'),
+          kind: 'potSplit',
+          fromSeatId: '',
+          fromName: '锅',
+          toSeatId: '',
+          toName: '',
+          amount: share,
+          at: Date.now(),
+          splitSeatIds: eligible.map((s) => s.seatId),
+          splitRemainder: remainder,
+        })
+        if (ledger.length > 100) ledger = ledger.slice(-100)
+        break
+      }
       case 'undoLast': {
         if (!isHost) return fail(ACK_REASONS.NOT_HOST)
         const entry = findLastUndoable(ledger)
@@ -545,6 +656,36 @@ export function createRoomStore() {
             return fail(ACK_REASONS.NOTHING_TO_UNDO)
           }
           seat.balance = Math.max(0, seat.balance - delta)
+        } else if (entry.kind === 'potIn') {
+          const seat = seats.find((s) => s.seatId === entry.fromSeatId)
+          if (!seat) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          const amt = entry.amount
+          if (!Number.isInteger(amt) || amt <= 0) {
+            return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          }
+          pot = Math.max(0, pot - amt)
+          seat.balance += amt
+        } else if (entry.kind === 'potOut') {
+          const seat = seats.find((s) => s.seatId === entry.toSeatId)
+          if (!seat) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          const amt = entry.amount
+          if (!Number.isInteger(amt) || amt <= 0) {
+            return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          }
+          seat.balance = Math.max(0, seat.balance - amt)
+          pot += amt
+        } else if (entry.kind === 'potSplit') {
+          const ids = entry.splitSeatIds ?? []
+          const amt = entry.amount
+          if (!Number.isInteger(amt) || amt <= 0 || ids.length === 0) {
+            return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          }
+          for (const sid of ids) {
+            const seat = seats.find((s) => s.seatId === sid)
+            if (!seat) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+            seat.balance = Math.max(0, seat.balance - amt)
+          }
+          pot += amt * ids.length
         } else {
           const sender = seats.find((s) => s.seatId === entry.fromSeatId)
           const receiver = seats.find((s) => s.seatId === entry.toSeatId)
@@ -582,6 +723,7 @@ export function createRoomStore() {
         snapshotAt,
         denoms: existing.table.denoms,
         seats,
+        pot,
         ledger,
       },
     })

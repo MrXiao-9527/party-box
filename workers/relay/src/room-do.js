@@ -87,6 +87,8 @@ export class RoomDurableObject {
             snapshotAt: now,
             denoms: [1, 5, 10, 25, 100],
             seats: [],
+            pot: 0,
+            ledger: [],
           },
         })
         await this.persist(data)

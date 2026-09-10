@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ACK_REASONS, findLastUndoable, ledgerEntrySummary, type LedgerEntry, type RoomState, type Seat, type TableSnapshot } from '../types'
+import { ACK_REASONS, findLastUndoable, ledgerEntrySummary, potSplitSummary, type LedgerEntry, type RoomState, type Seat, type TableSnapshot } from '../types'
 import type { ChipOpType } from '../types'
 
 interface ChipTableProps {
@@ -57,6 +57,13 @@ export function ChipTable({
   const [undoOpen, setUndoOpen] = useState(false)
   const [undoTarget, setUndoTarget] = useState<LedgerEntry | null>(null)
   const [ledgerOpen, setLedgerOpen] = useState(false)
+  const [potInOpen, setPotInOpen] = useState(false)
+  const [potInAmount, setPotInAmount] = useState('')
+  const [potOutOpen, setPotOutOpen] = useState(false)
+  const [potOutAmount, setPotOutAmount] = useState('')
+  const [potOutTargetId, setPotOutTargetId] = useState<string>('')
+  const [potSplitOpen, setPotSplitOpen] = useState(false)
+  const [potSplitAmount, setPotSplitAmount] = useState('')
   const longPressTimer = useRef<number | null>(null)
   const longPressed = useRef(false)
 
@@ -74,6 +81,31 @@ export function ChipTable({
 
   const buyInNum = Number.parseInt(buyInAmount, 10)
   const buyInValid = Number.isInteger(buyInNum) && buyInNum > 0
+
+  const potBalance = Math.max(
+    0,
+    Math.floor(Number.isFinite(table.pot) ? table.pot : 0),
+  )
+  const showPotActions = room.phase !== 'paused'
+
+  const potInNum = Number.parseInt(potInAmount, 10)
+  const potInValid = Number.isInteger(potInNum) && potInNum > 0
+
+  const potOutNum = Number.parseInt(potOutAmount, 10)
+  const potOutValid = Number.isInteger(potOutNum) && potOutNum > 0
+  const potOutTarget = seats.find((s) => s.seatId === potOutTargetId) ?? null
+
+  const potSplitEligible = useMemo(
+    () => seats.filter((s) => !s.locked),
+    [seats],
+  )
+  const potSplitNum = Number.parseInt(potSplitAmount, 10)
+  const potSplitValid = Number.isInteger(potSplitNum) && potSplitNum > 0
+  const potSplitK = potSplitEligible.length
+  const potSplitM =
+    potSplitValid && potSplitK > 0 ? Math.floor(potSplitNum / potSplitK) : 0
+  const potSplitR =
+    potSplitValid && potSplitK > 0 ? potSplitNum - potSplitM * potSplitK : 0
 
   const lastUndoable = useMemo(
     () => findLastUndoable(table.ledger ?? []),
@@ -258,6 +290,98 @@ export function ChipTable({
     setUndoTarget(null)
   }
 
+  const openPotIn = () => {
+    if (self.locked) {
+      pushToast(ACK_REASONS.SEAT_LOCKED)
+      return
+    }
+    setPotInAmount('')
+    setPotInOpen(true)
+  }
+
+  const confirmPotIn = () => {
+    if (self.locked) {
+      pushToast(ACK_REASONS.SEAT_LOCKED)
+      return
+    }
+    if (!potInValid) {
+      pushToast(ACK_REASONS.POSITIVE_INT)
+      return
+    }
+    if (self.balance < potInNum) {
+      pushToast(ACK_REASONS.INSUFFICIENT)
+      return
+    }
+    onOp('potIn', self.seatId, { amount: potInNum })
+    setPotInOpen(false)
+    setPotInAmount('')
+  }
+
+  const openPotOut = () => {
+    if (!isHost) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    setPotOutAmount('')
+    setPotOutTargetId(
+      seats.find((s) => s.seatId !== self.seatId)?.seatId ?? self.seatId,
+    )
+    setPotOutOpen(true)
+  }
+
+  const confirmPotOut = () => {
+    if (!isHost) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    if (!potOutValid) {
+      pushToast(ACK_REASONS.POSITIVE_INT)
+      return
+    }
+    if (potBalance < potOutNum) {
+      pushToast(ACK_REASONS.POT_INSUFFICIENT)
+      return
+    }
+    if (!potOutTarget) {
+      pushToast(ACK_REASONS.INVALID)
+      return
+    }
+    onOp('potOut', potOutTarget.seatId, { amount: potOutNum })
+    setPotOutOpen(false)
+    setPotOutAmount('')
+  }
+
+  const openPotSplit = () => {
+    if (!isHost) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    setPotSplitAmount('')
+    setPotSplitOpen(true)
+  }
+
+  const confirmPotSplit = () => {
+    if (!isHost) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    if (!potSplitValid) {
+      pushToast(ACK_REASONS.POSITIVE_INT)
+      return
+    }
+    if (potBalance < potSplitNum) {
+      pushToast(ACK_REASONS.POT_INSUFFICIENT)
+      return
+    }
+    if (potSplitK === 0 || potSplitM < 1) {
+      pushToast(ACK_REASONS.INVALID)
+      return
+    }
+    onOp('potSplit', self.seatId, { amount: potSplitNum })
+    setPotSplitOpen(false)
+    setPotSplitAmount('')
+  }
+
   const ledger = [...(table.ledger ?? [])].reverse()
 
   return (
@@ -269,6 +393,8 @@ export function ChipTable({
           <span>{seats.length} 人</span>
           <span className="dot">·</span>
           <span>{isHost ? '桌主' : '玩家'}</span>
+          <span className="dot">·</span>
+          <span className="pot-top">锅 · {potBalance}</span>
         </div>
         <button
           type="button"
@@ -315,6 +441,24 @@ export function ChipTable({
           <button type="button" className="btn primary compact" onClick={openTransfer}>
             转筹码
           </button>
+        </div>
+      )}
+
+      {showPotActions && (
+        <div className="pot-bar" role="toolbar" aria-label="公共锅操作">
+          <button type="button" className="btn ghost compact" onClick={openPotIn}>
+            进锅
+          </button>
+          {isHost && (
+            <button type="button" className="btn ghost compact" onClick={openPotOut}>
+              出锅
+            </button>
+          )}
+          {isHost && (
+            <button type="button" className="btn primary compact" onClick={openPotSplit}>
+              均分
+            </button>
+          )}
         </div>
       )}
 
@@ -372,6 +516,15 @@ export function ChipTable({
                         {row.amount > 0 ? '+' : ''}
                         {row.amount}
                       </span>
+                    </>
+                  ) : row.kind === 'potIn' ||
+                    row.kind === 'potOut' ||
+                    row.kind === 'potSplit' ? (
+                    <>
+                      <span className="ledger-who">
+                        {ledgerEntrySummary(row)}
+                      </span>
+                      <span className="ledger-amt">+{row.amount}</span>
                     </>
                   ) : (
                     <>
@@ -609,6 +762,148 @@ export function ChipTable({
               </button>
               <button type="button" className="btn primary" onClick={confirmUndo}>
                 确认撤销
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {potInOpen && (
+        <div className="confirm-overlay" role="dialog" aria-label="进锅">
+          <div className="confirm-box transfer-box">
+            <p className="transfer-title">进锅</p>
+            <label className="transfer-amount-label">
+              金额（任意正整数）
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                className="transfer-amount-input"
+                value={potInAmount}
+                onChange={(e) => setPotInAmount(e.target.value)}
+                autoFocus
+              />
+            </label>
+            {potInValid && (
+              <div className="transfer-preview" aria-live="polite">
+                <p>
+                  {self.name} → 锅 +{potInNum}
+                </p>
+              </div>
+            )}
+            <div className="cta-row">
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  setPotInOpen(false)
+                  setPotInAmount('')
+                }}
+              >
+                取消
+              </button>
+              <button type="button" className="btn primary" onClick={confirmPotIn}>
+                确认进锅
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {potOutOpen && isHost && (
+        <div className="confirm-overlay" role="dialog" aria-label="出锅">
+          <div className="confirm-box transfer-box">
+            <p className="transfer-title">出锅</p>
+            <label className="transfer-amount-label">
+              付给
+              <select
+                className="transfer-amount-input pot-target-select"
+                value={potOutTargetId}
+                onChange={(e) => setPotOutTargetId(e.target.value)}
+              >
+                {seats.map((s) => (
+                  <option key={s.seatId} value={s.seatId}>
+                    {s.name}
+                    {s.locked ? '（已锁定）' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="transfer-amount-label">
+              金额（任意正整数）
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                className="transfer-amount-input"
+                value={potOutAmount}
+                onChange={(e) => setPotOutAmount(e.target.value)}
+                autoFocus
+              />
+            </label>
+            {potOutValid && potOutTarget && (
+              <div className="transfer-preview" aria-live="polite">
+                <p>
+                  锅 → {potOutTarget.name} +{potOutNum}
+                </p>
+              </div>
+            )}
+            <div className="cta-row">
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  setPotOutOpen(false)
+                  setPotOutAmount('')
+                }}
+              >
+                取消
+              </button>
+              <button type="button" className="btn primary" onClick={confirmPotOut}>
+                确认出锅
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {potSplitOpen && isHost && (
+        <div className="confirm-overlay" role="dialog" aria-label="均分">
+          <div className="confirm-box transfer-box">
+            <p className="transfer-title">均分</p>
+            <label className="transfer-amount-label">
+              金额（任意正整数）
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                className="transfer-amount-input"
+                value={potSplitAmount}
+                onChange={(e) => setPotSplitAmount(e.target.value)}
+                autoFocus
+              />
+            </label>
+            {potSplitValid && potSplitK > 0 && (
+              <div className="transfer-preview" aria-live="polite">
+                <p>{potSplitSummary(potSplitK, potSplitM, potSplitR)}</p>
+              </div>
+            )}
+            <div className="cta-row">
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  setPotSplitOpen(false)
+                  setPotSplitAmount('')
+                }}
+              >
+                取消
+              </button>
+              <button type="button" className="btn primary" onClick={confirmPotSplit}>
+                确认均分
               </button>
             </div>
           </div>
