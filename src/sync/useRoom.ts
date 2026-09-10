@@ -50,13 +50,17 @@ function seatsFromSnapshot(
 
 function denomKey(
   type: ChipOpType,
-  extra?: { denom?: number; amount?: number },
+  extra?: { denom?: number; amount?: number; targetSeatIds?: string[] },
 ): string | null {
   if (type === '+denom' || type === '-denom') {
     return `${type}:${extra?.denom ?? ''}`
   }
   if (type === '+batch' || type === '-batch') {
     return `${type}:${extra?.amount ?? ''}`
+  }
+  if (type === 'transfer') {
+    const ids = [...(extra?.targetSeatIds ?? [])].sort().join(',')
+    return `transfer:${ids}:${extra?.amount ?? ''}`
   }
   return null
 }
@@ -140,7 +144,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     (op: ChipOp, base: TableSnapshot): TableSnapshot => {
       const seats = base.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) }))
       const target = seats.find((s) => s.seatId === op.targetSeatId)
-      if (!target && op.type !== 'resetTable') return base
+      if (!target && op.type !== 'resetTable' && op.type !== 'transfer') return base
+      let ledger = [...(base.ledger ?? [])]
 
       switch (op.type) {
         case '+denom':
@@ -180,8 +185,40 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         case 'unlock':
           if (target) target.locked = false
           break
+        case 'transfer': {
+          const amount = op.amount ?? 0
+          if (!Number.isInteger(amount) || amount <= 0) return base
+          const rawIds =
+            op.targetSeatIds && op.targetSeatIds.length > 0
+              ? op.targetSeatIds
+              : [op.targetSeatId]
+          const sender = seats.find((s) => s.seatId === op.fromSeatId)
+          if (!sender) return base
+          const receivers = rawIds
+            .filter((id, i, arr) => id && arr.indexOf(id) === i && id !== op.fromSeatId)
+            .map((id) => seats.find((s) => s.seatId === id))
+            .filter((s): s is NonNullable<typeof s> => !!s)
+          if (receivers.length === 0) return base
+          const total = amount * receivers.length
+          if (sender.balance < total) return base
+          sender.balance -= total
+          const at = Date.now()
+          for (const t of receivers) {
+            t.balance += amount
+            ledger.push({
+              id: `led_opt_${op.opId}_${t.seatId}`,
+              fromSeatId: sender.seatId,
+              fromName: sender.name,
+              toSeatId: t.seatId,
+              toName: t.name,
+              amount,
+              at,
+            })
+          }
+          break
+        }
       }
-      return { ...base, seats, snapshotAt: Date.now() }
+      return { ...base, seats, ledger, snapshotAt: Date.now() }
     },
     [],
   )
@@ -193,6 +230,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       const sanitized: TableSnapshot = {
         ...snap,
         seats: snap.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) })),
+        ledger: Array.isArray(snap.ledger) ? snap.ledger : [],
       }
       setTable(sanitized)
       snapshotRef.current = sanitized
@@ -207,7 +245,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     async (
       type: ChipOpType,
       targetSeatId: string,
-      extra?: { denom?: number; amount?: number },
+      extra?: { denom?: number; amount?: number; targetSeatIds?: string[] },
     ) => {
       if (!session || !roomCode || !snapshotRef.current) return
 
@@ -225,6 +263,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         type,
         denom: extra?.denom,
         amount: extra?.amount,
+        targetSeatIds: extra?.targetSeatIds,
       }
 
       const before = snapshotRef.current

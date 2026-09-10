@@ -12,6 +12,18 @@ export type ChipOpType =
   | 'resetTable'
   | 'lock'
   | 'unlock'
+  | 'transfer'
+
+/** Successful chip transfer row — failed attempts never appear. */
+export interface LedgerEntry {
+  id: string
+  fromSeatId: string
+  fromName: string
+  toSeatId: string
+  toName: string
+  amount: number
+  at: number
+}
 
 export interface Seat {
   seatId: string
@@ -42,10 +54,14 @@ export interface ChipOp {
   opId: string
   roomCode: string
   fromSeatId: string
+  /** Primary / first target (required shape). Transfer may list more via targetSeatIds. */
   targetSeatId: string
   type: ChipOpType
   denom?: number
+  /** Transfer: positive integer amount per target (not forced to denoms). */
   amount?: number
+  /** Transfer one-to-many targets. If omitted, [targetSeatId]. */
+  targetSeatIds?: string[]
 }
 
 export interface ChipAck {
@@ -67,6 +83,8 @@ export interface TableSnapshot {
   snapshotAt: number
   seats: SnapshotSeat[]
   denoms: number[]
+  /** In-table transfer ledger (successful settles only). */
+  ledger: LedgerEntry[]
 }
 
 export const MAX_SEATS = 8
@@ -85,6 +103,8 @@ export const ACK_REASONS = {
   ROOM_CODE_INVALID: '房码无效',
   TABLE_FULL: '本桌已满（最多8人）',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
+  INSUFFICIENT: '余额不足',
+  SELF_TRANSFER: '不能转给自己',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */

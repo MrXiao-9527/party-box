@@ -16,6 +16,8 @@ export const ACK_REASONS = {
   ROOM_CODE_INVALID: '房码无效',
   TABLE_FULL: '本桌已满（最多8人）',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
+  INSUFFICIENT: '余额不足',
+  SELF_TRANSFER: '不能转给自己',
 }
 
 const ROOM_TTL_MS = 4 * 60 * 60 * 1000 // 4h idle → drop
@@ -49,6 +51,7 @@ function normalize(data) {
     table: {
       ...data.table,
       seats: data.table.seats.slice(0, MAX_SEATS),
+      ledger: Array.isArray(data.table.ledger) ? data.table.ledger : [],
     },
   }
 }
@@ -105,6 +108,7 @@ export function createRoomStore() {
         snapshotAt: now,
         denoms: [...DEFAULT_DENOMS],
         seats: [],
+        ledger: [],
       },
     })
     return {
@@ -298,6 +302,7 @@ export function createRoomStore() {
     const isHost = op.fromSeatId === existing.room.hostSeatId
     const seats = existing.table.seats.map((s) => ({ ...s }))
     const target = seats.find((s) => s.seatId === op.targetSeatId)
+    let ledger = [...(existing.table.ledger ?? [])]
 
     const fail = (reason) => ({
       ack: {
@@ -309,7 +314,7 @@ export function createRoomStore() {
       data: existing,
     })
 
-    if (!target && op.type !== 'resetTable') {
+    if (!target && op.type !== 'resetTable' && op.type !== 'transfer') {
       return fail(ACK_REASONS.INVALID)
     }
 
@@ -370,6 +375,60 @@ export function createRoomStore() {
         target.locked = op.type === 'lock'
         break
       }
+      case 'transfer': {
+        const amount = op.amount ?? 0
+        if (!Number.isInteger(amount) || amount <= 0) {
+          return fail(ACK_REASONS.INVALID)
+        }
+
+        const rawIds =
+          op.targetSeatIds && op.targetSeatIds.length > 0
+            ? op.targetSeatIds
+            : [op.targetSeatId]
+        const seen = new Set()
+        const targetIds = []
+        for (const id of rawIds) {
+          if (!id || seen.has(id)) continue
+          seen.add(id)
+          targetIds.push(id)
+        }
+        if (targetIds.length === 0) return fail(ACK_REASONS.INVALID)
+        if (targetIds.includes(op.fromSeatId)) {
+          return fail(ACK_REASONS.SELF_TRANSFER)
+        }
+
+        const sender = seats.find((s) => s.seatId === op.fromSeatId)
+        if (!sender) return fail(ACK_REASONS.INVALID)
+        if (sender.locked) return fail(ACK_REASONS.SEAT_LOCKED)
+
+        const receivers = []
+        for (const tid of targetIds) {
+          const t = seats.find((s) => s.seatId === tid)
+          if (!t) return fail(ACK_REASONS.INVALID)
+          if (t.locked) return fail(ACK_REASONS.SEAT_LOCKED)
+          receivers.push(t)
+        }
+
+        const total = amount * receivers.length
+        if (sender.balance < total) return fail(ACK_REASONS.INSUFFICIENT)
+
+        sender.balance -= total
+        const at = Date.now()
+        for (const t of receivers) {
+          t.balance += amount
+          ledger.push({
+            id: uid('led'),
+            fromSeatId: sender.seatId,
+            fromName: sender.name,
+            toSeatId: t.seatId,
+            toName: t.name,
+            amount,
+            at,
+          })
+        }
+        if (ledger.length > 100) ledger = ledger.slice(-100)
+        break
+      }
       default:
         return fail(ACK_REASONS.INVALID)
     }
@@ -381,6 +440,7 @@ export function createRoomStore() {
         snapshotAt,
         denoms: existing.table.denoms,
         seats,
+        ledger,
       },
     })
     return { ack: { opId: op.opId, ok: true, snapshotAt }, data }

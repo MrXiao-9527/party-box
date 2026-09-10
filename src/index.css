@@ -497,6 +497,142 @@ input {
   opacity: 0.65;
 }
 
+button.seat {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  border: none;
+}
+
+.seat-other.selected {
+  outline: 2px solid var(--seat-own);
+  outline-offset: 1px;
+}
+
+.transfer-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 0.55rem;
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.transfer-bar-meta {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.transfer-box .transfer-title {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+}
+
+.transfer-targets {
+  margin: 0 0 0.85rem;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.transfer-amount-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.transfer-amount-input {
+  border: 1px solid rgba(242, 244, 247, 0.16);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  padding: 0.75rem 0.85rem;
+  font-variant-numeric: tabular-nums;
+  font-size: 1.15rem;
+}
+
+.transfer-preview {
+  margin: 0.85rem 0 0;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius);
+  background: var(--bg);
+  font-variant-numeric: tabular-nums;
+}
+
+.transfer-preview p {
+  margin: 0;
+}
+
+.transfer-preview ul {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+}
+
+.ledger-panel {
+  margin-top: 0.15rem;
+}
+
+.ledger-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  padding: 0.35rem 0.1rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.ledger-list {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0.55rem 0.65rem;
+  border-radius: var(--radius);
+  background: var(--card);
+  max-height: 9rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.ledger-empty {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+.ledger-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.55rem;
+  align-items: baseline;
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.ledger-who {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ledger-amt {
+  color: var(--seat-own);
+}
+
+.ledger-time {
+  color: var(--text-secondary);
+}
+
 /* Denom chips — only saturated accents; ~48px tall */
 .denom-bar {
   position: fixed;
