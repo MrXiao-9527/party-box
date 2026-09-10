@@ -18,6 +18,7 @@ import { MAX_SEATS, parseRoomCode } from '../types'
 import {
   decideRestore,
   hasHadSeat,
+  invalidateStoredSeatId,
   loadIdentity,
   newTabId,
   openSeatTabChannel,
@@ -32,6 +33,7 @@ type GateMode =
   | { type: 'booting' }
   | { type: 'nick'; prefill?: string; notice?: string }
   | { type: 'takeover'; identity: SeatIdentity }
+  | { type: 'blocked'; reason: 'full' }
   | { type: 'ready' }
   | { type: 'gone' }
 
@@ -42,6 +44,10 @@ function identityFromSession(session: Session, isHost: boolean): SeatIdentity {
     name: session.name,
     role: isHost ? 'host' : 'player',
   }
+}
+
+function isTableFull(memberCount: number): boolean {
+  return memberCount >= MAX_SEATS
 }
 
 export function RoomPage() {
@@ -148,6 +154,22 @@ export function RoomPage() {
         }, 280)
       })
 
+    const enterNickForNewSeat = (prefill?: string, notice?: string) => {
+      // Invalidate old seatId in localStorage before allocating a new one.
+      invalidateStoredSeatId(roomCode)
+      saveSession(null)
+      setGate({ type: 'nick', prefill, notice })
+    }
+
+    const blockIfFull = (): boolean => {
+      if (!roomData || !isTableFull(roomData.room.members.length)) return false
+      invalidateStoredSeatId(roomCode)
+      saveSession(null)
+      roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
+      setGate({ type: 'blocked', reason: 'full' })
+      return true
+    }
+
     const run = async () => {
       // Fresh「开一桌」pending host claim (empty members + empty-name session)
       if (
@@ -195,6 +217,8 @@ export function RoomPage() {
       }
 
       if (decision.kind === 'silent') {
+        // Host snapshot via restoreSeat → setPersisted (balances + phase).
+        // Paused host stays disconnected — do NOT auto「重开一桌」.
         const data = restoreSeat(roomCode, decision.identity.seatId)
         if (data) {
           const member = data.room.members.find(
@@ -226,23 +250,18 @@ export function RoomPage() {
           setGate({ type: 'ready' })
           return
         }
-        // Fall through to seat_taken if restore failed
-        setGate({
-          type: 'nick',
-          prefill: decision.identity.name,
-          notice: RESTORE_COPY.SEAT_TAKEN,
-        })
+        // Restore failed → treat as occupied
+        if (blockIfFull()) return
         roomApi.pushToast(RESTORE_COPY.SEAT_TAKEN)
+        enterNickForNewSeat(decision.identity.name, RESTORE_COPY.SEAT_TAKEN)
         return
       }
 
       if (decision.kind === 'seat_taken') {
+        // Occupied + full → only「本桌已满（最多8人）」; do not enter nick / new seat.
+        if (blockIfFull()) return
         roomApi.pushToast(decision.toast)
-        setGate({
-          type: 'nick',
-          prefill: decision.prefillName,
-          notice: decision.toast,
-        })
+        enterNickForNewSeat(decision.prefillName, decision.toast)
         return
       }
 
@@ -252,8 +271,9 @@ export function RoomPage() {
       }
 
       // identity_lost — prior seat mark exists but identity key is gone
+      if (blockIfFull()) return
       roomApi.pushToast(decision.toast)
-      setGate({ type: 'nick', notice: decision.toast })
+      enterNickForNewSeat(undefined, decision.toast)
     }
 
     void run()
@@ -294,7 +314,17 @@ export function RoomPage() {
     })
     const data = restoreSeat(roomCode, id.seatId)
     if (!data) {
+      const roomNow = loadRoom(roomCode)
+      if (roomNow && isTableFull(roomNow.room.members.length)) {
+        invalidateStoredSeatId(roomCode)
+        saveSession(null)
+        roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
+        setGate({ type: 'blocked', reason: 'full' })
+        return
+      }
       roomApi.pushToast(RESTORE_COPY.SEAT_TAKEN)
+      invalidateStoredSeatId(roomCode)
+      saveSession(null)
       setGate({ type: 'nick', prefill: id.name, notice: RESTORE_COPY.SEAT_TAKEN })
       return
     }
@@ -318,6 +348,23 @@ export function RoomPage() {
     setGate({ type: 'ready' })
   }
 
+  const tryNewSeatFromTakeover = () => {
+    if (gate.type !== 'takeover' || !roomCode) return
+    const roomNow = loadRoom(roomCode)
+    if (roomNow && isTableFull(roomNow.room.members.length)) {
+      invalidateStoredSeatId(roomCode)
+      saveSession(null)
+      roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
+      setGate({ type: 'blocked', reason: 'full' })
+      return
+    }
+    const name = gate.identity.name
+    invalidateStoredSeatId(roomCode)
+    saveSession(null)
+    roomApi.pushToast(RESTORE_COPY.SEAT_TAKEN)
+    setGate({ type: 'nick', prefill: name, notice: RESTORE_COPY.SEAT_TAKEN })
+  }
+
   if (gate.type === 'booting' || gate.type === 'gone') {
     return <div className="page" />
   }
@@ -330,35 +377,78 @@ export function RoomPage() {
     )
   }
 
-  const exitRoom = () => {
-    if (roomApi.isHost) deleteRoom(roomCode)
+  /** Active host exit may dissolve the room; read-only only clears local identity. */
+  const exitLocalIdentity = () => {
     saveIdentity(null, roomCode)
     roomApi.clearSession()
     roomApi.setOffline(false)
     holdingSeatRef.current = null
+    setTabReadOnly(false)
     navigate('/')
   }
 
-  const guardedOp: typeof roomApi.submitOp = (...args) => {
+  const exitRoom = () => {
     if (readOnly) {
+      exitLocalIdentity()
+      return
+    }
+    if (roomApi.isHost) deleteRoom(roomCode)
+    exitLocalIdentity()
+  }
+
+  const guardedOp: typeof roomApi.submitOp = (...args) => {
+    if (readOnlyRef.current || readOnly) {
       roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
       return Promise.resolve()
     }
     return roomApi.submitOp(...args)
   }
 
-  const debug = roomApi.room ? (
-    <DevPanel
-      onHostPause={roomApi.signalHostDisconnect}
-      onFillSeats={roomApi.fillSeats}
-      onToggleOffline={() =>
-        roomApi.setOffline(roomApi.connectionState !== 'offline')
-      }
-      connectionState={roomApi.connectionState}
-      seatCount={roomApi.room.members.length}
-      maxSeats={roomApi.room.maxSeats ?? MAX_SEATS}
-    />
-  ) : null
+  const denyIfReadOnly = (fn: () => void) => () => {
+    if (readOnlyRef.current || readOnly) {
+      roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
+      return
+    }
+    fn()
+  }
+
+  const debug =
+    roomApi.room && !readOnly ? (
+      <DevPanel
+        onHostPause={roomApi.signalHostDisconnect}
+        onFillSeats={roomApi.fillSeats}
+        onToggleOffline={() =>
+          roomApi.setOffline(roomApi.connectionState !== 'offline')
+        }
+        connectionState={roomApi.connectionState}
+        seatCount={roomApi.room.members.length}
+        maxSeats={roomApi.room.maxSeats ?? MAX_SEATS}
+      />
+    ) : null
+
+  if (gate.type === 'blocked') {
+    return (
+      <div className="page nickname">
+        <ToastStack toasts={roomApi.toasts} onDismiss={roomApi.dismissToast} />
+        <div className="nickname-card">
+          <p className="eyebrow">房间 {roomCode}</p>
+          <h1>{RESTORE_COPY.TABLE_FULL}</h1>
+          <p className="hint">原席不可用且本桌已满，无法新坐一席。</p>
+          <button
+            type="button"
+            className="btn primary wide"
+            onClick={() => {
+              saveIdentity(null, roomCode)
+              roomApi.clearSession()
+              navigate('/')
+            }}
+          >
+            回首页
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (gate.type === 'takeover') {
     return (
@@ -374,13 +464,7 @@ export function RoomPage() {
           <button
             type="button"
             className="btn ghost wide"
-            onClick={() =>
-              setGate({
-                type: 'nick',
-                prefill: gate.identity.name,
-                notice: RESTORE_COPY.SEAT_TAKEN,
-              })
-            }
+            onClick={tryNewSeatFromTakeover}
           >
             新坐一席
           </button>
@@ -440,7 +524,10 @@ export function RoomPage() {
       <ToastStack toasts={roomApi.toasts} onDismiss={roomApi.dismissToast} />
       {readOnly && (
         <div className="readonly-strip" role="status">
-          {RESTORE_COPY.TAKEN_OVER}
+          <span>{RESTORE_COPY.TAKEN_OVER}</span>
+          <button type="button" className="btn ghost compact" onClick={exitRoom}>
+            退出房间
+          </button>
         </div>
       )}
       {debug}
@@ -449,20 +536,18 @@ export function RoomPage() {
           room={roomApi.room}
           session={roomApi.session}
           isHost={roomApi.isHost}
-          onStart={readOnly ? () => roomApi.pushToast(RESTORE_COPY.TAKEN_OVER) : roomApi.startPlaying}
+          onStart={denyIfReadOnly(roomApi.startPlaying)}
         />
       ) : phase === 'paused' ? (
         <PausedTable
           room={roomApi.room}
           session={roomApi.session}
-          onResume={
-            readOnly
-              ? () => roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
-              : roomApi.resumeTable
-          }
+          onResume={denyIfReadOnly(roomApi.resumeTable)}
           onPickHost={
             readOnly
-              ? () => roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
+              ? () => {
+                  roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
+                }
               : roomApi.claimHost
           }
           pushToast={roomApi.pushToast}
@@ -476,10 +561,10 @@ export function RoomPage() {
           connectionState={roomApi.connectionState}
           onOp={guardedOp}
           pushToast={roomApi.pushToast}
-          onToggleOffline={() =>
-            roomApi.setOffline(roomApi.connectionState !== 'offline')
-          }
-          onHostLeave={roomApi.signalHostDisconnect}
+          onToggleOffline={denyIfReadOnly(() =>
+            roomApi.setOffline(roomApi.connectionState !== 'offline'),
+          )}
+          onHostLeave={denyIfReadOnly(roomApi.signalHostDisconnect)}
           onExit={exitRoom}
         />
       ) : (

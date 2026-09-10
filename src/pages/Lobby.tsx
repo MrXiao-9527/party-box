@@ -38,7 +38,7 @@ export function Lobby({ room, session, isHost, onStart }: LobbyProps) {
         <h2>
           成员 · {room.members.length}/{MAX_SEATS}
         </h2>
-        {full && <p className="hint">本桌已满（最多 8 人）</p>}
+        {full && <p className="hint">本桌已满（最多8人）</p>}
         <ul>
           {room.members.map((m) => (
             <li key={m.seatId} className={m.seatId === session.seatId ? 'self' : ''}>

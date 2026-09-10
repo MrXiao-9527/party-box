@@ -37,6 +37,8 @@ export const RESTORE_COPY = {
   ROOM_GONE: '房间已结束',
   OTHER_TAB: '该席已在其他标签打开',
   TAKEN_OVER: '已在其他标签接管',
+  /** Locked copy — same as ACK_REASONS.TABLE_FULL. */
+  TABLE_FULL: '本桌已满（最多8人）',
 } as const
 
 export const IDENTITY_KEY = 'party-box:identity'
@@ -126,6 +128,17 @@ export function saveIdentity(
       roomCode: identity.roomCode.toUpperCase(),
     }),
   )
+}
+
+/**
+ * Drop stale seatId from localStorage after seat_taken, but keep the
+ * room-scoped had-seat mark so a later wipe still counts as identity_lost.
+ */
+export function invalidateStoredSeatId(roomCode?: string): void {
+  const prev = loadIdentity()
+  if (roomCode) markHadSeat(roomCode)
+  else if (prev) markHadSeat(prev.roomCode)
+  localStorage.removeItem(IDENTITY_KEY)
 }
 
 export interface RestoreRoomView {
