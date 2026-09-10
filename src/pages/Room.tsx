@@ -7,10 +7,17 @@ import { NicknameGate } from './Nickname'
 import { Lobby } from './Lobby'
 import { ChipTable } from './ChipTable'
 import { PausedTable } from './PausedTable'
-import { loadRoom, saveSession, type Session } from '../store/localRoom'
+import {
+  loadRoom,
+  loadSession,
+  saveSession,
+  type PersistedRoom,
+  type Session,
+} from '../store/localRoom'
 import {
   deleteRoom,
   restoreSeat,
+  setMemberConnected,
   syncRoomFromRelay,
 } from '../sync/roomApi'
 import { ACK_REASONS, MAX_SEATS, parseRoomCode } from '../types'
@@ -111,7 +118,23 @@ export function RoomPage() {
     }
     if (!roomCode) return
 
-    const identity = loadIdentity()
+    // Prefer identity key; fall back to session for same room (refresh resilience).
+    const storedIdentity = loadIdentity()
+    const storedSession = loadSession()
+    const identity: SeatIdentity | null =
+      storedIdentity && storedIdentity.roomCode.toUpperCase() === roomCode
+        ? storedIdentity
+        : storedSession &&
+            storedSession.roomCode.toUpperCase() === roomCode &&
+            storedSession.seatId &&
+            storedSession.name
+          ? {
+              roomCode,
+              seatId: storedSession.seatId,
+              name: storedSession.name,
+              role: 'player',
+            }
+          : null
 
     // Probe other tabs for same seat before silent restore
     const probeOtherTab = (seatId: string): Promise<boolean> =>
@@ -148,6 +171,34 @@ export function RoomPage() {
       invalidateStoredSeatId(roomCode)
       saveSession(null)
       setGate({ type: 'nick', prefill, notice })
+    }
+
+    const bindSilentSeat = (data: PersistedRoom, id: SeatIdentity) => {
+      const member = data.room.members.find((m) => m.seatId === id.seatId)
+      const session: Session = {
+        seatId: id.seatId,
+        name: member?.name ?? id.name,
+        roomCode,
+      }
+      const nextIdentity: SeatIdentity = {
+        roomCode,
+        seatId: session.seatId,
+        name: session.name,
+        role: roleForSeat(data.room.hostSeatId, session.seatId),
+      }
+      saveSession(session)
+      saveIdentity(nextIdentity)
+      roomApi.bindSession(session)
+      roomApi.setPersisted(data)
+      setTabReadOnly(false)
+      holdingSeatRef.current = session.seatId
+      channelRef.current?.post({
+        type: 'claim',
+        roomCode,
+        seatId: session.seatId,
+        tabId: tabIdRef.current,
+      })
+      setGate({ type: 'ready' })
     }
 
     const run = async () => {
@@ -201,7 +252,7 @@ export function RoomPage() {
       }
 
       let seatHeldByOtherTab = false
-      if (identity?.roomCode === roomCode && identity.seatId) {
+      if (identity?.seatId) {
         seatHeldByOtherTab = await probeOtherTab(identity.seatId)
       }
 
@@ -230,38 +281,39 @@ export function RoomPage() {
       if (decision.kind === 'silent') {
         // Host snapshot via restoreSeat → setPersisted (balances + phase).
         // Paused host stays disconnected — do NOT auto「重开一桌」.
-        const data = await restoreSeat(roomCode, decision.identity.seatId)
-        if (data) {
-          const member = data.room.members.find(
+        let data: PersistedRoom | null = null
+        try {
+          data = await restoreSeat(roomCode, decision.identity.seatId)
+        } catch {
+          data = null
+        }
+        // Sync already proved seat is still ours — do not drop to nick if
+        // /restore blips. Bind the synced snapshot and reconnect best-effort.
+        if (
+          !data &&
+          roomDataNow.room.members.some(
             (m) => m.seatId === decision.identity.seatId,
           )
-          const session: Session = {
-            seatId: decision.identity.seatId,
-            name: member?.name ?? decision.identity.name,
-            roomCode,
+        ) {
+          data = roomDataNow
+          const pausedHost =
+            roomDataNow.room.phase === 'paused' &&
+            decision.identity.seatId === roomDataNow.room.hostSeatId
+          if (!pausedHost) {
+            void setMemberConnected(
+              roomCode,
+              decision.identity.seatId,
+              true,
+            ).then((next) => {
+              if (next) roomApi.setPersisted(next)
+            })
           }
-          const nextIdentity: SeatIdentity = {
-            roomCode,
-            seatId: session.seatId,
-            name: session.name,
-            role: roleForSeat(data.room.hostSeatId, session.seatId),
-          }
-          saveSession(session)
-          saveIdentity(nextIdentity)
-          roomApi.bindSession(session)
-          roomApi.setPersisted(data)
-          setTabReadOnly(false)
-          holdingSeatRef.current = session.seatId
-          channelRef.current?.post({
-            type: 'claim',
-            roomCode,
-            seatId: session.seatId,
-            tabId: tabIdRef.current,
-          })
-          setGate({ type: 'ready' })
+        }
+        if (data) {
+          bindSilentSeat(data, decision.identity)
           return
         }
-        // Restore failed → treat as occupied
+        // Seat gone between sync and restore → occupied
         if (blockIfFullNow()) return
         roomApi.pushToast(RESTORE_COPY.SEAT_TAKEN)
         enterNickForNewSeat(decision.identity.name, RESTORE_COPY.SEAT_TAKEN)
@@ -501,22 +553,15 @@ export function RoomPage() {
     )
   }
 
-  // ready
+  // ready — session must be bound by silent restore / nick / takeover.
+  // Do NOT fall through to NicknameGate: that bypasses decideRestore and
+  // can flash the nick page after a same-code refresh.
   if (
     !roomApi.session ||
-    roomApi.session.roomCode !== roomCode ||
+    roomApi.session.roomCode.toUpperCase() !== roomCode ||
     !roomApi.session.name
   ) {
-    return (
-      <>
-        <ToastStack toasts={roomApi.toasts} onDismiss={roomApi.dismissToast} />
-        <NicknameGate
-          roomCode={roomCode}
-          onReady={onNickReady}
-          onError={(msg) => roomApi.pushToast(msg)}
-        />
-      </>
-    )
+    return <div className="page" />
   }
 
   if (!roomApi.room) {
