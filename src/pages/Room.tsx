@@ -189,6 +189,7 @@ export function RoomPage() {
       saveSession(session)
       saveIdentity(nextIdentity)
       roomApi.bindSession(session)
+      // Host TableSnapshot wins: balances + phase (paused stays paused).
       roomApi.setPersisted(data)
       setTabReadOnly(false)
       holdingSeatRef.current = session.seatId
@@ -279,8 +280,9 @@ export function RoomPage() {
       }
 
       if (decision.kind === 'silent') {
-        // Host snapshot via restoreSeat → setPersisted (balances + phase).
-        // Paused host stays disconnected — do NOT auto「重开一桌」.
+        // Acceptance: silent reseat + host TableSnapshot balances + phase.
+        // Paused host: restoreSeat leaves phase=paused / connected=false —
+        // never auto「重开一桌」/ resumeTable.
         let data: PersistedRoom | null = null
         try {
           data = await restoreSeat(roomCode, decision.identity.seatId)
@@ -288,7 +290,8 @@ export function RoomPage() {
           data = null
         }
         // Sync already proved seat is still ours — do not drop to nick if
-        // /restore blips. Bind the synced snapshot and reconnect best-effort.
+        // /restore blips. Bind the synced host snapshot; reconnect best-effort
+        // (skipped for paused host so UI stays「桌主已离开 · 桌子已暂停」).
         if (
           !data &&
           roomDataNow.room.members.some(
