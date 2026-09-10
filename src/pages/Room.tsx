@@ -426,10 +426,17 @@ export function RoomPage() {
         <PausedTable
           room={roomApi.room}
           session={roomApi.session}
-          isHost={roomApi.isHost}
-          onResume={readOnly ? () => roomApi.pushToast(RESTORE_COPY.TAKEN_OVER) : roomApi.resumeTable}
-          onPickHost={readOnly ? () => roomApi.pushToast(RESTORE_COPY.TAKEN_OVER) : roomApi.claimHost}
-          onExit={exitRoom}
+          onResume={
+            readOnly
+              ? () => roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
+              : roomApi.resumeTable
+          }
+          onPickHost={
+            readOnly
+              ? () => roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
+              : roomApi.claimHost
+          }
+          pushToast={roomApi.pushToast}
         />
       ) : roomApi.table ? (
         <ChipTable

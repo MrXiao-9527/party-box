@@ -267,27 +267,35 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   const resumeTable = useCallback(() => {
     if (!roomCode || !session) return
     const data = resumeAsHost(roomCode, session.seatId)
-    if (data) {
-      const connected = setMemberConnected(roomCode, session.seatId, true)
-      const next = connected ?? data
-      setRoom(next.room)
-      setTable(next.table)
-      snapshotRef.current = next.table
-    }
-  }, [roomCode, session])
-
-  const claimHost = useCallback(() => {
-    if (!roomCode || !session) return
-    const result = pickNewHost(roomCode, session.seatId)
-    if ('error' in result) {
-      pushToast(result.error)
+    if (!data) {
+      pushToast('仅桌主可执行此操作')
       return
     }
-    setRoom(result.room)
-    setTable(result.table)
-    snapshotRef.current = result.table
-    pushToast('你已成为新桌主')
+    const connected = setMemberConnected(roomCode, session.seatId, true)
+    const next = connected ?? data
+    setRoom(next.room)
+    setTable(next.table)
+    snapshotRef.current = next.table
   }, [roomCode, session, pushToast])
+
+  const claimHost = useCallback(
+    (newHostSeatId?: string) => {
+      if (!roomCode || !session) return
+      const seatId = newHostSeatId ?? session.seatId
+      const result = pickNewHost(roomCode, seatId)
+      if ('error' in result) {
+        pushToast(result.error)
+        return
+      }
+      setRoom(result.room)
+      setTable(result.table)
+      snapshotRef.current = result.table
+      pushToast(
+        seatId === session.seatId ? '你已成为新桌主' : '已选出新桌主',
+      )
+    },
+    [roomCode, session, pushToast],
+  )
 
   const fillSeats = useCallback(() => {
     if (!roomCode) return

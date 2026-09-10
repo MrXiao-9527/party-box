@@ -1,24 +1,42 @@
+import { useState } from 'react'
 import type { RoomState } from '../types'
 import type { Session } from '../store/localRoom'
 
 interface PausedTableProps {
   room: RoomState
   session: Session
-  isHost: boolean
   onResume: () => void
-  onPickHost: () => void
-  onExit: () => void
+  onPickHost: (newHostSeatId: string) => void
+  pushToast: (text: string) => void
 }
 
 export function PausedTable({
   room,
   session,
-  isHost,
   onResume,
   onPickHost,
-  onExit,
+  pushToast,
 }: PausedTableProps) {
+  const [picking, setPicking] = useState(false)
   const host = room.members.find((m) => m.seatId === room.hostSeatId)
+
+  // Connected members who can take over — exclude the left host seat.
+  const candidates = room.members.filter(
+    (m) => m.connected && m.seatId !== room.hostSeatId,
+  )
+
+  const openPickHost = () => {
+    if (candidates.length === 0) {
+      pushToast('暂无其他成员可接桌主')
+      return
+    }
+    setPicking(true)
+  }
+
+  const chooseHost = (seatId: string) => {
+    setPicking(false)
+    onPickHost(seatId)
+  }
 
   return (
     <div className="page paused">
@@ -54,19 +72,42 @@ export function PausedTable({
       </ul>
 
       <div className="paused-actions">
-        {isHost ? (
-          <button type="button" className="btn primary wide" onClick={onResume}>
-            重开一桌
-          </button>
-        ) : (
-          <button type="button" className="btn primary wide" onClick={onPickHost}>
-            选新桌主
-          </button>
-        )}
-        <button type="button" className="btn ghost wide" onClick={onExit}>
-          退出房间
+        <button type="button" className="btn primary wide" onClick={onResume}>
+          重开一桌
+        </button>
+        <button type="button" className="btn ghost wide" onClick={openPickHost}>
+          选新桌主
         </button>
       </div>
+
+      {picking && (
+        <div className="confirm-overlay" role="dialog" aria-label="选新桌主">
+          <div className="confirm-box">
+            <p>选择新桌主</p>
+            <ul className="pick-host-list">
+              {candidates.map((m) => (
+                <li key={m.seatId}>
+                  <button
+                    type="button"
+                    className="btn ghost wide"
+                    onClick={() => chooseHost(m.seatId)}
+                  >
+                    {m.name}
+                    {m.seatId === session.seatId ? '（我）' : ''}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <button
+              type="button"
+              className="btn ghost wide"
+              onClick={() => setPicking(false)}
+            >
+              取消
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
