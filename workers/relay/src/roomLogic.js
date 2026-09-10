@@ -18,6 +18,7 @@ export const ACK_REASONS = {
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
   INSUFFICIENT: '余额不足',
   SELF_TRANSFER: '不能转给自己',
+  POSITIVE_INT: '请输入正整数',
 }
 
 const ROOM_TTL_MS = 4 * 60 * 60 * 1000 // 4h idle → drop
@@ -314,7 +315,12 @@ export function createRoomStore() {
       data: existing,
     })
 
-    if (!target && op.type !== 'resetTable' && op.type !== 'transfer') {
+    if (
+      !target &&
+      op.type !== 'resetTable' &&
+      op.type !== 'transfer' &&
+      op.type !== 'uniformBuyIn'
+    ) {
       return fail(ACK_REASONS.INVALID)
     }
 
@@ -418,6 +424,7 @@ export function createRoomStore() {
           t.balance += amount
           ledger.push({
             id: uid('led'),
+            kind: 'transfer',
             fromSeatId: sender.seatId,
             fromName: sender.name,
             toSeatId: t.seatId,
@@ -426,6 +433,29 @@ export function createRoomStore() {
             at,
           })
         }
+        if (ledger.length > 100) ledger = ledger.slice(-100)
+        break
+      }
+      case 'uniformBuyIn': {
+        if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+        const amount = op.amount ?? 0
+        if (!Number.isInteger(amount) || amount <= 0) {
+          return fail(ACK_REASONS.POSITIVE_INT)
+        }
+        // 开局清桌优先于锁定：locked seats also set to N (lock flag kept).
+        for (const s of seats) {
+          s.balance = amount
+        }
+        ledger.push({
+          id: uid('led'),
+          kind: 'uniformBuyIn',
+          fromSeatId: op.fromSeatId,
+          fromName: '',
+          toSeatId: '',
+          toName: '',
+          amount,
+          at: Date.now(),
+        })
         if (ledger.length > 100) ledger = ledger.slice(-100)
         break
       }

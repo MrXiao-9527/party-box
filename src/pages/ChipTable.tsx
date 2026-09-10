@@ -52,6 +52,8 @@ export function ChipTable({
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [transferOpen, setTransferOpen] = useState(false)
   const [transferAmount, setTransferAmount] = useState('')
+  const [buyInOpen, setBuyInOpen] = useState(false)
+  const [buyInAmount, setBuyInAmount] = useState('')
   const [ledgerOpen, setLedgerOpen] = useState(false)
   const longPressTimer = useRef<number | null>(null)
   const longPressed = useRef(false)
@@ -67,6 +69,9 @@ export function ChipTable({
   const amountNum = Number.parseInt(transferAmount, 10)
   const amountValid = Number.isInteger(amountNum) && amountNum > 0
   const totalOut = amountValid ? amountNum * selectedSeats.length : 0
+
+  const buyInNum = Number.parseInt(buyInAmount, 10)
+  const buyInValid = Number.isInteger(buyInNum) && buyInNum > 0
 
   if (!self) {
     return (
@@ -192,6 +197,30 @@ export function ChipTable({
     setSelectedIds([])
   }
 
+  const openBuyIn = () => {
+    if (!isHost) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    setBuyInAmount('')
+    setBuyInOpen(true)
+    setMenuOpen(false)
+  }
+
+  const confirmBuyIn = () => {
+    if (!isHost) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    if (!buyInValid) {
+      pushToast(ACK_REASONS.POSITIVE_INT)
+      return
+    }
+    onOp('uniformBuyIn', self.seatId, { amount: buyInNum })
+    setBuyInOpen(false)
+    setBuyInAmount('')
+  }
+
   const ledger = [...(table.ledger ?? [])].reverse()
 
   return (
@@ -285,10 +314,19 @@ export function ChipTable({
             ) : (
               ledger.map((row) => (
                 <li key={row.id} className="ledger-row">
-                  <span className="ledger-who">
-                    {row.fromName}→{row.toName}
-                  </span>
-                  <span className="ledger-amt">+{row.amount}</span>
+                  {row.kind === 'uniformBuyIn' ? (
+                    <>
+                      <span className="ledger-who">全员买入 {row.amount}</span>
+                      <span className="ledger-amt ledger-amt-set">={row.amount}</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="ledger-who">
+                        {row.fromName}→{row.toName}
+                      </span>
+                      <span className="ledger-amt">+{row.amount}</span>
+                    </>
+                  )}
                   <span className="ledger-time">{formatLedgerTime(row.at)}</span>
                 </li>
               ))
@@ -339,6 +377,9 @@ export function ChipTable({
             disabled={!isHost}
           >
             重置整桌
+          </button>
+          <button type="button" onClick={openBuyIn} disabled={!isHost}>
+            全员买入
           </button>
           <button
             type="button"
@@ -436,6 +477,51 @@ export function ChipTable({
                 onClick={confirmTransfer}
               >
                 确认转出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {buyInOpen && (
+        <div className="confirm-overlay" role="dialog" aria-label="全员买入">
+          <div className="confirm-box transfer-box">
+            <p className="transfer-title">全员买入</p>
+            <label className="transfer-amount-label">
+              金额（任意正整数）
+              <input
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                className="transfer-amount-input buyin-amount-input"
+                value={buyInAmount}
+                onChange={(e) => setBuyInAmount(e.target.value)}
+                autoFocus
+              />
+            </label>
+            {buyInValid && (
+              <div className="transfer-preview" aria-live="polite">
+                <p>全员余额将设为 {buyInNum}</p>
+              </div>
+            )}
+            <div className="cta-row">
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  setBuyInOpen(false)
+                  setBuyInAmount('')
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={confirmBuyIn}
+              >
+                确认买入
               </button>
             </div>
           </div>

@@ -62,6 +62,9 @@ function denomKey(
     const ids = [...(extra?.targetSeatIds ?? [])].sort().join(',')
     return `transfer:${ids}:${extra?.amount ?? ''}`
   }
+  if (type === 'uniformBuyIn') {
+    return `uniformBuyIn:${extra?.amount ?? ''}`
+  }
   return null
 }
 
@@ -144,7 +147,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     (op: ChipOp, base: TableSnapshot): TableSnapshot => {
       const seats = base.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) }))
       const target = seats.find((s) => s.seatId === op.targetSeatId)
-      if (!target && op.type !== 'resetTable' && op.type !== 'transfer') return base
+      if (
+        !target &&
+        op.type !== 'resetTable' &&
+        op.type !== 'transfer' &&
+        op.type !== 'uniformBuyIn'
+      ) {
+        return base
+      }
       let ledger = [...(base.ledger ?? [])]
 
       switch (op.type) {
@@ -207,6 +217,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             t.balance += amount
             ledger.push({
               id: `led_opt_${op.opId}_${t.seatId}`,
+              kind: 'transfer',
               fromSeatId: sender.seatId,
               fromName: sender.name,
               toSeatId: t.seatId,
@@ -215,6 +226,24 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
               at,
             })
           }
+          break
+        }
+        case 'uniformBuyIn': {
+          const amount = op.amount ?? 0
+          if (!Number.isInteger(amount) || amount <= 0) return base
+          for (const s of seats) {
+            s.balance = amount
+          }
+          ledger.push({
+            id: `led_opt_${op.opId}_buyin`,
+            kind: 'uniformBuyIn',
+            fromSeatId: op.fromSeatId,
+            fromName: '',
+            toSeatId: '',
+            toName: '',
+            amount,
+            at: Date.now(),
+          })
           break
         }
       }

@@ -11,7 +11,8 @@
     "lint": "oxlint",
     "preview": "vite preview --host 127.0.0.1 --port 45321",
     "test:relay": "node scripts/check-relay.mjs",
-    "test:transfer": "node scripts/test-transfer.mjs"
+    "test:transfer": "node scripts/test-transfer.mjs",
+    "test:buyin": "node scripts/test-buyin.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",
