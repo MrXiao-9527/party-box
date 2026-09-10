@@ -63,9 +63,14 @@ try {
     const el = document.querySelector('.hero-balance')
     return el && Number(el.textContent) >= 100
   })
+  await new Promise((r) => setTimeout(r, 300))
 
   // Open overflow → 全员买入
-  await page.click('button[aria-label="菜单"]')
+  await page.waitForSelector('button[aria-label="菜单"]')
+  await page.evaluate(() => {
+    document.querySelector('button[aria-label="菜单"]')?.click()
+  })
+  await page.waitForSelector('.menu-sheet')
   await page.waitForFunction(() =>
     [...document.querySelectorAll('.menu-sheet button')].some(
       (b) => (b.textContent || '').trim() === '全员买入',
@@ -86,6 +91,7 @@ try {
   await shot('buyin-invalid-toast')
   // Dialog still open; clear and enter 50
   await page.click('.buyin-amount-input', { clickCount: 3 })
+  await page.keyboard.press('Backspace')
   await page.type('.buyin-amount-input', '50')
   await page.waitForFunction(() =>
     (document.querySelector('.transfer-preview')?.textContent || '').includes(
