@@ -88,12 +88,14 @@ export function loadRoom(roomCode: string): PersistedRoom | null {
   }
 }
 
-export function saveRoom(data: PersistedRoom): void {
+/** Persist and return normalized room (always includes numeric `table.pot`). */
+export function saveRoom(data: PersistedRoom): PersistedRoom {
   const normalized = normalizeRoom(data)
   localStorage.setItem(
     ROOM_PREFIX + normalized.room.roomCode.toUpperCase(),
     JSON.stringify(normalized),
   )
+  return normalized
 }
 
 export function deleteRoom(roomCode: string): void {
@@ -622,7 +624,8 @@ export function applyChipOp(op: ChipOp): {
       break
     }
     case 'potIn': {
-      const amount = op.amount ?? 0
+      // Coerce in case JSON/transport delivered amount as numeric string.
+      const amount = Number(op.amount)
       if (!Number.isInteger(amount) || amount <= 0) {
         return fail(ACK_REASONS.POSITIVE_INT)
       }
@@ -648,7 +651,7 @@ export function applyChipOp(op: ChipOp): {
     }
     case 'potOut': {
       if (!isHost) return fail(ACK_REASONS.NOT_HOST)
-      const amount = op.amount ?? 0
+      const amount = Number(op.amount)
       if (!Number.isInteger(amount) || amount <= 0) {
         return fail(ACK_REASONS.POSITIVE_INT)
       }
@@ -671,7 +674,7 @@ export function applyChipOp(op: ChipOp): {
     }
     case 'potSplit': {
       if (!isHost) return fail(ACK_REASONS.NOT_HOST)
-      const amount = op.amount ?? 0
+      const amount = Number(op.amount)
       if (!Number.isInteger(amount) || amount <= 0) {
         return fail(ACK_REASONS.POSITIVE_INT)
       }

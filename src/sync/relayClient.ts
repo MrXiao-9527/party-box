@@ -67,9 +67,9 @@ async function api<T>(
 
 function cache(data: PersistedRoom | null | undefined): PersistedRoom | null {
   if (!data) return null
-  saveRoom(data)
-  notifyRoomUpdate(data.room.roomCode, data)
-  return data
+  const normalized = saveRoom(data)
+  notifyRoomUpdate(normalized.room.roomCode, normalized)
+  return normalized
 }
 
 const ROOM_EVENT = 'party-box:relay-room'
@@ -346,9 +346,14 @@ export function subscribeRelayRoom(
           data: PersistedRoom | null
         }
         if (msg.type !== 'room') return
-        if (msg.data) saveRoom(msg.data)
-        notifyRoomUpdate(code, msg.data)
-        onUpdate?.(msg.data)
+        if (msg.data) {
+          const normalized = saveRoom(msg.data)
+          notifyRoomUpdate(code, normalized)
+          onUpdate?.(normalized)
+        } else {
+          notifyRoomUpdate(code, null)
+          onUpdate?.(null)
+        }
       } catch {
         /* ignore */
       }

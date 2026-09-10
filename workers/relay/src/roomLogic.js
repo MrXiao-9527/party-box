@@ -208,6 +208,11 @@ export function createRoomStore() {
           { seatId, name, isHost: true, locked: false, balance: 0 },
           ...existing.table.seats.map((s) => ({ ...s, isHost: false })),
         ],
+        // Same host TableSnapshot as seats — never drop pot/ledger on rebuild.
+        pot: normalizePot(existing.table.pot),
+        ledger: Array.isArray(existing.table.ledger)
+          ? existing.table.ledger
+          : [],
       },
     })
   }
@@ -552,7 +557,8 @@ export function createRoomStore() {
         break
       }
       case 'potIn': {
-        const amount = op.amount ?? 0
+        // Coerce in case JSON/transport delivered amount as numeric string.
+        const amount = Number(op.amount)
         if (!Number.isInteger(amount) || amount <= 0) {
           return fail(ACK_REASONS.POSITIVE_INT)
         }
@@ -578,7 +584,7 @@ export function createRoomStore() {
       }
       case 'potOut': {
         if (!isHost) return fail(ACK_REASONS.NOT_HOST)
-        const amount = op.amount ?? 0
+        const amount = Number(op.amount)
         if (!Number.isInteger(amount) || amount <= 0) {
           return fail(ACK_REASONS.POSITIVE_INT)
         }
@@ -601,7 +607,7 @@ export function createRoomStore() {
       }
       case 'potSplit': {
         if (!isHost) return fail(ACK_REASONS.NOT_HOST)
-        const amount = op.amount ?? 0
+        const amount = Number(op.amount)
         if (!Number.isInteger(amount) || amount <= 0) {
           return fail(ACK_REASONS.POSITIVE_INT)
         }
