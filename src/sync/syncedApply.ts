@@ -11,28 +11,16 @@ export function sanitizeTableSnapshot(snap: TableSnapshot): TableSnapshot {
 }
 
 /**
- * Whether an incoming host snapshot may replace the current one.
- * Stale / same-age-while-pending must be rejected — callers must also
- * skip the accompanying room payload when this returns false.
+ * Product lock: snapshots may only apply when newer by snapshotAt.
+ * Never overwrite newer state with older/equal lobby or table.
+ * Callers must gate setRoom with this same rule (see applySyncedRoom).
  */
 export function canApplyHostSnapshot(
   currentSnapshotAt: number | null | undefined,
   incomingSnapshotAt: number,
-  opts?: { force?: boolean; hasPendingOps?: boolean },
+  opts?: { force?: boolean },
 ): boolean {
   if (opts?.force) return true
-  if (
-    currentSnapshotAt != null &&
-    incomingSnapshotAt < currentSnapshotAt
-  ) {
-    return false
-  }
-  if (
-    currentSnapshotAt != null &&
-    opts?.hasPendingOps &&
-    incomingSnapshotAt <= currentSnapshotAt
-  ) {
-    return false
-  }
-  return true
+  if (currentSnapshotAt == null) return true
+  return incomingSnapshotAt > currentSnapshotAt
 }
