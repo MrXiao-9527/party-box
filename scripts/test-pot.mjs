@@ -352,4 +352,49 @@ assert(pot() === 0, 'pot starts 0')
   assert(pot() === beforePot, 'pot untouched by transfer')
 }
 
+// 12) pot survives member-connected / phase / seatAdjust (same TableSnapshot)
+{
+  op({ opId: 'pi_persist', type: 'potIn', amount: 8, targetSeatId: hostId })
+  const before = pot()
+  assert(before >= 8, 'seed pot for persist')
+  store.setMemberConnected(code, aId, false)
+  store.setMemberConnected(code, aId, true)
+  store.setPhase(code, 'playing')
+  op({ opId: 'adj_persist', type: '+denom', denom: 1, targetSeatId: hostId })
+  assert(pot() === before, 'pot unchanged across non-pot mutations')
+  const snap = store.get(code).table
+  assert(typeof snap.pot === 'number' && Number.isInteger(snap.pot), 'pot always numeric on snapshot')
+}
+
+// 13) Numeric-string amount (JSON quirk) still settles potIn
+{
+  const before = pot()
+  const beforeA = bal(aId)
+  const r = store.applyChipOp({
+    opId: 'pi_str',
+    roomCode: code,
+    fromSeatId: aId,
+    targetSeatId: aId,
+    type: 'potIn',
+    amount: /** @type {any} */ ('5'),
+  })
+  assert(r.ack.ok, 'potIn string amount ok')
+  assert(pot() === before + 5, 'pot +5 from string amount')
+  assert(bal(aId) === beforeA - 5, 'seat -5 from string amount')
+}
+
+// 14) Guest potIn never 「操作无效」 when unlocked + funded
+{
+  const r = store.applyChipOp({
+    opId: 'pi_guest_ok',
+    roomCode: code,
+    fromSeatId: bId,
+    targetSeatId: bId,
+    type: 'potIn',
+    amount: 2,
+  })
+  assert(r.ack.ok, 'guest potIn ok')
+  assert(r.ack.reason !== ACK_REASONS.INVALID, 'not 操作无效')
+}
+
 console.log('公共锅验 QA gates: OK')
