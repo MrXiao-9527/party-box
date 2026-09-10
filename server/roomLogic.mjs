@@ -270,10 +270,11 @@ export function createRoomStore() {
   function setPhase(roomCode, phase) {
     const existing = get(roomCode)
     if (!existing) return null
+    const snapshotAt = Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
     return set({
       ...existing,
       room: { ...existing.room, phase, maxSeats: MAX_SEATS },
-      table: { ...existing.table, snapshotAt: Date.now() },
+      table: { ...existing.table, snapshotAt },
     })
   }
 

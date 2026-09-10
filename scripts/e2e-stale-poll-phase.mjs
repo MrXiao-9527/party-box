@@ -57,28 +57,32 @@ async function uiPhase(page) {
   }))
 }
 
-/** Inject older/equal lobby payload via same path as poll/WS. */
-async function injectStaleLobby(page, { equalAge = false } = {}) {
-  return page.evaluate((equal) => {
-    const code = location.pathname.replace(/^\/r\//, '').toUpperCase()
-    const raw = localStorage.getItem(`party-box:room:${code}`)
-    if (!raw) return { ok: false, reason: 'no local room' }
-    const data = JSON.parse(raw)
-    const at = data.table.snapshotAt ?? 1
-    const stale = {
-      room: { ...data.room, phase: 'lobby' },
-      table: {
-        ...data.table,
-        snapshotAt: equal ? at : Math.max(0, at - 10_000),
-      },
-    }
-    window.dispatchEvent(
-      new CustomEvent('party-box:relay-room', {
-        detail: { roomCode: code, data: stale },
-      }),
-    )
-    return { ok: true, currentAt: at, staleAt: stale.table.snapshotAt }
-  }, equalAge)
+/** Inject older/equal/newer lobby payload via same path as poll/WS. */
+async function injectStaleLobby(page, { equalAge = false, newer = false } = {}) {
+  return page.evaluate(
+    ({ equal, newerAt }) => {
+      const code = location.pathname.replace(/^\/r\//, '').toUpperCase()
+      const raw = localStorage.getItem(`party-box:room:${code}`)
+      if (!raw) return { ok: false, reason: 'no local room' }
+      const data = JSON.parse(raw)
+      const at = data.table.snapshotAt ?? 1
+      const staleAt = newerAt ? at + 10_000 : equal ? at : Math.max(0, at - 10_000)
+      const stale = {
+        room: { ...data.room, phase: 'lobby' },
+        table: {
+          ...data.table,
+          snapshotAt: staleAt,
+        },
+      }
+      window.dispatchEvent(
+        new CustomEvent('party-box:relay-room', {
+          detail: { roomCode: code, data: stale },
+        }),
+      )
+      return { ok: true, currentAt: at, staleAt: stale.table.snapshotAt }
+    },
+    { equal: equalAge, newerAt: newer },
+  )
 }
 
 try {
@@ -147,11 +151,13 @@ try {
     throw new Error('FAIL: guest not on ChipTable after 开桌')
   }
 
-  // Stale older + equal-age lobby inject on both ends
+  // Stale older + equal-age + newer lobby inject on both ends
   console.log('host stale', await injectStaleLobby(host))
   console.log('guest stale', await injectStaleLobby(guest))
   console.log('host equal', await injectStaleLobby(host, { equalAge: true }))
   console.log('guest equal', await injectStaleLobby(guest, { equalAge: true }))
+  console.log('host newer lobby', await injectStaleLobby(host, { newer: true }))
+  console.log('guest newer lobby', await injectStaleLobby(guest, { newer: true }))
   await new Promise((r) => setTimeout(r, 1000))
 
   h = await uiPhase(host)

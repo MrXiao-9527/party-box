@@ -314,10 +314,11 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
 export function setPhase(roomCode: string, phase: Phase): PersistedRoom | null {
   const existing = loadRoom(roomCode)
   if (!existing) return null
+  const snapshotAt = Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
   const data: PersistedRoom = {
     ...existing,
     room: { ...existing.room, phase, maxSeats: MAX_SEATS },
-    table: { ...existing.table, snapshotAt: Date.now() },
+    table: { ...existing.table, snapshotAt },
   }
   saveRoom(data)
   return data
