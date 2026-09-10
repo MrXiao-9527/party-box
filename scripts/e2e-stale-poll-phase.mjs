@@ -1,7 +1,8 @@
 /**
- * Verify stale lobby relay payload cannot revert ChipTable after 开桌.
- * Covers poll/WS race: setRoom was previously applied even when snapshot rejected.
- * Requires: npm run dev:all (vite :45321 + relay :45322)
+ * Product lock acceptance:
+ * 1) Only newer snapshotAt applies (room+table gated together)
+ * 2) After 开桌, dual-end MUST stay on ChipTable — kickback to 「等候开桌」 = FAIL
+ * Requires: npm run dev:all
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
@@ -17,6 +18,19 @@ const browser = await puppeteer.launch({
   args: ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
   defaultViewport: { width: 390, height: 844 },
 })
+
+async function prep(page) {
+  await page.setRequestInterception(true)
+  page.on('request', (req) => {
+    const url = req.url()
+    if (url.includes('fonts.googleapis') || url.includes('fonts.gstatic')) {
+      req.abort()
+      return
+    }
+    req.continue()
+  })
+  page.setDefaultTimeout(20_000)
+}
 
 async function clickText(page, text) {
   await page.waitForFunction(
@@ -35,6 +49,38 @@ async function clickText(page, text) {
   }, text)
 }
 
+async function uiPhase(page) {
+  return page.evaluate(() => ({
+    hasTable: !!document.querySelector('.page.table'),
+    hasLobby: !!document.querySelector('.page.lobby'),
+    waitLobby: document.body.innerText.includes('等候开桌'),
+  }))
+}
+
+/** Inject older/equal lobby payload via same path as poll/WS. */
+async function injectStaleLobby(page, { equalAge = false } = {}) {
+  return page.evaluate((equal) => {
+    const code = location.pathname.replace(/^\/r\//, '').toUpperCase()
+    const raw = localStorage.getItem(`party-box:room:${code}`)
+    if (!raw) return { ok: false, reason: 'no local room' }
+    const data = JSON.parse(raw)
+    const at = data.table.snapshotAt ?? 1
+    const stale = {
+      room: { ...data.room, phase: 'lobby' },
+      table: {
+        ...data.table,
+        snapshotAt: equal ? at : Math.max(0, at - 10_000),
+      },
+    }
+    window.dispatchEvent(
+      new CustomEvent('party-box:relay-room', {
+        detail: { roomCode: code, data: stale },
+      }),
+    )
+    return { ok: true, currentAt: at, staleAt: stale.table.snapshotAt }
+  }, equalAge)
+}
+
 try {
   for (let i = 0; i < 40; i++) {
     try {
@@ -46,27 +92,40 @@ try {
     await new Promise((r) => setTimeout(r, 250))
   }
 
-  const page = await browser.newPage()
-  await page.setRequestInterception(true)
-  page.on('request', (req) => {
-    const url = req.url()
-    if (url.includes('fonts.googleapis') || url.includes('fonts.gstatic')) {
-      req.abort()
-      return
-    }
-    req.continue()
-  })
+  const hostCtx = await browser.createBrowserContext()
+  const guestCtx = await browser.createBrowserContext()
+  const host = await hostCtx.newPage()
+  const guest = await guestCtx.newPage()
+  await prep(host)
+  await prep(guest)
 
-  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('.brand')
-  await clickText(page, '开一桌')
-  await page.waitForSelector('.nickname-card input')
-  await page.type('.nickname-card input', '甲')
-  await clickText(page, '进入')
-  await page.waitForSelector('.page.lobby')
+  await host.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await host.waitForSelector('.brand')
+  await clickText(host, '开一桌')
+  await host.waitForSelector('.nickname-card input')
+  await host.type('.nickname-card input', '甲')
+  await clickText(host, '进入')
+  await host.waitForSelector('.page.lobby')
+  const code = await host.evaluate(() =>
+    location.pathname.replace(/^\/r\//, '').toUpperCase(),
+  )
+  console.log('code', code)
 
-  // Rapid 开桌 clicks (bug report: host clicks repeatedly)
-  await page.evaluate(() => {
+  await guest.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await guest.waitForSelector('.brand')
+  await clickText(guest, '加入')
+  await guest.waitForSelector('.join-panel input')
+  await guest.type('.join-panel input', code)
+  await clickText(guest, '进入')
+  await guest.waitForSelector('.nickname-card input')
+  await guest.type('.nickname-card input', '乙')
+  await clickText(guest, '进入')
+  await guest.waitForSelector('.page.lobby')
+
+  await host.waitForFunction(() => document.body.innerText.includes('乙'))
+
+  // Rapid 开桌
+  await host.evaluate(() => {
     const b = [...document.querySelectorAll('button')].find(
       (el) => (el.textContent || '').trim() === '开桌',
     )
@@ -74,61 +133,48 @@ try {
     b.click()
     b.click()
   })
-  await page.waitForSelector('.page.table', { timeout: 10_000 })
 
-  const before = await page.evaluate(() => ({
-    hasTable: !!document.querySelector('.page.table'),
-    hasLobby: !!document.querySelector('.page.lobby'),
-  }))
-  console.log('after 开桌', before)
+  await host.waitForSelector('.page.table', { timeout: 10_000 })
+  await guest.waitForSelector('.page.table', { timeout: 12_000 })
 
-  // Inject stale lobby payload the same way late poll/WS would
-  // (onRelayRoomUpdate → applySyncedRoom). Snapshot older than current.
-  const injected = await page.evaluate(() => {
-    const code = location.pathname.replace(/^\/r\//, '').toUpperCase()
-    const key = `party-box:room:${code}`
-    const raw = localStorage.getItem(key)
-    if (!raw) return { ok: false, reason: 'no local room' }
-    const data = JSON.parse(raw)
-    const stale = {
-      room: { ...data.room, phase: 'lobby' },
-      table: {
-        ...data.table,
-        snapshotAt: Math.max(0, (data.table.snapshotAt ?? 1) - 10_000),
-      },
-    }
-    window.dispatchEvent(
-      new CustomEvent('party-box:relay-room', {
-        detail: { roomCode: code, data: stale },
-      }),
-    )
-    return {
-      ok: true,
-      currentAt: data.table.snapshotAt,
-      staleAt: stale.table.snapshotAt,
-      currentPhase: data.room.phase,
-    }
+  let h = await uiPhase(host)
+  let g = await uiPhase(guest)
+  console.log('dual after 开桌', { host: h, guest: g })
+  if (!h.hasTable || h.hasLobby || h.waitLobby) {
+    throw new Error('FAIL: host not on ChipTable after 开桌')
+  }
+  if (!g.hasTable || g.hasLobby || g.waitLobby) {
+    throw new Error('FAIL: guest not on ChipTable after 开桌')
+  }
+
+  // Stale older + equal-age lobby inject on both ends
+  console.log('host stale', await injectStaleLobby(host))
+  console.log('guest stale', await injectStaleLobby(guest))
+  console.log('host equal', await injectStaleLobby(host, { equalAge: true }))
+  console.log('guest equal', await injectStaleLobby(guest, { equalAge: true }))
+  await new Promise((r) => setTimeout(r, 1000))
+
+  h = await uiPhase(host)
+  g = await uiPhase(guest)
+  console.log('dual after stale inject', { host: h, guest: g })
+
+  await host.screenshot({
+    path: `${ART}/dual_host_still_table.png`,
+    fullPage: true,
   })
-  console.log('injected stale', injected)
-
-  await new Promise((r) => setTimeout(r, 800))
-
-  const after = await page.evaluate(() => ({
-    hasTable: !!document.querySelector('.page.table'),
-    hasLobby: !!document.querySelector('.page.lobby'),
-    bodyHasWait: document.body.innerText.includes('等候开桌'),
-  }))
-  console.log('after stale inject', after)
-
-  await page.screenshot({
-    path: `${ART}/stale_poll_phase_still_table.png`,
+  await guest.screenshot({
+    path: `${ART}/dual_guest_still_table.png`,
     fullPage: true,
   })
 
-  if (!after.hasTable || after.hasLobby || after.bodyHasWait) {
-    throw new Error('stale lobby payload reverted UI to lobby')
+  if (!h.hasTable || h.hasLobby || h.waitLobby) {
+    throw new Error('FAIL: host kicked back to 等候开桌')
   }
-  console.log('ok: stale lobby inject did not revert playing → lobby')
+  if (!g.hasTable || g.hasLobby || g.waitLobby) {
+    throw new Error('FAIL: guest kicked back to 等候开桌')
+  }
+
+  console.log('ok: dual-end ChipTable; stale/equal lobby cannot revert')
 } catch (e) {
   console.error(e)
   process.exitCode = 1

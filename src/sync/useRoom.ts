@@ -118,10 +118,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         !canApplyHostSnapshot(
           snapshotRef.current?.snapshotAt,
           sanitized.snapshotAt,
-          {
-            force: opts?.force,
-            hasPendingOps: pendingOpsRef.current.size > 0,
-          },
+          { force: opts?.force },
         )
       ) {
         return false
@@ -134,9 +131,9 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   )
 
   /**
-   * Room + table must move together. If the table snapshot is rejected as
-   * stale, skip the accompanying room payload (avoids poll/WS races that
-   * would revert phase playing → lobby after 开桌).
+   * Room + table share one snapshotAt gate: only apply when newer (or force).
+   * Rejecting the table also skips setRoom — stale poll/WS cannot revert
+   * phase playing → lobby after 开桌.
    */
   const applySyncedRoom = useCallback(
     (data: PersistedRoom, opts?: { force?: boolean }) => {

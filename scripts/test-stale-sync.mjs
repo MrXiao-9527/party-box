@@ -1,5 +1,5 @@
 /**
- * Regression: stale relay poll/WS must not apply room when table snapshot is rejected.
+ * Product lock: snapshots only when newer; setRoom gated with same rule.
  * Run: node --experimental-strip-types scripts/test-stale-sync.mjs
  */
 import { canApplyHostSnapshot } from '../src/sync/syncedApply.ts'
@@ -8,7 +8,7 @@ function assert(cond, msg) {
   if (!cond) throw new Error(msg)
 }
 
-/** Simulate applySyncedRoom gate: skip room when snapshot rejected. */
+/** Simulate applySyncedRoom: skip room when snapshot rejected. */
 function applySynced(currentAt, incoming, opts) {
   if (!canApplyHostSnapshot(currentAt, incoming.table.snapshotAt, opts)) {
     return { applied: false, phase: null }
@@ -18,13 +18,11 @@ function applySynced(currentAt, incoming, opts) {
 
 // 1) After 开桌 (playing @ 200), late lobby poll (@ 100) must not revert phase
 {
-  let phase = 'playing'
-  let at = 200
-  const stale = {
+  const phase = 'playing'
+  const r = applySynced(200, {
     room: { phase: 'lobby' },
     table: { snapshotAt: 100 },
-  }
-  const r = applySynced(at, stale)
+  })
   assert(!r.applied, 'stale poll rejected')
   assert(phase === 'playing', 'phase stays playing')
 }
@@ -38,7 +36,16 @@ function applySynced(currentAt, incoming, opts) {
   assert(!r.applied, 'stale WS room update rejected')
 }
 
-// 3) Fresh poll after playing still applies
+// 3) Equal-age must NOT overwrite (only newer)
+{
+  const r = applySynced(200, {
+    room: { phase: 'lobby' },
+    table: { snapshotAt: 200 },
+  })
+  assert(!r.applied, 'equal-age lobby rejected')
+}
+
+// 4) Fresh poll after playing still applies
 {
   const r = applySynced(200, {
     room: { phase: 'playing' },
@@ -47,7 +54,7 @@ function applySynced(currentAt, incoming, opts) {
   assert(r.applied && r.phase === 'playing' && r.at === 250, 'fresh poll ok')
 }
 
-// 4) startPlaying / forced updates still apply both even if older clock
+// 5) startPlaying / forced updates still apply both
 {
   const r = applySynced(
     300,
@@ -57,14 +64,12 @@ function applySynced(currentAt, incoming, opts) {
   assert(r.applied && r.phase === 'playing', 'force applies room+table')
 }
 
-// 5) Pending ops: same-age echo rejected (room gated too)
+// 6) First snapshot (no current) applies
 {
-  const r = applySynced(
-    200,
-    { room: { phase: 'playing' }, table: { snapshotAt: 200 } },
-    { hasPendingOps: true },
+  assert(
+    canApplyHostSnapshot(null, 1),
+    'null current accepts first snapshot',
   )
-  assert(!r.applied, 'pending same-age rejected')
 }
 
-console.log('ok: stale sync gate — room skipped when snapshot rejected')
+console.log('ok: only-newer snapshotAt gate — room skipped when not newer')
