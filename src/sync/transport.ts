@@ -8,7 +8,7 @@ import {
 
 /**
  * Transport abstraction. LocalStore is the solo/dev path;
- * SharedRelay is used when VITE_RELAY_URL is set (cross-device rooms).
+ * RemoteStore is used when VITE_RELAY_URL is set (cross-device rooms).
  */
 export interface ChipTransport {
   sendOp(op: ChipOp): Promise<ChipAck>
@@ -79,10 +79,11 @@ export class LocalStoreTransport implements ChipTransport {
 }
 
 /**
- * Shared relay transport — server holds RoomState; chip ops are
- * host-authoritative on the relay (same rules as LocalStore).
+ * Remote shared-relay transport — Cloudflare Worker DO / Node relay holds RoomState.
+ * Chip ops are host-authoritative on the relay (same rules as LocalStore).
+ * Enabled when VITE_RELAY_URL is set.
  */
-export class SharedRelayTransport implements ChipTransport {
+export class RemoteStoreTransport implements ChipTransport {
   private offline = false
 
   setOffline(offline: boolean): void {
@@ -122,6 +123,9 @@ export class SharedRelayTransport implements ChipTransport {
   }
 }
 
+/** @deprecated alias — use RemoteStoreTransport */
+export const SharedRelayTransport = RemoteStoreTransport
+
 /**
  * Stub WebRTC DataChannel transport — interface only.
  * Multiplayer peer sync is intentionally not implemented in this slice.
@@ -145,8 +149,10 @@ export class WebRtcDataChannelTransport implements ChipTransport {
 }
 
 export const localTransport = new LocalStoreTransport()
-export const relayTransport = new SharedRelayTransport()
+export const remoteTransport = new RemoteStoreTransport()
+/** @deprecated use remoteTransport */
+export const relayTransport = remoteTransport
 
 export const defaultTransport: ChipTransport = isRelayEnabled()
-  ? relayTransport
+  ? remoteTransport
   : localTransport
