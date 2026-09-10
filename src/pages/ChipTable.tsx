@@ -378,9 +378,11 @@ export function ChipTable({
           >
             重置整桌
           </button>
-          <button type="button" onClick={openBuyIn} disabled={!isHost}>
-            全员买入
-          </button>
+          {isHost && (
+            <button type="button" onClick={openBuyIn}>
+              全员买入
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -483,7 +485,7 @@ export function ChipTable({
         </div>
       )}
 
-      {buyInOpen && (
+      {buyInOpen && isHost && (
         <div className="confirm-overlay" role="dialog" aria-label="全员买入">
           <div className="confirm-box transfer-box">
             <p className="transfer-title">全员买入</p>
