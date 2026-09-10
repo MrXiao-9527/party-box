@@ -14,10 +14,20 @@ export type ChipOpType =
   | 'unlock'
   | 'transfer'
   | 'uniformBuyIn'
+  | 'potIn'
+  | 'potOut'
+  | 'potSplit'
   | 'undoLast'
 
-/** Ledger row kind — omit / transfer = seat→seat; seatAdjust = 本席加减; uniformBuyIn / undo. */
-export type LedgerKind = 'transfer' | 'seatAdjust' | 'uniformBuyIn' | 'undo'
+/** Ledger row kind — omit / transfer = seat→seat; seatAdjust = 本席加减; pot*; uniformBuyIn / undo. */
+export type LedgerKind =
+  | 'transfer'
+  | 'seatAdjust'
+  | 'uniformBuyIn'
+  | 'potIn'
+  | 'potOut'
+  | 'potSplit'
+  | 'undo'
 
 /** Successful chip ledger row — failed attempts never appear. */
 export interface LedgerEntry {
@@ -29,13 +39,16 @@ export interface LedgerEntry {
   toSeatId: string
   toName: string
   /**
-   * transfer / uniformBuyIn: positive amount.
+   * transfer / uniformBuyIn / potIn / potOut: positive amount.
+   * potSplit: per-person floor share.
    * seatAdjust: signed delta (买码 +, 下分 −).
    */
   amount: number
   at: number
   /** uniformBuyIn: balances before set — required to reverse on undo. */
   prevBalances?: { seatId: string; balance: number }[]
+  /** potSplit: seats that received the floor share (for undo). */
+  splitSeatIds?: string[]
   /** undo rows: id of the ledger entry this undo reversed. */
   undoneId?: string
 }
@@ -73,7 +86,7 @@ export interface ChipOp {
   targetSeatId: string
   type: ChipOpType
   denom?: number
-  /** Transfer / uniformBuyIn: positive integer amount. */
+  /** Transfer / uniformBuyIn / potIn / potOut / potSplit: positive integer amount. */
   amount?: number
   /** Transfer one-to-many targets. If omitted, [targetSeatId]. */
   targetSeatIds?: string[]
@@ -81,6 +94,7 @@ export interface ChipOp {
 
 /** Human summary of a ledger row (for preview / 撤销 · … / 流水文案).
  * seatAdjust 产品文案：`昵称 +N` / `昵称 -N`（例：「甲 +10」「甲 -5」）.
+ * pot：`甲 → 锅 +N` / `锅 → 乙 +N` / `锅均分 · 各 +N`.
  */
 export function ledgerEntrySummary(entry: LedgerEntry): string {
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
@@ -88,6 +102,15 @@ export function ledgerEntrySummary(entry: LedgerEntry): string {
   if (entry.kind === 'seatAdjust') {
     const n = entry.amount
     return `${entry.fromName} ${n > 0 ? '+' : ''}${n}`
+  }
+  if (entry.kind === 'potIn') {
+    return `${entry.fromName} → 锅 +${entry.amount}`
+  }
+  if (entry.kind === 'potOut') {
+    return `锅 → ${entry.toName} +${entry.amount}`
+  }
+  if (entry.kind === 'potSplit') {
+    return `锅均分 · 各 +${entry.amount}`
   }
   return `${entry.fromName}→${entry.toName} +${entry.amount}`
 }
@@ -128,7 +151,9 @@ export interface TableSnapshot {
   snapshotAt: number
   seats: SnapshotSeat[]
   denoms: number[]
-  /** In-table ledger (settles: seat ±, transfers, buy-in, undos). */
+  /** Independent public pot balance (not a seat field). Older snapshots → 0. */
+  pot: number
+  /** In-table ledger (settles: seat ±, transfers, pot, buy-in, undos). */
   ledger: LedgerEntry[]
 }
 
@@ -149,6 +174,7 @@ export const ACK_REASONS = {
   TABLE_FULL: '本桌已满（最多8人）',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
   INSUFFICIENT: '余额不足',
+  POT_INSUFFICIENT: '锅内不足',
   SELF_TRANSFER: '不能转给自己',
   POSITIVE_INT: '请输入正整数',
   NOTHING_TO_UNDO: '没有可撤销的记录',

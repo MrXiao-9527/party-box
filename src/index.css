@@ -525,6 +525,73 @@ button.seat {
   color: var(--text-secondary);
 }
 
+.pot-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius);
+  background: linear-gradient(
+    135deg,
+    rgba(212, 168, 75, 0.14),
+    rgba(242, 244, 247, 0.04)
+  );
+  border: 1px solid rgba(212, 168, 75, 0.28);
+}
+
+.pot-meta {
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.pot-label {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.pot-balance {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.pot-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.pot-mode-row {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0 0 0.75rem;
+}
+
+.pot-mode-btn {
+  flex: 1;
+  border: 1px solid rgba(242, 244, 247, 0.16);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text-secondary);
+  padding: 0.55rem 0.4rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+}
+
+.pot-mode-btn.on {
+  color: var(--text);
+  border-color: rgba(212, 168, 75, 0.55);
+  background: rgba(212, 168, 75, 0.12);
+}
+
+.pot-target-select {
+  appearance: none;
+}
+
 .transfer-box .transfer-title {
   margin: 0 0 0.35rem;
   font-family: var(--font-display);
