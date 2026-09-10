@@ -17,6 +17,7 @@ import {
 import { MAX_SEATS, parseRoomCode } from '../types'
 import {
   decideRestore,
+  hasHadSeat,
   loadIdentity,
   newTabId,
   openSeatTabChannel,
@@ -149,7 +150,7 @@ export function RoomPage() {
 
       if (!roomData) {
         roomApi.pushToast(RESTORE_COPY.ROOM_GONE)
-        saveIdentity(null)
+        saveIdentity(null, roomCode)
         navigate('/', { replace: true })
         setGate({ type: 'gone' })
         return
@@ -165,11 +166,12 @@ export function RoomPage() {
         room: roomView,
         identity,
         seatHeldByOtherTab,
+        hadPriorSeat: hasHadSeat(roomCode),
       })
 
       if (decision.kind === 'room_gone') {
         roomApi.pushToast(decision.toast)
-        saveIdentity(null)
+        saveIdentity(null, roomCode)
         navigate('/', { replace: true })
         setGate({ type: 'gone' })
         return
@@ -222,7 +224,12 @@ export function RoomPage() {
         return
       }
 
-      // identity_lost
+      if (decision.kind === 'fresh_join') {
+        setGate({ type: 'nick' })
+        return
+      }
+
+      // identity_lost — prior seat mark exists but identity key is gone
       roomApi.pushToast(decision.toast)
       setGate({ type: 'nick', notice: decision.toast })
     }
@@ -296,7 +303,7 @@ export function RoomPage() {
 
   const exitRoom = () => {
     if (roomApi.isHost) deleteRoom(roomCode)
-    saveIdentity(null)
+    saveIdentity(null, roomCode)
     roomApi.clearSession()
     roomApi.setOffline(false)
     holdingSeatRef.current = null

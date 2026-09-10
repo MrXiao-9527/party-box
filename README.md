@@ -35,7 +35,8 @@ localStorage `party-box:identity`：`{ roomCode, seatId, name, role }`
 |------|------|
 | seatId 仍在房 | 静默恢复（余额/桌主/暂停态） |
 | 原席被占 | toast「原席被占，新坐一席」→ 昵称预填 → 新 seatId |
-| 无 identity | toast「本地身份丢失，已为你新坐一席」 |
+| 首次进房（从未存过该房 seatId） | 静默进昵称门，无 toast |
+| 曾有该房 seatId 但 identity 丢失 | toast「本地身份丢失，已为你新坐一席」 |
 | 房间不存在 | 回首页 +「房间已结束」 |
 | 双标签 | 第二标签「该席已在其他标签打开」+「接管」（BroadcastChannel kick）；旧标签只读「已在其他标签接管」 |
 

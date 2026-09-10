@@ -23,6 +23,7 @@ export type RestoreDecision =
       identity: SeatIdentity
     }
   | { kind: 'identity_lost'; toast: string }
+  | { kind: 'fresh_join' }
   | { kind: 'room_gone'; toast: string }
   | {
       kind: 'other_tab'
@@ -39,6 +40,8 @@ export const RESTORE_COPY = {
 } as const
 
 export const IDENTITY_KEY = 'party-box:identity'
+/** Room-scoped mark that this browser once held a seatId for the room. */
+export const HAD_SEAT_PREFIX = 'party-box:had-seat:'
 export const TAB_CHANNEL = 'party-box:seat-tab'
 
 export interface TabMessage {
@@ -46,6 +49,34 @@ export interface TabMessage {
   roomCode: string
   seatId: string
   tabId: string
+}
+
+export function hadSeatKey(roomCode: string): string {
+  return `${HAD_SEAT_PREFIX}${roomCode.toUpperCase()}`
+}
+
+export function hasHadSeat(roomCode: string): boolean {
+  try {
+    return localStorage.getItem(hadSeatKey(roomCode)) !== null
+  } catch {
+    return false
+  }
+}
+
+export function markHadSeat(roomCode: string): void {
+  try {
+    localStorage.setItem(hadSeatKey(roomCode), '1')
+  } catch {
+    /* ignore quota / private mode */
+  }
+}
+
+export function clearHadSeat(roomCode: string): void {
+  try {
+    localStorage.removeItem(hadSeatKey(roomCode))
+  } catch {
+    /* ignore */
+  }
 }
 
 export function loadIdentity(): SeatIdentity | null {
@@ -63,11 +94,31 @@ export function loadIdentity(): SeatIdentity | null {
   }
 }
 
-export function saveIdentity(identity: SeatIdentity | null): void {
+/**
+ * Persist identity. When clearing, pass `clearRoomCode` so the room-scoped
+ * had-seat mark is removed (intentional leave / room ended → quiet rejoin).
+ * Saving a seat marks the room; that mark survives a wiped identity key so
+ * we can tell wipe vs never-joined.
+ */
+export function saveIdentity(
+  identity: SeatIdentity | null,
+  clearRoomCode?: string,
+): void {
   if (!identity) {
+    const prev = loadIdentity()
+    const code = clearRoomCode ?? prev?.roomCode
+    if (code) clearHadSeat(code)
     localStorage.removeItem(IDENTITY_KEY)
     return
   }
+  const prev = loadIdentity()
+  if (
+    prev &&
+    prev.roomCode.toUpperCase() !== identity.roomCode.toUpperCase()
+  ) {
+    clearHadSeat(prev.roomCode)
+  }
+  markHadSeat(identity.roomCode)
   localStorage.setItem(
     IDENTITY_KEY,
     JSON.stringify({
@@ -88,12 +139,16 @@ export interface RestoreRoomView {
 /**
  * Pure restore decision for /r/:code or refresh.
  * Dual-tab "other_tab" is detected separately via BroadcastChannel.
+ *
+ * `hadPriorSeat`: localStorage once had a seatId for this roomCode (room-scoped
+ * mark). Without it, missing identity is a quiet first join — not identity_lost.
  */
 export function decideRestore(args: {
   roomCode: string
   room: RestoreRoomView | null
   identity: SeatIdentity | null
   seatHeldByOtherTab: boolean
+  hadPriorSeat?: boolean
 }): RestoreDecision {
   const code = args.roomCode.toUpperCase()
 
@@ -107,7 +162,10 @@ export function decideRestore(args: {
       : null
 
   if (!identity) {
-    return { kind: 'identity_lost', toast: RESTORE_COPY.IDENTITY_LOST }
+    if (args.hadPriorSeat) {
+      return { kind: 'identity_lost', toast: RESTORE_COPY.IDENTITY_LOST }
+    }
+    return { kind: 'fresh_join' }
   }
 
   if (args.seatHeldByOtherTab) {

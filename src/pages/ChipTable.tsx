@@ -37,7 +37,9 @@ export function ChipTable({
   const others = seats.filter((s) => !s.isSelf)
   const [menuOpen, setMenuOpen] = useState(false)
   const [batchMode, setBatchMode] = useState(false)
-  const [confirmReset, setConfirmReset] = useState(false)
+  const [confirmReset, setConfirmReset] = useState<'seat' | 'table' | null>(
+    null,
+  )
   const longPressTimer = useRef<number | null>(null)
   const longPressed = useRef(false)
 
@@ -92,6 +94,7 @@ export function ChipTable({
       return
     }
     onOp('resetSeat', self.seatId)
+    setConfirmReset(null)
     setMenuOpen(false)
   }
 
@@ -101,7 +104,7 @@ export function ChipTable({
       return
     }
     onOp('resetTable', self.seatId)
-    setConfirmReset(false)
+    setConfirmReset(null)
     setMenuOpen(false)
   }
 
@@ -185,12 +188,16 @@ export function ChipTable({
           <button type="button" onClick={toggleLock}>
             {self.locked ? '解锁座位' : '锁定座位'}
           </button>
-          <button type="button" onClick={resetSeat} disabled={!isHost}>
+          <button
+            type="button"
+            onClick={() => setConfirmReset('seat')}
+            disabled={!isHost}
+          >
             重置我的筹码
           </button>
           <button
             type="button"
-            onClick={() => setConfirmReset(true)}
+            onClick={() => setConfirmReset('table')}
             disabled={!isHost}
           >
             重置整桌
@@ -231,12 +238,36 @@ export function ChipTable({
         </div>
       )}
 
-      {confirmReset && (
+      {confirmReset === 'seat' && (
+        <div className="confirm-overlay" role="alertdialog">
+          <div className="confirm-box">
+            <p>确定重置我的筹码？此操作不可撤销。</p>
+            <div className="cta-row">
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setConfirmReset(null)}
+              >
+                取消
+              </button>
+              <button type="button" className="btn primary" onClick={resetSeat}>
+                确认重置
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmReset === 'table' && (
         <div className="confirm-overlay" role="alertdialog">
           <div className="confirm-box">
             <p>确认重置整桌筹码？此操作不可撤销。</p>
             <div className="cta-row">
-              <button type="button" className="btn ghost" onClick={() => setConfirmReset(false)}>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setConfirmReset(null)}
+              >
                 取消
               </button>
               <button type="button" className="btn primary" onClick={resetTable}>
