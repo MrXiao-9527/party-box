@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ACK_REASONS, type RoomState, type Seat, type TableSnapshot } from '../types'
+import { ACK_REASONS, findLastUndoable, ledgerEntrySummary, type LedgerEntry, type RoomState, type Seat, type TableSnapshot } from '../types'
 import type { ChipOpType } from '../types'
 
 interface ChipTableProps {
@@ -54,6 +54,8 @@ export function ChipTable({
   const [transferAmount, setTransferAmount] = useState('')
   const [buyInOpen, setBuyInOpen] = useState(false)
   const [buyInAmount, setBuyInAmount] = useState('')
+  const [undoOpen, setUndoOpen] = useState(false)
+  const [undoTarget, setUndoTarget] = useState<LedgerEntry | null>(null)
   const [ledgerOpen, setLedgerOpen] = useState(false)
   const longPressTimer = useRef<number | null>(null)
   const longPressed = useRef(false)
@@ -72,6 +74,11 @@ export function ChipTable({
 
   const buyInNum = Number.parseInt(buyInAmount, 10)
   const buyInValid = Number.isInteger(buyInNum) && buyInNum > 0
+
+  const lastUndoable = useMemo(
+    () => findLastUndoable(table.ledger ?? []),
+    [table.ledger],
+  )
 
   if (!self) {
     return (
@@ -221,6 +228,36 @@ export function ChipTable({
     setBuyInAmount('')
   }
 
+  const openUndo = () => {
+    if (!isHost) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    if (!lastUndoable) {
+      pushToast(ACK_REASONS.NOTHING_TO_UNDO)
+      setMenuOpen(false)
+      return
+    }
+    setUndoTarget(lastUndoable)
+    setUndoOpen(true)
+    setMenuOpen(false)
+  }
+
+  const confirmUndo = () => {
+    if (!isHost) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    if (!undoTarget) {
+      pushToast(ACK_REASONS.NOTHING_TO_UNDO)
+      setUndoOpen(false)
+      return
+    }
+    onOp('undoLast', self.seatId)
+    setUndoOpen(false)
+    setUndoTarget(null)
+  }
+
   const ledger = [...(table.ledger ?? [])].reverse()
 
   return (
@@ -314,10 +351,25 @@ export function ChipTable({
             ) : (
               ledger.map((row) => (
                 <li key={row.id} className="ledger-row">
-                  {row.kind === 'uniformBuyIn' ? (
+                  {row.kind === 'undo' ? (
+                    <>
+                      <span className="ledger-who">撤销 · {row.fromName}</span>
+                      <span className="ledger-amt ledger-amt-set">↩</span>
+                    </>
+                  ) : row.kind === 'uniformBuyIn' ? (
                     <>
                       <span className="ledger-who">全员买入 {row.amount}</span>
                       <span className="ledger-amt ledger-amt-set">={row.amount}</span>
+                    </>
+                  ) : row.kind === 'seatAdjust' ? (
+                    <>
+                      <span className="ledger-who">{row.fromName}</span>
+                      <span
+                        className={`ledger-amt${row.amount < 0 ? ' ledger-amt-set' : ''}`}
+                      >
+                        {row.amount > 0 ? '+' : ''}
+                        {row.amount}
+                      </span>
                     </>
                   ) : (
                     <>
@@ -381,6 +433,11 @@ export function ChipTable({
           {isHost && (
             <button type="button" onClick={openBuyIn}>
               全员买入
+            </button>
+          )}
+          {isHost && (
+            <button type="button" onClick={openUndo}>
+              撤销上一笔
             </button>
           )}
           <button
@@ -524,6 +581,32 @@ export function ChipTable({
                 onClick={confirmBuyIn}
               >
                 确认买入
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {undoOpen && isHost && undoTarget && (
+        <div className="confirm-overlay" role="dialog" aria-label="撤销上一笔">
+          <div className="confirm-box transfer-box">
+            <p className="transfer-title">撤销上一笔</p>
+            <div className="transfer-preview" aria-live="polite">
+              <p>将撤销：{ledgerEntrySummary(undoTarget)}</p>
+            </div>
+            <div className="cta-row">
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  setUndoOpen(false)
+                  setUndoTarget(null)
+                }}
+              >
+                取消
+              </button>
+              <button type="button" className="btn primary" onClick={confirmUndo}>
+                确认撤销
               </button>
             </div>
           </div>

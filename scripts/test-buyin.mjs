@@ -64,8 +64,9 @@ store.applyChipOp({
   }
   const aSeat = r.data.table.seats.find((s) => s.seatId === aId)
   assert(aSeat.locked === true, 'locked seat stays locked')
-  assert(r.data.table.ledger.length === 1, 'one summary ledger row')
-  const row = r.data.table.ledger[0]
+  const buyInRows = r.data.table.ledger.filter((e) => e.kind === 'uniformBuyIn')
+  assert(buyInRows.length === 1, 'one summary ledger row')
+  const row = buyInRows[0]
   assert(row.kind === 'uniformBuyIn', 'ledger kind')
   assert(row.amount === 100, 'ledger amount N')
 }

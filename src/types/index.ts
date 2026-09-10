@@ -14,9 +14,10 @@ export type ChipOpType =
   | 'unlock'
   | 'transfer'
   | 'uniformBuyIn'
+  | 'undoLast'
 
-/** Ledger row kind — omit / transfer = seat→seat; uniformBuyIn = summary. */
-export type LedgerKind = 'transfer' | 'uniformBuyIn'
+/** Ledger row kind — omit / transfer = seat→seat; seatAdjust = 本席加减; uniformBuyIn / undo. */
+export type LedgerKind = 'transfer' | 'seatAdjust' | 'uniformBuyIn' | 'undo'
 
 /** Successful chip ledger row — failed attempts never appear. */
 export interface LedgerEntry {
@@ -27,8 +28,16 @@ export interface LedgerEntry {
   fromName: string
   toSeatId: string
   toName: string
+  /**
+   * transfer / uniformBuyIn: positive amount.
+   * seatAdjust: signed delta (买码 +, 下分 −).
+   */
   amount: number
   at: number
+  /** uniformBuyIn: balances before set — required to reverse on undo. */
+  prevBalances?: { seatId: string; balance: number }[]
+  /** undo rows: id of the ledger entry this undo reversed. */
+  undoneId?: string
 }
 
 export interface Seat {
@@ -70,6 +79,34 @@ export interface ChipOp {
   targetSeatIds?: string[]
 }
 
+/** Human summary of a ledger row (for preview / 撤销 · …). */
+export function ledgerEntrySummary(entry: LedgerEntry): string {
+  if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
+  if (entry.kind === 'undo') return entry.fromName || '撤销'
+  if (entry.kind === 'seatAdjust') {
+    const n = entry.amount
+    return `${entry.fromName} ${n > 0 ? '+' : ''}${n}`
+  }
+  return `${entry.fromName}→${entry.toName} +${entry.amount}`
+}
+
+/** Newest successful settle that has not yet been undone (skips undo rows). */
+export function findLastUndoable(
+  ledger: LedgerEntry[],
+): LedgerEntry | null {
+  const undone = new Set<string>()
+  for (const e of ledger) {
+    if (e.kind === 'undo' && e.undoneId) undone.add(e.undoneId)
+  }
+  for (let i = ledger.length - 1; i >= 0; i--) {
+    const e = ledger[i]
+    if (e.kind === 'undo') continue
+    if (undone.has(e.id)) continue
+    return e
+  }
+  return null
+}
+
 export interface ChipAck {
   opId: string
   ok: boolean
@@ -89,7 +126,7 @@ export interface TableSnapshot {
   snapshotAt: number
   seats: SnapshotSeat[]
   denoms: number[]
-  /** In-table ledger (successful settles only: transfers + uniform buy-in). */
+  /** In-table ledger (settles: seat ±, transfers, buy-in, undos). */
   ledger: LedgerEntry[]
 }
 
@@ -112,6 +149,7 @@ export const ACK_REASONS = {
   INSUFFICIENT: '余额不足',
   SELF_TRANSFER: '不能转给自己',
   POSITIVE_INT: '请输入正整数',
+  NOTHING_TO_UNDO: '没有可撤销的记录',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */

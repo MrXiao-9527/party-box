@@ -58,9 +58,10 @@ store.applyChipOp({
   const aSeat = r.data.table.seats.find((s) => s.seatId === aId)
   assert(hostSeat.balance === before.table.seats.find((s) => s.seatId === hostId).balance - 3, 'host -3')
   assert(aSeat.balance === before.table.seats.find((s) => s.seatId === aId).balance + 3, '甲 +3')
-  assert(r.data.table.ledger.length === 1, 'ledger 1 row')
-  assert(r.data.table.ledger[0].amount === 3, 'ledger amount')
-  assert(r.data.table.ledger[0].fromSeatId === hostId && r.data.table.ledger[0].toSeatId === aId, 'ledger who')
+  assert(r.data.table.ledger.length === before.table.ledger.length + 1, 'ledger +1 transfer row')
+  const last = r.data.table.ledger.at(-1)
+  assert(last.amount === 3, 'ledger amount')
+  assert(last.fromSeatId === hostId && last.toSeatId === aId, 'ledger who')
 }
 
 // 2) One-to-many ×3
@@ -78,7 +79,7 @@ store.applyChipOp({
   assert(r.ack.ok, 'one-to-many ok')
   const hostSeat = r.data.table.seats.find((s) => s.seatId === hostId)
   assert(hostSeat.balance === before.table.seats.find((s) => s.seatId === hostId).balance - 6, 'host -6')
-  assert(r.data.table.ledger.length === 3, 'ledger +2 rows')
+  assert(r.data.table.ledger.length === before.table.ledger.length + 2, 'ledger +2 rows')
 }
 
 // 3) Insufficient — whole batch fails, no partial, no ledger

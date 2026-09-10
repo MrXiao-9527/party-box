@@ -2,6 +2,8 @@ import {
   ACK_REASONS,
   DEFAULT_DENOMS,
   MAX_SEATS,
+  findLastUndoable,
+  ledgerEntrySummary,
   type ChipAck,
   type ChipOp,
   type Phase,
@@ -425,7 +427,8 @@ export function applyChipOp(op: ChipOp): {
     !target &&
     op.type !== 'resetTable' &&
     op.type !== 'transfer' &&
-    op.type !== 'uniformBuyIn'
+    op.type !== 'uniformBuyIn' &&
+    op.type !== 'undoLast'
   ) {
     return fail(ACK_REASONS.INVALID)
   }
@@ -440,8 +443,23 @@ export function applyChipOp(op: ChipOp): {
       }
       const denom = op.denom ?? 0
       if (denom <= 0) return fail(ACK_REASONS.INVALID)
+      const before = target.balance
       const delta = op.type === '+denom' ? denom : -denom
       target.balance = Math.max(0, target.balance + delta)
+      const actual = target.balance - before
+      if (actual !== 0) {
+        ledger.push({
+          id: uid('led'),
+          kind: 'seatAdjust',
+          fromSeatId: target.seatId,
+          fromName: target.name,
+          toSeatId: '',
+          toName: '',
+          amount: actual,
+          at: Date.now(),
+        })
+        if (ledger.length > 100) ledger = ledger.slice(-100)
+      }
       break
     }
     case '+batch':
@@ -453,8 +471,23 @@ export function applyChipOp(op: ChipOp): {
       }
       const amount = op.amount ?? 0
       if (amount <= 0) return fail(ACK_REASONS.INVALID)
+      const before = target.balance
       const delta = op.type === '+batch' ? amount : -amount
       target.balance = Math.max(0, target.balance + delta)
+      const actual = target.balance - before
+      if (actual !== 0) {
+        ledger.push({
+          id: uid('led'),
+          kind: 'seatAdjust',
+          fromSeatId: target.seatId,
+          fromName: target.name,
+          toSeatId: '',
+          toName: '',
+          amount: actual,
+          at: Date.now(),
+        })
+        if (ledger.length > 100) ledger = ledger.slice(-100)
+      }
       break
     }
     case 'set': {
@@ -550,6 +583,10 @@ export function applyChipOp(op: ChipOp): {
       if (!Number.isInteger(amount) || amount <= 0) {
         return fail(ACK_REASONS.POSITIVE_INT)
       }
+      const prevBalances = seats.map((s) => ({
+        seatId: s.seatId,
+        balance: s.balance,
+      }))
       // 开局清桌优先于锁定：locked seats also set to N (lock flag kept).
       for (const s of seats) {
         s.balance = amount
@@ -563,6 +600,59 @@ export function applyChipOp(op: ChipOp): {
         toName: '',
         amount,
         at: Date.now(),
+        prevBalances,
+      })
+      if (ledger.length > 100) ledger = ledger.slice(-100)
+      break
+    }
+    case 'undoLast': {
+      if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+      const entry = findLastUndoable(ledger)
+      if (!entry) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+      const summary = ledgerEntrySummary(entry)
+
+      if (entry.kind === 'uniformBuyIn') {
+        if (!entry.prevBalances || entry.prevBalances.length === 0) {
+          return fail(ACK_REASONS.NOTHING_TO_UNDO)
+        }
+        const byId = new Map(
+          entry.prevBalances.map((p) => [p.seatId, p.balance]),
+        )
+        for (const s of seats) {
+          if (byId.has(s.seatId)) s.balance = byId.get(s.seatId)!
+        }
+      } else if (entry.kind === 'seatAdjust') {
+        const seat = seats.find((s) => s.seatId === entry.fromSeatId)
+        if (!seat) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+        const delta = entry.amount
+        if (!Number.isInteger(delta) || delta === 0) {
+          return fail(ACK_REASONS.NOTHING_TO_UNDO)
+        }
+        // Reverse signed delta (买码 +N → −N; 下分 −N → +N).
+        seat.balance = Math.max(0, seat.balance - delta)
+      } else {
+        // transfer (or legacy omit kind): reverse one seat→seat row
+        const sender = seats.find((s) => s.seatId === entry.fromSeatId)
+        const receiver = seats.find((s) => s.seatId === entry.toSeatId)
+        if (!sender || !receiver) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+        const amt = entry.amount
+        if (!Number.isInteger(amt) || amt <= 0) {
+          return fail(ACK_REASONS.NOTHING_TO_UNDO)
+        }
+        receiver.balance = Math.max(0, receiver.balance - amt)
+        sender.balance += amt
+      }
+
+      ledger.push({
+        id: uid('led'),
+        kind: 'undo',
+        fromSeatId: op.fromSeatId,
+        fromName: summary,
+        toSeatId: '',
+        toName: '',
+        amount: entry.amount,
+        at: Date.now(),
+        undoneId: entry.id,
       })
       if (ledger.length > 100) ledger = ledger.slice(-100)
       break
