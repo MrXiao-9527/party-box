@@ -14,6 +14,7 @@ import type {
   Seat,
   TableSnapshot,
 } from '../types'
+import { findLastUndoable, ledgerEntrySummary } from '../types'
 import { defaultTransport, type ChipTransport } from './transport'
 import { loadIdentity, roleForSeat, saveIdentity } from './seatRestore'
 import {
@@ -64,6 +65,9 @@ function denomKey(
   }
   if (type === 'uniformBuyIn') {
     return `uniformBuyIn:${extra?.amount ?? ''}`
+  }
+  if (type === 'undoLast') {
+    return 'undoLast'
   }
   return null
 }
@@ -151,7 +155,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         !target &&
         op.type !== 'resetTable' &&
         op.type !== 'transfer' &&
-        op.type !== 'uniformBuyIn'
+        op.type !== 'uniformBuyIn' &&
+        op.type !== 'undoLast'
       ) {
         return base
       }
@@ -231,6 +236,10 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         case 'uniformBuyIn': {
           const amount = op.amount ?? 0
           if (!Number.isInteger(amount) || amount <= 0) return base
+          const prevBalances = seats.map((s) => ({
+            seatId: s.seatId,
+            balance: s.balance,
+          }))
           for (const s of seats) {
             s.balance = amount
           }
@@ -243,6 +252,41 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             toName: '',
             amount,
             at: Date.now(),
+            prevBalances,
+          })
+          break
+        }
+        case 'undoLast': {
+          const entry = findLastUndoable(ledger)
+          if (!entry) return base
+          const summary = ledgerEntrySummary(entry)
+          if (entry.kind === 'uniformBuyIn') {
+            if (!entry.prevBalances || entry.prevBalances.length === 0) return base
+            const byId = new Map(
+              entry.prevBalances.map((p) => [p.seatId, p.balance]),
+            )
+            for (const s of seats) {
+              if (byId.has(s.seatId)) s.balance = byId.get(s.seatId)!
+            }
+          } else {
+            const sender = seats.find((s) => s.seatId === entry.fromSeatId)
+            const receiver = seats.find((s) => s.seatId === entry.toSeatId)
+            if (!sender || !receiver) return base
+            const amt = entry.amount
+            if (!Number.isInteger(amt) || amt <= 0) return base
+            receiver.balance = Math.max(0, receiver.balance - amt)
+            sender.balance += amt
+          }
+          ledger.push({
+            id: `led_opt_${op.opId}_undo`,
+            kind: 'undo',
+            fromSeatId: op.fromSeatId,
+            fromName: summary,
+            toSeatId: '',
+            toName: '',
+            amount: entry.amount,
+            at: Date.now(),
+            undoneId: entry.id,
           })
           break
         }

@@ -19,6 +19,27 @@ export const ACK_REASONS = {
   INSUFFICIENT: '余额不足',
   SELF_TRANSFER: '不能转给自己',
   POSITIVE_INT: '请输入正整数',
+  NOTHING_TO_UNDO: '没有可撤销的记录',
+}
+
+export function ledgerEntrySummary(entry) {
+  if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
+  if (entry.kind === 'undo') return entry.fromName || '撤销'
+  return `${entry.fromName}→${entry.toName} +${entry.amount}`
+}
+
+export function findLastUndoable(ledger) {
+  const undone = new Set()
+  for (const e of ledger) {
+    if (e.kind === 'undo' && e.undoneId) undone.add(e.undoneId)
+  }
+  for (let i = ledger.length - 1; i >= 0; i--) {
+    const e = ledger[i]
+    if (e.kind === 'undo') continue
+    if (undone.has(e.id)) continue
+    return e
+  }
+  return null
 }
 
 const ROOM_TTL_MS = 4 * 60 * 60 * 1000 // 4h idle → drop
@@ -319,7 +340,8 @@ export function createRoomStore() {
       !target &&
       op.type !== 'resetTable' &&
       op.type !== 'transfer' &&
-      op.type !== 'uniformBuyIn'
+      op.type !== 'uniformBuyIn' &&
+      op.type !== 'undoLast'
     ) {
       return fail(ACK_REASONS.INVALID)
     }
@@ -442,6 +464,10 @@ export function createRoomStore() {
         if (!Number.isInteger(amount) || amount <= 0) {
           return fail(ACK_REASONS.POSITIVE_INT)
         }
+        const prevBalances = seats.map((s) => ({
+          seatId: s.seatId,
+          balance: s.balance,
+        }))
         // 开局清桌优先于锁定：locked seats also set to N (lock flag kept).
         for (const s of seats) {
           s.balance = amount
@@ -455,6 +481,49 @@ export function createRoomStore() {
           toName: '',
           amount,
           at: Date.now(),
+          prevBalances,
+        })
+        if (ledger.length > 100) ledger = ledger.slice(-100)
+        break
+      }
+      case 'undoLast': {
+        if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+        const entry = findLastUndoable(ledger)
+        if (!entry) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+        const summary = ledgerEntrySummary(entry)
+
+        if (entry.kind === 'uniformBuyIn') {
+          if (!entry.prevBalances || entry.prevBalances.length === 0) {
+            return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          }
+          const byId = new Map(
+            entry.prevBalances.map((p) => [p.seatId, p.balance]),
+          )
+          for (const s of seats) {
+            if (byId.has(s.seatId)) s.balance = byId.get(s.seatId)
+          }
+        } else {
+          const sender = seats.find((s) => s.seatId === entry.fromSeatId)
+          const receiver = seats.find((s) => s.seatId === entry.toSeatId)
+          if (!sender || !receiver) return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          const amt = entry.amount
+          if (!Number.isInteger(amt) || amt <= 0) {
+            return fail(ACK_REASONS.NOTHING_TO_UNDO)
+          }
+          receiver.balance = Math.max(0, receiver.balance - amt)
+          sender.balance += amt
+        }
+
+        ledger.push({
+          id: uid('led'),
+          kind: 'undo',
+          fromSeatId: op.fromSeatId,
+          fromName: summary,
+          toSeatId: '',
+          toName: '',
+          amount: entry.amount,
+          at: Date.now(),
+          undoneId: entry.id,
         })
         if (ledger.length > 100) ledger = ledger.slice(-100)
         break
