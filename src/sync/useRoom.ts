@@ -14,12 +14,13 @@ import type {
   Seat,
   TableSnapshot,
 } from '../types'
-import { findLastUndoable, ledgerEntrySummary } from '../types'
+import { ACK_REASONS, findLastUndoable, ledgerEntrySummary } from '../types'
 import { defaultTransport, type ChipTransport } from './transport'
 import { loadIdentity, roleForSeat, saveIdentity } from './seatRestore'
 import {
   fillSeatsToMax,
   pickNewHost,
+  RelayNetworkError,
   resumeAsHost,
   setMemberConnected,
   setPhase,
@@ -600,13 +601,23 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   const startPlaying = useCallback(() => {
     if (!roomCode || !session) return
     void (async () => {
-      const data = await setPhase(roomCode, 'playing')
-      if (data) {
-        setRoom(data.room)
-        applyHostSnapshot(data.table, { force: true })
+      try {
+        const data = await setPhase(roomCode, 'playing')
+        if (data) {
+          setRoom(data.room)
+          applyHostSnapshot(data.table, { force: true })
+          return
+        }
+        pushToast('开桌失败，请重开一桌或检查网络')
+      } catch (e) {
+        pushToast(
+          e instanceof RelayNetworkError
+            ? ACK_REASONS.RELAY_UNREACHABLE
+            : '开桌失败，请重开一桌或检查网络',
+        )
       }
     })()
-  }, [roomCode, session, applyHostSnapshot])
+  }, [roomCode, session, applyHostSnapshot, pushToast])
 
   const signalHostDisconnect = useCallback(() => {
     if (!roomCode || !session || !room) return
@@ -615,14 +626,24 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       return
     }
     void (async () => {
-      await setMemberConnected(roomCode, session.seatId, false)
-      const data = await setPhase(roomCode, 'paused')
-      if (data) {
-        const refreshed = loadRoom(roomCode)
-        const next = refreshed ?? data
-        setRoom(next.room)
-        applyHostSnapshot(next.table, { force: true })
-        pushToast('桌主已离开 · 桌子已暂停')
+      try {
+        await setMemberConnected(roomCode, session.seatId, false)
+        const data = await setPhase(roomCode, 'paused')
+        if (data) {
+          const refreshed = loadRoom(roomCode)
+          const next = refreshed ?? data
+          setRoom(next.room)
+          applyHostSnapshot(next.table, { force: true })
+          pushToast('桌主已离开 · 桌子已暂停')
+          return
+        }
+        pushToast('操作失败，请重试或检查网络')
+      } catch (e) {
+        pushToast(
+          e instanceof RelayNetworkError
+            ? ACK_REASONS.RELAY_UNREACHABLE
+            : '操作失败，请重试或检查网络',
+        )
       }
     })()
   }, [roomCode, session, room, pushToast, applyHostSnapshot])
@@ -630,15 +651,23 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   const resumeTable = useCallback(() => {
     if (!roomCode || !session) return
     void (async () => {
-      const data = await resumeAsHost(roomCode, session.seatId)
-      if (!data) {
-        pushToast('仅桌主可执行此操作')
-        return
+      try {
+        const data = await resumeAsHost(roomCode, session.seatId)
+        if (!data) {
+          pushToast('仅桌主可执行此操作')
+          return
+        }
+        const connected = await setMemberConnected(roomCode, session.seatId, true)
+        const next = connected ?? data
+        setRoom(next.room)
+        applyHostSnapshot(next.table, { force: true })
+      } catch (e) {
+        pushToast(
+          e instanceof RelayNetworkError
+            ? ACK_REASONS.RELAY_UNREACHABLE
+            : '开桌失败，请重开一桌或检查网络',
+        )
       }
-      const connected = await setMemberConnected(roomCode, session.seatId, true)
-      const next = connected ?? data
-      setRoom(next.room)
-      applyHostSnapshot(next.table, { force: true })
     })()
   }, [roomCode, session, pushToast, applyHostSnapshot])
 
