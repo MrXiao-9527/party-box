@@ -1,0 +1,18 @@
+{
+  "name": "聚会盒子",
+  "short_name": "聚会盒子",
+  "description": "Party Box — 移动端聚会工具箱",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0F1115",
+  "theme_color": "#0F1115",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
