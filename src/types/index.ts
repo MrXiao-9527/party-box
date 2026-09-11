@@ -321,3 +321,49 @@ export function parseRoomCreate(
     seatId,
   }
 }
+
+/** Body carries a real create snapshot, not omitted defaults (buyIn 0 / seats 8). */
+export function hasCreateSnapshot(
+  parsed:
+    | {
+        ok: true
+        buyInN: number
+        maxSeats: number
+        smallBlind?: number
+        bigBlind?: number
+      }
+    | { ok: false; error: string },
+): parsed is {
+  ok: true
+  buyInN: number
+  maxSeats: number
+  smallBlind?: number
+  bigBlind?: number
+} {
+  if (!parsed.ok) return false
+  return (
+    parsed.buyInN > 0 ||
+    parsed.maxSeats !== MAX_SEATS ||
+    parsed.smallBlind != null ||
+    parsed.bigBlind != null
+  )
+}
+
+/**
+ * Overlay create-room snapshot onto room when `input` includes it.
+ * Repairs rooms whose POST /rooms dropped buyInN / maxSeats / blinds.
+ */
+export function stampCreateSettings<
+  T extends Pick<RoomState, 'buyInN' | 'maxSeats' | 'smallBlind' | 'bigBlind'>,
+>(room: T, input: RoomCreateInput | null | undefined): T {
+  if (!input || typeof input !== 'object') return room
+  const parsed = parseRoomCreate(input)
+  if (!hasCreateSnapshot(parsed)) return room
+  return {
+    ...room,
+    buyInN: parsed.buyInN,
+    maxSeats: parsed.maxSeats,
+    smallBlind: parsed.smallBlind,
+    bigBlind: parsed.bigBlind,
+  }
+}

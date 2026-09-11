@@ -19,7 +19,8 @@
     "test:pot": "node scripts/test-pot.mjs",
     "test:stale-sync": "node --experimental-strip-types scripts/test-stale-sync.mjs",
     "test:settlement": "node --experimental-strip-types scripts/test-settlement.mjs",
-    "test:room-create": "node scripts/test-room-create.mjs"
+    "test:room-create": "node scripts/test-room-create.mjs",
+    "test:e2e-create-snapshot": "node scripts/e2e-create-snapshot.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

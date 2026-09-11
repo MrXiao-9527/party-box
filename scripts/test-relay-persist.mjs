@@ -82,11 +82,60 @@ function stopRelay(child) {
 const first = startRelay()
 const health1 = await waitHealth()
 assert(health1.backend === 'node-file', 'backend node-file')
+assert(health1.roomSettings === true, 'health roomSettings')
 console.log('relay up', health1)
 
-const created = await json('/rooms', { method: 'POST', body: '{}' })
+// Repair: empty create (legacy shape) + claim-host body restamps snapshot
+const dropped = await json('/rooms', { method: 'POST', body: '{}' })
+assert(dropped.status === 201, 'legacy-shaped create')
+assert(dropped.body.data.room.buyInN === 0, 'legacy buyInN 0')
+assert(dropped.body.data.room.maxSeats === 8, 'legacy maxSeats 8')
+const dropCode = dropped.body.data.room.roomCode
+const dropSeat = dropped.body.session.seatId
+const stampedClaim = await json(`/rooms/${dropCode}/claim-host`, {
+  method: 'POST',
+  body: JSON.stringify({
+    seatId: dropSeat,
+    name: '桌主',
+    buyInN: 100,
+    maxSeats: 4,
+    smallBlind: 1,
+    bigBlind: 2,
+  }),
+})
+assert(stampedClaim.status === 200, 'claim-host stamp')
+assert(stampedClaim.body.data.room.buyInN === 100, 'claim stamps buyInN')
+assert(stampedClaim.body.data.room.maxSeats === 4, 'claim stamps maxSeats')
+assert(stampedClaim.body.data.room.smallBlind === 1, 'claim stamps sb')
+assert(stampedClaim.body.data.room.bigBlind === 2, 'claim stamps bb')
+const stampedPhase = await json(`/rooms/${dropCode}/phase`, {
+  method: 'POST',
+  body: JSON.stringify({
+    phase: 'playing',
+    buyInN: 100,
+    maxSeats: 4,
+    smallBlind: 1,
+    bigBlind: 2,
+  }),
+})
+assert(stampedPhase.body.data.room.buyInN === 100, 'phase keeps stamped buyInN')
+assert(stampedPhase.body.data.room.maxSeats === 4, 'phase keeps stamped maxSeats')
+
+const created = await json('/rooms', {
+  method: 'POST',
+  body: JSON.stringify({
+    buyInN: 100,
+    maxSeats: 4,
+    smallBlind: 1,
+    bigBlind: 2,
+  }),
+})
 assert(created.status === 201, 'create')
-const code = created.body.data.room.roomCode
+const createdRoom = created.body.data.room
+assert(createdRoom.buyInN === 100, 'create persist buyInN')
+assert(createdRoom.maxSeats === 4, 'create persist maxSeats')
+assert(createdRoom.smallBlind === 1 && createdRoom.bigBlind === 2, 'create persist blinds')
+const code = createdRoom.roomCode
 const hostSeat = created.body.session.seatId
 
 await json(`/rooms/${code}/claim-host`, {
@@ -135,6 +184,10 @@ assert(
 assert(beforeTable.pot === 5, 'pot 5 before restart')
 assert(before.body.data.room.phase === 'playing', 'phase playing')
 assert(before.body.data.room.members.length === 2, '2 members')
+assert(before.body.data.room.buyInN === 100, 'buyInN before restart')
+assert(before.body.data.room.maxSeats === 4, 'maxSeats before restart')
+assert(before.body.data.room.smallBlind === 1, 'sb before restart')
+assert(before.body.data.room.bigBlind === 2, 'bb before restart')
 
 await stopRelay(first.child)
 console.log('relay stopped; snapshot at', path.join(DATA, 'rooms.json'))
@@ -148,6 +201,10 @@ const after = await json(`/rooms/${code}`)
 assert(after.status === 200, 'GET same code after remount')
 assert(after.body.data.room.phase === 'playing', 'phase restored')
 assert(after.body.data.room.members.length === 2, 'members restored')
+assert(after.body.data.room.buyInN === 100, 'buyInN restored')
+assert(after.body.data.room.maxSeats === 4, 'maxSeats restored')
+assert(after.body.data.room.smallBlind === 1, 'sb restored')
+assert(after.body.data.room.bigBlind === 2, 'bb restored')
 assert(after.body.data.table.pot === 5, 'pot restored')
 assert(
   after.body.data.table.seats.find((s) => s.seatId === guestSeat)?.balance ===

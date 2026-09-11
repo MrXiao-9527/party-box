@@ -15,16 +15,16 @@ export function RoomSettingsReadout({ room }: RoomSettingsReadoutProps) {
     <dl className="room-settings" aria-label="桌面设置">
       <div>
         <dt>买入</dt>
-        <dd>{room.buyInN > 0 ? room.buyInN : '—'}</dd>
+        <dd data-setting="buyInN">{room.buyInN > 0 ? room.buyInN : '—'}</dd>
       </div>
       <div>
         <dt>人数</dt>
-        <dd>{room.maxSeats}</dd>
+        <dd data-setting="maxSeats">{room.maxSeats}</dd>
       </div>
       {blinds && (
         <div>
           <dt>盲注</dt>
-          <dd>{blinds}</dd>
+          <dd data-setting="blinds">{blinds}</dd>
         </div>
       )}
     </dl>

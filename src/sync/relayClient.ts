@@ -6,7 +6,7 @@
 import type { ChipAck, ChipOp, Phase, RoomCreateInput, TableSnapshot } from '../types'
 import { ACK_REASONS } from '../types'
 import type { PersistedRoom, Session } from '../store/localRoom'
-import { saveRoom } from '../store/localRoom'
+import { saveCreateSettings, saveRoom } from '../store/localRoom'
 
 export class RelayNetworkError extends Error {
   constructor(message = ACK_REASONS.RELAY_UNREACHABLE) {
@@ -148,20 +148,22 @@ export async function relayCreateEmptyHostRoom(
     return { error: result.body.error }
   }
   const body = result.body as { session: Session; data: PersistedRoom }
-  cache(body.data)
-  return body
+  saveCreateSettings(body.session.roomCode, input)
+  const cached = cache(body.data)
+  return { session: body.session, data: cached ?? body.data }
 }
 
 export async function relayClaimHostSeat(
   roomCode: string,
   seatId: string,
   name: string,
+  settings?: RoomCreateInput | null,
 ): Promise<PersistedRoom | null> {
   const result = await api<{ data: PersistedRoom }>(
     `/rooms/${encodeURIComponent(roomCode)}/claim-host`,
     {
       method: 'POST',
-      body: JSON.stringify({ seatId, name }),
+      body: JSON.stringify({ seatId, name, ...(settings ?? {}) }),
     },
   )
   if (!result.ok) {
@@ -205,10 +207,11 @@ export async function relayJoinRoom(
 export async function relaySetPhase(
   roomCode: string,
   phase: Phase,
+  settings?: RoomCreateInput | null,
 ): Promise<PersistedRoom | null> {
   const result = await api<{ data: PersistedRoom }>(
     `/rooms/${encodeURIComponent(roomCode)}/phase`,
-    { method: 'POST', body: JSON.stringify({ phase }) },
+    { method: 'POST', body: JSON.stringify({ phase, ...(settings ?? {}) }) },
   )
   if (!result.ok) {
     // Distinguish wipe/404 so UI can toast 「房间服务已重启，请重新开桌」.

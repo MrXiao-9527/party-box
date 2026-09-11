@@ -85,6 +85,34 @@ export function parseRoomCreate(input = {}) {
   }
 }
 
+/** Body carries a real create snapshot, not omitted defaults (buyIn 0 / seats 8). */
+export function hasCreateSnapshot(parsed) {
+  if (!parsed || !parsed.ok) return false
+  return (
+    parsed.buyInN > 0 ||
+    parsed.maxSeats !== MAX_SEATS ||
+    parsed.smallBlind != null ||
+    parsed.bigBlind != null
+  )
+}
+
+/**
+ * Overlay create-room snapshot onto room when `input` includes it.
+ * Repairs rooms whose POST /rooms dropped buyInN / maxSeats / blinds.
+ */
+export function stampCreateSettings(room, input) {
+  if (!input || typeof input !== 'object') return room
+  const parsed = parseRoomCreate(input)
+  if (!hasCreateSnapshot(parsed)) return room
+  return {
+    ...room,
+    buyInN: parsed.buyInN,
+    maxSeats: parsed.maxSeats,
+    smallBlind: parsed.smallBlind,
+    bigBlind: parsed.bigBlind,
+  }
+}
+
 export function ledgerEntrySummary(entry) {
   // seatAdjust: 「甲 +10」 / 「甲 -5」
   // pot: 「甲 → 底池 +N」 / 「底池 → 乙 +N」 / 「底池均分 · 在座K人 · 各 +M · 余R留底池」
@@ -269,36 +297,37 @@ export function createRoomStore() {
     }
   }
 
-  function claimHostSeat(roomCode, seatId, name) {
+  function claimHostSeat(roomCode, seatId, name, settings) {
     const existing = get(roomCode)
     if (!existing) return null
     if (existing.room.hostSeatId !== seatId) return null
+    const room = stampCreateSettings(existing.room, settings)
 
-    const already = existing.room.members.find((m) => m.seatId === seatId)
+    const already = room.members.find((m) => m.seatId === seatId)
     if (already) {
-      const members = existing.room.members.map((m) =>
+      const members = room.members.map((m) =>
         m.seatId === seatId ? { ...m, name, isHost: true, connected: true } : m,
       )
       const seats = existing.table.seats.map((s) =>
         s.seatId === seatId ? { ...s, name, isHost: true } : s,
       )
       return set({
-        room: { ...existing.room, members },
+        room: { ...room, members },
         table: { ...existing.table, seats, snapshotAt: Date.now() },
       })
     }
 
-    if (existing.room.members.length >= normalizeMaxSeats(existing.room.maxSeats)) {
+    if (room.members.length >= normalizeMaxSeats(room.maxSeats)) {
       return null
     }
 
     return set({
       room: {
-        ...existing.room,
+        ...room,
         hostSeatId: seatId,
         members: [
           { seatId, name, isHost: true, connected: true },
-          ...existing.room.members.map((m) => ({ ...m, isHost: false })),
+          ...room.members.map((m) => ({ ...m, isHost: false })),
         ],
       },
       table: {
@@ -376,13 +405,13 @@ export function createRoomStore() {
     })
   }
 
-  function setPhase(roomCode, phase) {
+  function setPhase(roomCode, phase, settings) {
     const existing = get(roomCode)
     if (!existing) return null
     const snapshotAt = Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
     return set({
       ...existing,
-      room: { ...existing.room, phase },
+      room: { ...stampCreateSettings(existing.room, settings), phase },
       table: { ...existing.table, snapshotAt },
     })
   }
