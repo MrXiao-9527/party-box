@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { A2HSHint } from '../components/A2HSHint'
 import { ToastStack } from '../components/Toast'
@@ -59,15 +59,23 @@ export function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const openingRef = useRef(false)
   const openTable = () => {
+    if (openingRef.current) return
+    openingRef.current = true
     void (async () => {
       try {
         const { session } = await createEmptyHostRoom()
         navigate(`/r/${session.roomCode}`)
       } catch {
+        openingRef.current = false
         toast(ACK_REASONS.RELAY_UNREACHABLE)
       }
     })()
+  }
+
+  const onOpenTablePointerUp = (e: PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') openTable()
   }
 
   const joinTable = () => {
@@ -107,7 +115,12 @@ export function HomePage() {
         <h1 className="brand">聚会盒子</h1>
         <p className="tagline">开一桌，筹码、计时、分账随身带</p>
         <div className="cta-row">
-          <button type="button" className="btn primary" onClick={openTable}>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={openTable}
+            onPointerUp={onOpenTablePointerUp}
+          >
             开一桌
           </button>
           <button

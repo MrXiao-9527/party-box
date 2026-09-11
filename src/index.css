@@ -51,12 +51,22 @@ input {
 }
 
 .page {
+  /* svh last: keep bottom CTAs above Safari/WeChat chrome. dvh jumps on tap
+     and cancels click when the footer (margin-top:auto) moves under the finger. */
+  min-height: 100vh;
   min-height: 100dvh;
+  min-height: 100svh;
   max-width: 440px;
   margin: 0 auto;
-  padding: 1.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom));
+  padding: 1.5rem 1.5rem calc(1.5rem + env(safe-area-inset-bottom, 0px));
   display: flex;
   flex-direction: column;
+}
+
+.page.lobby,
+.page.paused {
+  /* Extra slack below 开桌 / 重开一桌: home-indicator + gesture / in-app bars. */
+  padding-bottom: calc(2.75rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* —— Home —— */
@@ -101,12 +111,19 @@ input {
   flex-wrap: wrap;
 }
 
+.cta-row .btn {
+  flex: 1;
+  min-width: 5.5rem;
+}
+
 .btn {
   border: none;
   border-radius: var(--radius);
   padding: 0.85rem 1.35rem;
+  min-height: 48px;
   cursor: pointer;
   font-weight: 500;
+  touch-action: manipulation;
   transition: transform 0.12s ease, opacity 0.12s;
 }
 
@@ -802,8 +819,7 @@ button.seat {
 .a2hs {
   position: fixed;
   left: 50%;
-  transform: translateX(-50%);
-  bottom: calc(1rem + env(safe-area-inset-bottom));
+  bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
   width: min(400px, calc(100% - 1.5rem));
   display: flex;
   align-items: center;
@@ -813,7 +829,10 @@ button.seat {
   border-radius: var(--radius);
   background: var(--card);
   z-index: 30;
-  animation: fade-up 0.3s ease both;
+  /* Keyframes must keep translateX(-50%). A fade-up that only sets
+     translateY overrides this and leaves the bar at left:50% covering
+     the right half of the viewport (pointer-events steal). */
+  animation: a2hs-in 0.3s ease both;
 }
 
 .a2hs p {
@@ -882,6 +901,17 @@ button.seat {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes a2hs-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
   }
 }
 
