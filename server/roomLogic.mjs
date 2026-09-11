@@ -21,6 +21,7 @@ export const ACK_REASONS = {
   SELF_TRANSFER: '不能转给自己',
   POSITIVE_INT: '请输入正整数',
   NOTHING_TO_UNDO: '没有可撤销的记录',
+  TABLE_SETTLING: '结算中，请先返回桌面',
 }
 
 export function ledgerEntrySummary(entry) {
@@ -90,6 +91,24 @@ function normalizePot(raw) {
   return Math.max(0, Math.floor(n))
 }
 
+function normalizeBuyIn(raw) {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.floor(n))
+}
+
+function normalizeSeat(s) {
+  return { ...s, buyIn: normalizeBuyIn(s.buyIn) }
+}
+
+function applyPlusBuyIn(seat, actual) {
+  if (actual > 0) seat.buyIn = normalizeBuyIn(seat.buyIn) + actual
+}
+
+function undoPlusBuyIn(seat, delta) {
+  if (delta > 0) seat.buyIn = Math.max(0, normalizeBuyIn(seat.buyIn) - delta)
+}
+
 function normalize(data) {
   return {
     ...data,
@@ -101,9 +120,10 @@ function normalize(data) {
     },
     table: {
       ...data.table,
-      seats: data.table.seats.slice(0, MAX_SEATS),
+      seats: data.table.seats.slice(0, MAX_SEATS).map(normalizeSeat),
       pot: normalizePot(data.table.pot),
       ledger: Array.isArray(data.table.ledger) ? data.table.ledger : [],
+      settling: !!data.table.settling,
     },
   }
 }
@@ -162,6 +182,7 @@ export function createRoomStore() {
         seats: [],
         pot: 0,
         ledger: [],
+        settling: false,
       },
     })
     return {
@@ -205,7 +226,7 @@ export function createRoomStore() {
         snapshotAt: Date.now(),
         denoms: existing.table.denoms,
         seats: [
-          { seatId, name, isHost: true, locked: false, balance: 0 },
+          { seatId, name, isHost: true, locked: false, balance: 0, buyIn: 0 },
           ...existing.table.seats.map((s) => ({ ...s, isHost: false })),
         ],
         // Same host TableSnapshot as seats — never drop pot/ledger on rebuild.
@@ -213,6 +234,7 @@ export function createRoomStore() {
         ledger: Array.isArray(existing.table.ledger)
           ? existing.table.ledger
           : [],
+        settling: !!existing.table.settling,
       },
     })
   }
@@ -242,7 +264,7 @@ export function createRoomStore() {
         snapshotAt: Date.now(),
         seats: [
           ...existing.table.seats,
-          { seatId, name, isHost: false, locked: false, balance: 0 },
+          { seatId, name, isHost: false, locked: false, balance: 0, buyIn: 0 },
         ],
       },
     })
@@ -259,7 +281,14 @@ export function createRoomStore() {
       const seatId = uid('seat')
       const name = `座位${n++}`
       members.push({ seatId, name, isHost: false, connected: true })
-      seats.push({ seatId, name, isHost: false, locked: false, balance: 0 })
+      seats.push({
+        seatId,
+        name,
+        isHost: false,
+        locked: false,
+        balance: 0,
+        buyIn: 0,
+      })
     }
     return set({
       room: { ...existing.room, members, maxSeats: MAX_SEATS },
@@ -363,6 +392,7 @@ export function createRoomStore() {
     const target = seats.find((s) => s.seatId === op.targetSeatId)
     let ledger = [...(existing.table.ledger ?? [])]
     let pot = normalizePot(existing.table.pot)
+    let settling = !!existing.table.settling
 
     const fail = (reason) => ({
       ack: {
@@ -375,6 +405,14 @@ export function createRoomStore() {
     })
 
     if (
+      settling &&
+      op.type !== 'openSettlement' &&
+      op.type !== 'closeSettlement'
+    ) {
+      return fail(ACK_REASONS.TABLE_SETTLING)
+    }
+
+    if (
       !target &&
       op.type !== 'resetTable' &&
       op.type !== 'transfer' &&
@@ -382,7 +420,9 @@ export function createRoomStore() {
       op.type !== 'potIn' &&
       op.type !== 'potOut' &&
       op.type !== 'potSplit' &&
-      op.type !== 'undoLast'
+      op.type !== 'undoLast' &&
+      op.type !== 'openSettlement' &&
+      op.type !== 'closeSettlement'
     ) {
       return fail(ACK_REASONS.INVALID)
     }
@@ -402,6 +442,7 @@ export function createRoomStore() {
         target.balance = Math.max(0, target.balance + delta)
         const actual = target.balance - before
         if (actual !== 0) {
+          applyPlusBuyIn(target, actual)
           ledger.push({
             id: uid('led'),
             kind: 'seatAdjust',
@@ -430,6 +471,7 @@ export function createRoomStore() {
         target.balance = Math.max(0, target.balance + delta)
         const actual = target.balance - before
         if (actual !== 0) {
+          applyPlusBuyIn(target, actual)
           ledger.push({
             id: uid('led'),
             kind: 'seatAdjust',
@@ -538,10 +580,12 @@ export function createRoomStore() {
         const prevBalances = seats.map((s) => ({
           seatId: s.seatId,
           balance: s.balance,
+          buyIn: normalizeBuyIn(s.buyIn),
         }))
         // 开局清桌优先于锁定：locked seats also set to N (lock flag kept).
         for (const s of seats) {
           s.balance = amount
+          s.buyIn = amount
         }
         ledger.push({
           id: uid('led'),
@@ -649,11 +693,12 @@ export function createRoomStore() {
           if (!entry.prevBalances || entry.prevBalances.length === 0) {
             return fail(ACK_REASONS.NOTHING_TO_UNDO)
           }
-          const byId = new Map(
-            entry.prevBalances.map((p) => [p.seatId, p.balance]),
-          )
+          const byId = new Map(entry.prevBalances.map((p) => [p.seatId, p]))
           for (const s of seats) {
-            if (byId.has(s.seatId)) s.balance = byId.get(s.seatId)
+            const prev = byId.get(s.seatId)
+            if (!prev) continue
+            s.balance = prev.balance
+            if (typeof prev.buyIn === 'number') s.buyIn = normalizeBuyIn(prev.buyIn)
           }
         } else if (entry.kind === 'seatAdjust') {
           const seat = seats.find((s) => s.seatId === entry.fromSeatId)
@@ -663,6 +708,7 @@ export function createRoomStore() {
             return fail(ACK_REASONS.NOTHING_TO_UNDO)
           }
           seat.balance = Math.max(0, seat.balance - delta)
+          undoPlusBuyIn(seat, delta)
         } else if (entry.kind === 'potIn') {
           const seat = seats.find((s) => s.seatId === entry.fromSeatId)
           if (!seat) return fail(ACK_REASONS.NOTHING_TO_UNDO)
@@ -719,6 +765,16 @@ export function createRoomStore() {
         if (ledger.length > 100) ledger = ledger.slice(-100)
         break
       }
+      case 'openSettlement': {
+        if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+        settling = true
+        break
+      }
+      case 'closeSettlement': {
+        if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+        settling = false
+        break
+      }
       default:
         return fail(ACK_REASONS.INVALID)
     }
@@ -732,6 +788,7 @@ export function createRoomStore() {
         seats,
         pot,
         ledger,
+        settling,
       },
     })
     return { ack: { opId: op.opId, ok: true, snapshotAt }, data }

@@ -905,6 +905,90 @@ button.seat {
   }
 }
 
+.settlement-pot {
+  margin: 0.35rem 0 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.settlement-table {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.65rem 0.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.settlement-head,
+.settlement-row,
+.settlement-foot {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr 0.9fr;
+  gap: 0.35rem;
+  align-items: center;
+  padding: 0.45rem 0.15rem;
+  font-size: 0.82rem;
+}
+
+.settlement-head {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
+.settlement-row {
+  border-top: 1px solid rgba(242, 244, 247, 0.06);
+}
+
+.settlement-foot {
+  border-top: 1px solid rgba(242, 244, 247, 0.12);
+  font-weight: 600;
+}
+
+.settlement-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.net-pos {
+  color: var(--denom-5);
+}
+
+.net-neg {
+  color: var(--denom-100);
+}
+
+.settlement-transfers {
+  margin-top: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settlement-transfers-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+}
+
+.settlement-transfer-list {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  list-style: none;
+  background: var(--card);
+  border-radius: var(--radius);
+}
+
+.settlement-transfer-list li {
+  padding: 0.35rem 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.settlement-back,
+.settlement-wait {
+  margin-top: 1.25rem;
+}
+
 @media (min-width: 720px) {
   .page {
     padding-top: 2rem;

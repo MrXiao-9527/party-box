@@ -4,9 +4,14 @@ import type { Phase, TableSnapshot } from '../types'
 export function sanitizeTableSnapshot(snap: TableSnapshot): TableSnapshot {
   return {
     ...snap,
-    seats: snap.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) })),
+    seats: snap.seats.map((s) => ({
+      ...s,
+      balance: Math.max(0, s.balance),
+      buyIn: Math.max(0, Math.floor(Number.isFinite(s.buyIn) ? s.buyIn : 0)),
+    })),
     pot: Math.max(0, Math.floor(Number.isFinite(snap.pot) ? snap.pot : 0)),
     ledger: Array.isArray(snap.ledger) ? snap.ledger : [],
+    settling: !!snap.settling,
   }
 }
 

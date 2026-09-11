@@ -18,6 +18,8 @@ export type ChipOpType =
   | 'potOut'
   | 'potSplit'
   | 'undoLast'
+  | 'openSettlement'
+  | 'closeSettlement'
 
 /** Ledger row kind — omit / transfer = seat→seat; seatAdjust = 本席加减; pot*; uniformBuyIn / undo. */
 export type LedgerKind =
@@ -45,8 +47,8 @@ export interface LedgerEntry {
    */
   amount: number
   at: number
-  /** uniformBuyIn: balances before set — required to reverse on undo. */
-  prevBalances?: { seatId: string; balance: number }[]
+  /** uniformBuyIn: balances + 累计买入 before set — required to reverse on undo. */
+  prevBalances?: { seatId: string; balance: number; buyIn?: number }[]
   /** potSplit: seats that received the floor share (for undo). */
   splitSeatIds?: string[]
   /** potSplit: remainder kept in pot after floor divide (N − M×K). */
@@ -62,6 +64,8 @@ export interface Seat {
   isHost: boolean
   locked: boolean
   balance: number
+  /** Cumulative buy-in (authoritative). Older snapshots → 0. */
+  buyIn: number
 }
 
 export interface RoomMember {
@@ -155,6 +159,8 @@ export interface SnapshotSeat {
   isHost: boolean
   locked: boolean
   balance: number
+  /** Cumulative buy-in (authoritative). Older snapshots → 0. */
+  buyIn: number
 }
 
 export interface TableSnapshot {
@@ -165,6 +171,8 @@ export interface TableSnapshot {
   pot: number
   /** In-table ledger (settles: seat ±, transfers, pot, buy-in, undos). */
   ledger: LedgerEntry[]
+  /** Host opened 结算 page. Shared so guests see the same numbers. */
+  settling?: boolean
 }
 
 export const MAX_SEATS = 8
@@ -190,6 +198,7 @@ export const ACK_REASONS = {
   SELF_TRANSFER: '不能转给自己',
   POSITIVE_INT: '请输入正整数',
   NOTHING_TO_UNDO: '没有可撤销的记录',
+  TABLE_SETTLING: '结算中，请先返回桌面',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */
