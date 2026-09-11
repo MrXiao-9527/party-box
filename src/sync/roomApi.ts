@@ -193,9 +193,12 @@ export async function resumeAsHost(
 export async function pickNewHost(
   roomCode: string,
   newHostSeatId: string,
+  fromSeatId: string,
 ): Promise<PersistedRoom | { error: string }> {
-  if (!isRelayEnabled()) return localPickNewHost(roomCode, newHostSeatId)
-  return relayPickNewHost(roomCode, newHostSeatId)
+  if (!isRelayEnabled()) {
+    return localPickNewHost(roomCode, newHostSeatId, fromSeatId)
+  }
+  return relayPickNewHost(roomCode, newHostSeatId, fromSeatId)
 }
 
 export async function fillSeatsToMax(

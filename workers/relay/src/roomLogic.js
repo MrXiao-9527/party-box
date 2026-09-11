@@ -18,6 +18,7 @@ export const ACK_REASONS = {
   TABLE_FULL: '本桌已满（最多8人）',
   SEATS_RANGE: '人数须为2–8',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
+  NO_HOST_CANDIDATE: '暂无在线成员可接桌',
   INSUFFICIENT: '余额不足',
   POT_INSUFFICIENT: '底池不足',
   SELF_TRANSFER: '不能转给自己',
@@ -425,9 +426,16 @@ export function createRoomStore() {
     })
   }
 
-  function pickNewHost(roomCode, newHostSeatId) {
+  function pickNewHost(roomCode, newHostSeatId, fromSeatId) {
     const existing = get(roomCode)
     if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+    if (existing.room.phase !== 'paused') return { error: ACK_REASONS.INVALID }
+    if (!fromSeatId || fromSeatId !== existing.room.hostSeatId) {
+      return { error: ACK_REASONS.NOT_HOST }
+    }
+    if (newHostSeatId === existing.room.hostSeatId) {
+      return { error: ACK_REASONS.INVALID }
+    }
     const candidate = existing.room.members.find((m) => m.seatId === newHostSeatId)
     if (!candidate) return { error: ACK_REASONS.INVALID }
     if (!candidate.connected) {

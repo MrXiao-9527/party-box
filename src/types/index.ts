@@ -223,6 +223,8 @@ export const ACK_REASONS = {
   TABLE_FULL: '本桌已满（最多8人）',
   SEATS_RANGE: '人数须为2–8',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
+  /** Paused-table host handoff: no other RoomMember.connected seat. */
+  NO_HOST_CANDIDATE: '暂无在线成员可接桌',
   INSUFFICIENT: '余额不足',
   POT_INSUFFICIENT: '底池不足',
   SELF_TRANSFER: '不能转给自己',

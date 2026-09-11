@@ -209,6 +209,13 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       snapshotRef.current = sanitized
       setRoom(data.room)
       roomRef.current = data.room
+      const id = loadIdentity()
+      if (id && id.roomCode.toUpperCase() === data.room.roomCode.toUpperCase()) {
+        const nextRole = roleForSeat(data.room.hostSeatId, id.seatId)
+        if (id.role !== nextRole) {
+          saveIdentity({ ...id, role: nextRole })
+        }
+      }
       return true
     },
     [],
@@ -802,11 +809,18 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   }, [roomCode, session, pushToast, applySyncedRoom])
 
   const claimHost = useCallback(
-    (newHostSeatId?: string) => {
+    (newHostSeatId: string) => {
       if (!roomCode || !session) return
-      const seatId = newHostSeatId ?? session.seatId
+      if (!newHostSeatId || newHostSeatId === session.seatId) {
+        pushToast(ACK_REASONS.INVALID)
+        return
+      }
       void (async () => {
-        const result = await pickNewHost(roomCode, seatId)
+        const result = await pickNewHost(
+          roomCode,
+          newHostSeatId,
+          session.seatId,
+        )
         if ('error' in result) {
           pushToast(result.error)
           return
@@ -819,9 +833,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             role: roleForSeat(result.room.hostSeatId, id.seatId),
           })
         }
-        pushToast(
-          seatId === session.seatId ? '你已成为新桌主' : '已选出新桌主',
-        )
+        pushToast('已选出新桌主')
       })()
     },
     [roomCode, session, pushToast, applySyncedRoom],
