@@ -202,6 +202,7 @@ try {
   })
 
   console.log('OK e2e-create-snapshot', code)
+  process.exitCode = 0
 } catch (err) {
   console.error(err)
   process.exitCode = 1
@@ -218,8 +219,16 @@ try {
     /* ignore */
   }
 } finally {
-  await browser?.close().catch(() => {})
+  try {
+    await Promise.race([
+      browser?.close() ?? Promise.resolve(),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ])
+  } catch {
+    /* ignore */
+  }
   await stop(vite)
   await stop(relay)
   fs.rmSync(DATA, { recursive: true, force: true })
+  process.exit(process.exitCode ?? 0)
 }
