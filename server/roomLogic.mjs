@@ -737,6 +737,33 @@ export function createRoomStore() {
     return { ack: { opId: op.opId, ok: true, snapshotAt }, data }
   }
 
+  /** Full dump for disk persistence (code → { data, touchedAt }). */
+  function exportAll() {
+    /** @type {Record<string, { data: object, touchedAt: number }>} */
+    const out = {}
+    for (const [key, entry] of rooms) {
+      out[key] = { data: entry.data, touchedAt: entry.touchedAt }
+    }
+    return out
+  }
+
+  /** Hydrate from disk after process restart. */
+  function importAll(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return 0
+    let n = 0
+    for (const [key, entry] of Object.entries(snapshot)) {
+      if (!entry?.data?.room?.roomCode) continue
+      const code = String(key).toUpperCase()
+      rooms.set(code, {
+        data: normalize(entry.data),
+        touchedAt:
+          typeof entry.touchedAt === 'number' ? entry.touchedAt : Date.now(),
+      })
+      n += 1
+    }
+    return n
+  }
+
   return {
     get,
     set,
@@ -752,6 +779,8 @@ export function createRoomStore() {
     restoreSeat,
     applyChipOp,
     sweep,
+    exportAll,
+    importAll,
     size: () => rooms.size,
   }
 }

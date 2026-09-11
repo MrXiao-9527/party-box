@@ -10,7 +10,9 @@ npm install
 npx wrangler deploy
 ```
 
-Set frontend `VITE_RELAY_URL` to the workers.dev (or custom) URL.
+Set frontend `VITE_RELAY_URL` to the workers.dev (or custom) URL at **build time**.
+
+Rooms survive Worker remount via Durable Object `persist()` — required for QA「稳预览验」.
 
 ## Local
 
@@ -19,6 +21,8 @@ npm run dev   # wrangler dev --port 45322
 ```
 
 Point app `.env.development` `VITE_RELAY_URL=http://127.0.0.1:45322`.
+
+See also repo root [`docs/stable-preview.md`](../../docs/stable-preview.md).
 
 ## API (compatible with Node relay)
 

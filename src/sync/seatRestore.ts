@@ -35,6 +35,8 @@ export const RESTORE_COPY = {
   SEAT_TAKEN: '原席被占，新坐一席',
   IDENTITY_LOST: '本地身份丢失，已为你新坐一席',
   ROOM_GONE: '房间已结束',
+  /** Locked — relay remount wiped room after client was seated. */
+  RELAY_RESTARTED: '房间服务已重启，请重新开桌',
   OTHER_TAB: '该席已在其他标签打开',
   TAKEN_OVER: '已在其他标签接管',
   /** Locked copy — same as ACK_REASONS.TABLE_FULL. */

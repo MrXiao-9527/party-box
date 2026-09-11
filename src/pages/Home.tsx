@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { A2HSHint } from '../components/A2HSHint'
 import { ToastStack } from '../components/Toast'
 import { createEmptyHostRoom, syncRoomFromRelay, syncStatusToast } from '../sync/roomApi'
+import { takeFlashToast } from '../sync/flashToast'
 import { ACK_REASONS, parseRoomCode } from '../types'
 
 const TOOLS = [
@@ -51,6 +52,12 @@ export function HomePage() {
       setToasts((prev) => prev.filter((t) => t.id !== id))
     }, 2800)
   }
+
+  useEffect(() => {
+    const flash = takeFlashToast()
+    if (flash) toast(flash)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const openTable = () => {
     void (async () => {

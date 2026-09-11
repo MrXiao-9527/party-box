@@ -179,6 +179,8 @@ export const ACK_REASONS = {
   ROLLBACK: '操作未生效，已回滚',
   INVALID: '操作无效',
   ROOM_MISSING: '房间不存在或已解散',
+  /** Was-in-room + relay 404 / wipe — locked QA copy (no zombie lobby). */
+  RELAY_RESTARTED: '房间服务已重启，请重新开桌',
   RELAY_UNREACHABLE: '连不上房间服务，请重试',
   ROOM_CODE_INVALID: '房码无效',
   TABLE_FULL: '本桌已满（最多8人）',

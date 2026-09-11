@@ -197,7 +197,18 @@ export async function relaySetPhase(
     `/rooms/${encodeURIComponent(roomCode)}/phase`,
     { method: 'POST', body: JSON.stringify({ phase }) },
   )
-  if (!result.ok) return null
+  if (!result.ok) {
+    // Distinguish wipe/404 so UI can toast 「房间服务已重启，请重新开桌」.
+    if (result.status === 404) {
+      const err = new Error(ACK_REASONS.ROOM_MISSING) as Error & {
+        code?: string
+      }
+      err.name = 'RelayRoomMissingError'
+      err.code = 'ROOM_MISSING'
+      throw err
+    }
+    return null
+  }
   return cache(result.body.data)
 }
 

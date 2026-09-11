@@ -4,6 +4,19 @@
 
 **真·双端验**：设置 `VITE_RELAY_URL` 并启动中继后，两台手机/两个浏览器可用同一房码加入并同步大厅与筹码（非 localStorage、非仅 LAN）。
 
+## 稳预览验（固定 HTTPS + 中继持久化）
+
+见 [`docs/stable-preview.md`](docs/stable-preview.md)。QA 标签：**稳预览验**。
+
+- **禁止** ephemeral `trycloudflare` / 临时 tunnel 作为验收预览。
+- Cloudflare Worker DO（推荐）或 Node `PARTY_BOX_DATA_DIR` 文件快照，重启后同房码恢复座位/余额/锅/流水/阶段。
+- 无法恢复时 toast 必须为：`房间服务已重启，请重新开桌`，并回首页（禁止僵尸「等候开桌」）。
+
+```bash
+npm run test:relay-persist
+# UI: node scripts/e2e-relay-restart.mjs
+```
+
 ## 本地运行（跨设备必开中继）
 
 ```bash
@@ -47,6 +60,7 @@ VITE_RELAY_URL=http://127.0.0.1:45322 npm run build && npm run preview
 | `VITE_RELAY_URL` | 前端构建 | 中继 origin |
 | `PORT` | Node 中继 | 默认 `45322` |
 | `CORS_ORIGIN` | Node 中继 | 允许的前端 origin；默认 `*` |
+| `PARTY_BOX_DATA_DIR` | Node 中继 | 持久化目录（默认 `./data`，写 `rooms.json`） |
 
 ### 部署 A — Cloudflare Worker + Durable Object（推荐生产）
 
