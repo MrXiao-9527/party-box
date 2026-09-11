@@ -516,7 +516,7 @@ export function RoomPage() {
   }
 
   const debug =
-    roomApi.room && !readOnly ? (
+    roomApi.room && !readOnly && !roomApi.table?.settling ? (
       <DevPanel
         onHostPause={roomApi.signalHostDisconnect}
         onFillSeats={roomApi.fillSeats}

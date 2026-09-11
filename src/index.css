@@ -912,42 +912,51 @@ button.seat {
   font-size: 0.9rem;
 }
 
-.settlement-table {
+.settlement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.settlement-card {
   background: var(--card);
   border-radius: var(--radius);
-  padding: 0.35rem 0.65rem 0.5rem;
-  font-variant-numeric: tabular-nums;
+  padding: 0.75rem 0.85rem;
 }
 
-.settlement-head,
-.settlement-row,
-.settlement-foot {
-  display: grid;
-  grid-template-columns: 1.2fr 1fr 1fr 0.9fr;
-  gap: 0.35rem;
-  align-items: center;
-  padding: 0.45rem 0.15rem;
-  font-size: 0.82rem;
-}
-
-.settlement-head {
-  color: var(--text-secondary);
-  font-size: 0.72rem;
-}
-
-.settlement-row {
-  border-top: 1px solid rgba(242, 244, 247, 0.06);
-}
-
-.settlement-foot {
-  border-top: 1px solid rgba(242, 244, 247, 0.12);
+.settlement-card .settlement-name {
+  margin: 0 0 0.45rem;
   font-weight: 600;
-}
-
-.settlement-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.settlement-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+}
+
+.settlement-dl div {
+  min-width: 0;
+}
+
+.settlement-dl dt {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
+.settlement-dl dd {
+  margin: 0.15rem 0 0;
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}
+
+.settlement-foot {
+  box-shadow: inset 0 0 0 1px rgba(242, 244, 247, 0.12);
 }
 
 .net-pos {

@@ -87,10 +87,10 @@ try {
   })
 
   // 1) 底池 > 0 blocks transfer list (8 divides evenly later)
-  await clickText('进锅')
+  await clickText('放进底池')
   await page.waitForSelector('.transfer-amount-input')
   await page.type('.transfer-amount-input', '8')
-  await clickText('确认进锅')
+  await clickText('确认放进底池')
   await page.waitForFunction(() =>
     (document.querySelector('.pot-top')?.textContent || '').includes('8'),
   )
@@ -106,10 +106,10 @@ try {
   await clickText('返回桌面')
   await page.waitForSelector('.seat-self')
 
-  await clickText('均分')
+  await clickText('底池均分')
   await page.waitForSelector('.transfer-amount-input')
   await page.type('.transfer-amount-input', '8')
-  await clickText('确认均分')
+  await clickText('确认底池均分')
   await page.waitForFunction(() =>
     (document.querySelector('.pot-top')?.textContent || '').includes('0'),
   )
@@ -152,8 +152,11 @@ try {
     const el = document.querySelector('.hero-balance')
     return el && Number(el.textContent) === 100
   })
+  await page.waitForFunction(() => !document.querySelector('.confirm-overlay'))
 
-  await page.click('.seat-other')
+  await page.evaluate(() => {
+    document.querySelector('.seats-rail .seat-other')?.click()
+  })
   await page.waitForSelector('.transfer-bar')
   await clickText('转筹码')
   await page.waitForSelector('.transfer-amount-input')
@@ -176,8 +179,11 @@ try {
     throw new Error(`bad transfer line: ${line}`)
   }
   const totals = await page.$eval('.settlement-foot', (el) => el.textContent)
-  if (!totals.includes('800') || !totals.includes('0')) {
+  if (!totals.includes('买入合计') || !totals.includes('800')) {
     throw new Error(`bad footer: ${totals}`)
+  }
+  if (!totals.includes('净额合计') || !totals.includes('0')) {
+    throw new Error(`bad footer net: ${totals}`)
   }
   await page.waitForFunction(() =>
     [...document.querySelectorAll('button')].some(

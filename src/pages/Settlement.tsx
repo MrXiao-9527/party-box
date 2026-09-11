@@ -80,35 +80,53 @@ export function Settlement({
         </div>
       </header>
 
-      <p className="settlement-pot">
-        底池 · {summary.pot}
-      </p>
+      <p className="settlement-pot">底池 · {summary.pot}</p>
 
-      <div className="settlement-table" role="table" aria-label="结算摘要">
-        <div className="settlement-head" role="row">
-          <span>昵称</span>
-          <span>累计买入</span>
-          <span>结算码量</span>
-          <span>净额</span>
-        </div>
+      <div className="settlement-list" aria-label="结算摘要">
         {summary.rows.map((row) => (
-          <div key={row.seatId} className="settlement-row" role="row">
-            <span className="settlement-name">{row.name}</span>
-            <span>{row.buyIn}</span>
-            <span>{row.settle}</span>
-            <span className={row.net < 0 ? 'net-neg' : row.net > 0 ? 'net-pos' : ''}>
-              {signed(row.net)}
-            </span>
-          </div>
+          <article key={row.seatId} className="settlement-card">
+            <p className="settlement-name">{row.name}</p>
+            <dl className="settlement-dl">
+              <div>
+                <dt>累计买入</dt>
+                <dd>{row.buyIn}</dd>
+              </div>
+              <div>
+                <dt>结算码量</dt>
+                <dd>{row.settle}</dd>
+              </div>
+              <div>
+                <dt>净额</dt>
+                <dd
+                  className={
+                    row.net < 0 ? 'net-neg' : row.net > 0 ? 'net-pos' : ''
+                  }
+                >
+                  {signed(row.net)}
+                </dd>
+              </div>
+            </dl>
+          </article>
         ))}
-        <div className="settlement-foot" role="row">
-          <span>合计</span>
-          <span>{summary.buyInTotal}</span>
-          <span>{summary.settleTotal}</span>
-          <span className={summary.netTotal !== 0 ? 'net-neg' : ''}>
-            {signed(summary.netTotal)}
-          </span>
-        </div>
+        <article className="settlement-card settlement-foot">
+          <p className="settlement-name">合计</p>
+          <dl className="settlement-dl">
+            <div>
+              <dt>买入合计</dt>
+              <dd>{summary.buyInTotal}</dd>
+            </div>
+            <div>
+              <dt>结算合计</dt>
+              <dd>{summary.settleTotal}</dd>
+            </div>
+            <div>
+              <dt>净额合计</dt>
+              <dd className={summary.netTotal !== 0 ? 'net-neg' : ''}>
+                {signed(summary.netTotal)}
+              </dd>
+            </div>
+          </dl>
+        </article>
       </div>
 
       {summary.block === null && (
@@ -138,7 +156,11 @@ export function Settlement({
       )}
 
       {isHost ? (
-        <button type="button" className="btn ghost wide settlement-back" onClick={onClose}>
+        <button
+          type="button"
+          className="btn ghost wide settlement-back"
+          onClick={onClose}
+        >
           返回桌面
         </button>
       ) : (
