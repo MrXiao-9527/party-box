@@ -472,7 +472,8 @@ export function setMemberConnected(
 
 /**
  * Explicit host handoff only — never called automatically on disconnect.
- * Online = RoomMember.connected (same presence flag as lobby / pause list).
+ * Pause after 桌主已离开: any connected member may pick another connected
+ * member. Online = RoomMember.connected (same presence flag as lobby / pause).
  */
 export function pickNewHost(
   roomCode: string,
@@ -482,8 +483,18 @@ export function pickNewHost(
   const existing = loadRoom(roomCode)
   if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
   if (existing.room.phase !== 'paused') return { error: ACK_REASONS.INVALID }
-  if (!fromSeatId || fromSeatId !== existing.room.hostSeatId) {
-    return { error: ACK_REASONS.NOT_HOST }
+
+  const caller = existing.room.members.find((m) => m.seatId === fromSeatId)
+  if (!caller || !caller.connected) return { error: ACK_REASONS.INVALID }
+
+  const currentHost = existing.room.members.find(
+    (m) => m.seatId === existing.room.hostSeatId,
+  )
+  // Product lock: pause after host has left (see signalHostDisconnect).
+  if (!currentHost || currentHost.connected) return { error: ACK_REASONS.INVALID }
+
+  if (!newHostSeatId || newHostSeatId === fromSeatId) {
+    return { error: ACK_REASONS.INVALID }
   }
   if (newHostSeatId === existing.room.hostSeatId) {
     return { error: ACK_REASONS.INVALID }

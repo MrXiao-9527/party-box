@@ -18,9 +18,11 @@ export function PausedTable({
   const [picking, setPicking] = useState(false)
   const [pendingSeatId, setPendingSeatId] = useState<string | null>(null)
   const host = room.members.find((m) => m.seatId === room.hostSeatId)
-  const isCurrentHost = session.seatId === room.hostSeatId
+  const viewer = room.members.find((m) => m.seatId === session.seatId)
+  const viewerOnline = !!viewer?.connected
 
-  // Online = RoomMember.connected. Host cannot select self.
+  // Any connected seated member may pick another connected member (not self).
+  // Left host is excluded (pause list shows 桌主 · 已离开).
   const candidates = room.members.filter(
     (m) =>
       m.connected &&
@@ -28,7 +30,8 @@ export function PausedTable({
       m.seatId !== session.seatId,
   )
   const pending = candidates.find((m) => m.seatId === pendingSeatId) ?? null
-  const canPick = candidates.length > 0
+  const canPick = viewerOnline && candidates.length > 0
+  const noCandidate = candidates.length === 0
 
   const closePick = () => {
     setPicking(false)
@@ -48,7 +51,7 @@ export function PausedTable({
       <p className="hint">
         不会自动转让桌主。请等待
         {host ? `「${host.name}」` : '桌主'}
-        重开一桌，或由桌主将桌主转让给在线成员。
+        重开一桌，或由在线成员选出新桌主。
       </p>
 
       <ul className="member-list paused-members">
@@ -79,26 +82,22 @@ export function PausedTable({
         <button type="button" className="btn primary wide" onClick={onResume}>
           重开一桌
         </button>
-        {isCurrentHost && (
-          <>
-            <button
-              type="button"
-              className="btn ghost wide"
-              data-pick-host
-              disabled={!canPick}
-              onClick={() => {
-                if (!canPick) return
-                setPicking(true)
-              }}
-            >
-              选新桌主
-            </button>
-            {!canPick && (
-              <p className="hint" data-no-host-candidate role="status">
-                {ACK_REASONS.NO_HOST_CANDIDATE}
-              </p>
-            )}
-          </>
+        <button
+          type="button"
+          className="btn ghost wide"
+          data-pick-host
+          disabled={!canPick}
+          onClick={() => {
+            if (!canPick) return
+            setPicking(true)
+          }}
+        >
+          选新桌主
+        </button>
+        {noCandidate && (
+          <p className="hint" data-no-host-candidate role="status">
+            {ACK_REASONS.NO_HOST_CANDIDATE}
+          </p>
         )}
       </div>
 
