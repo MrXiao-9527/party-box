@@ -1,5 +1,5 @@
 /**
- * Dual-device public pot sync QA — 「公共锅验」UI.
+ * Dual-device public pot sync QA — 「公共底池验」UI.
  * Requires: vite :45321 + relay :45322 (dev:all).
  */
 import puppeteer from 'puppeteer-core'
@@ -113,12 +113,12 @@ try {
     { timeout: 10000 },
   )
 
-  // 乙进锅 10
-  await clickText(guest, '进锅')
+  // 乙放进底池 10
+  await clickText(guest, '放进底池')
   await guest.waitForSelector('.transfer-amount-input')
   await guest.click('.transfer-amount-input', { clickCount: 3 })
   await guest.type('.transfer-amount-input', '10')
-  await clickText(guest, '确认进锅')
+  await clickText(guest, '确认放进底池')
   await new Promise((r) => setTimeout(r, 2000))
 
   console.log('ops', JSON.stringify(ops, null, 2))
@@ -147,7 +147,7 @@ try {
   await guest.screenshot({ path: `${ART}/pot-guest-after-refresh.png` })
 
   // Host potOut 4 → 乙
-  await clickText(host, '出锅')
+  await clickText(host, '从底池发给')
   await host.waitForSelector('.transfer-amount-input')
   // target select + amount
   await host.evaluate(() => {
@@ -164,18 +164,18 @@ try {
   const amountInput = amountInputs[amountInputs.length - 1]
   await amountInput.click({ clickCount: 3 })
   await amountInput.type('4')
-  await clickText(host, '确认出锅')
+  await clickText(host, '确认从底池发给')
   await new Promise((r) => setTimeout(r, 1500))
   const potAfterOut = await potText(host)
   console.log('pot after out', potAfterOut)
   await host.screenshot({ path: `${ART}/pot-after-out.png` })
 
   // Host potSplit remaining
-  await clickText(host, '均分')
+  await clickText(host, '底池均分')
   await host.waitForSelector('.transfer-amount-input')
   await host.click('.transfer-amount-input', { clickCount: 3 })
   await host.type('.transfer-amount-input', '6')
-  await clickText(host, '确认均分')
+  await clickText(host, '确认底池均分')
   await new Promise((r) => setTimeout(r, 1500))
   const potAfterSplit = await potText(host)
   const guestPotSplit = await potText(guest)
@@ -186,12 +186,12 @@ try {
   const invalidToast = toasts.some((t) => t.includes('操作无效'))
   const ok =
     !invalidToast &&
-    guestPot.includes('锅 · 10') &&
-    hostPot.includes('锅 · 10') &&
-    guestPotRefresh.includes('锅 · 10') &&
-    potAfterOut.includes('锅 · 6') &&
-    potAfterSplit.includes('锅 · 0') &&
-    guestPotSplit.includes('锅 · 0')
+    guestPot.includes('底池 · 10') &&
+    hostPot.includes('底池 · 10') &&
+    guestPotRefresh.includes('底池 · 10') &&
+    potAfterOut.includes('底池 · 6') &&
+    potAfterSplit.includes('底池 · 0') &&
+    guestPotSplit.includes('底池 · 0')
 
   console.log(ok ? 'E2E_POT_OK' : 'E2E_POT_FAIL')
   await browser.close()

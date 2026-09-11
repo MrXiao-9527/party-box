@@ -18,14 +18,18 @@ import { ACK_REASONS, findLastUndoable, ledgerEntrySummary } from '../types'
 import { defaultTransport, type ChipTransport } from './transport'
 import { loadIdentity, roleForSeat, saveIdentity } from './seatRestore'
 import {
+  clearLocalRoomArtifacts,
   fillSeatsToMax,
   pickNewHost,
   RelayNetworkError,
   resumeAsHost,
+  roomGoneToast,
   setMemberConnected,
   setPhase,
   syncRoomFromRelay,
+  wasInRoomLocally,
 } from './roomApi'
+import { setFlashToast } from './flashToast'
 import {
   isRelayEnabled,
   onRelayRoomUpdate,
@@ -102,6 +106,9 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   /** Drop same-key denom taps while awaiting ack. */
   const inflightKeysRef = useRef<Set<string>>(new Set())
   const pendingOpsRef = useRef<Set<string>>(new Set())
+  /** Host exit / intentional leave — skip restart toast on WS null. */
+  const intentionalLeaveRef = useRef(false)
+  const goneToastSentRef = useRef(false)
 
   const pushToast = useCallback((text: string) => {
     const id = `toast_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
@@ -110,6 +117,36 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       setToasts((prev) => prev.filter((t) => t.id !== id))
     }, 2800)
   }, [])
+
+  const markLeaving = useCallback(() => {
+    intentionalLeaveRef.current = true
+  }, [])
+
+  /** Relay 404 / wipe after we were in-room: clear zombie lobby, toast once. */
+  const handleRelayRoomGone = useCallback(
+    (code: string) => {
+      if (intentionalLeaveRef.current) {
+        setRoom(null)
+        roomRef.current = null
+        setTable(null)
+        snapshotRef.current = null
+        return
+      }
+      const toast = roomGoneToast(code)
+      clearLocalRoomArtifacts(code)
+      setRoom(null)
+      roomRef.current = null
+      setTable(null)
+      snapshotRef.current = null
+      setSession(null)
+      if (!goneToastSentRef.current) {
+        goneToastSentRef.current = true
+        setFlashToast(toast)
+        pushToast(toast)
+      }
+    },
+    [pushToast],
+  )
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
@@ -190,12 +227,19 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     }
     window.addEventListener('storage', onStorage)
 
+    goneToastSentRef.current = false
+    intentionalLeaveRef.current = false
+
     const unsubRelayEvent = onRelayRoomUpdate(roomCode, (data) => {
       if (!data) {
-        setRoom(null)
-        roomRef.current = null
-        setTable(null)
-        snapshotRef.current = null
+        if (isRelayEnabled() && wasInRoomLocally(roomCode)) {
+          handleRelayRoomGone(roomCode)
+        } else {
+          setRoom(null)
+          roomRef.current = null
+          setTable(null)
+          snapshotRef.current = null
+        }
         return
       }
       applySyncedRoom(data)
@@ -206,11 +250,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       : () => {}
 
     // Relay: poll shared host snapshot (not only localStorage) so pot survives WS blips.
+    // Missing after was-in-room → restart toast (no zombie「等候开桌」).
     const poll = window.setInterval(() => {
       if (isRelayEnabled()) {
         void syncRoomFromRelay(roomCode).then((synced) => {
           if (synced.status === 'ok') {
             applySyncedRoom(synced.data)
+          } else if (synced.status === 'missing') {
+            handleRelayRoomGone(roomCode)
           }
         })
       } else {
@@ -223,7 +270,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       unsubRelayEvent()
       unsubWs()
     }
-  }, [roomCode, refresh, applySyncedRoom])
+  }, [roomCode, refresh, applySyncedRoom, handleRelayRoomGone])
 
   const applyLocalOptimistic = useCallback(
     (op: ChipOp, base: TableSnapshot): TableSnapshot => {
@@ -414,7 +461,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             fromSeatId: sender.seatId,
             fromName: sender.name,
             toSeatId: '',
-            toName: '锅',
+            toName: '底池',
             amount,
             at: Date.now(),
           })
@@ -430,7 +477,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             id: `led_opt_${op.opId}_potOut`,
             kind: 'potOut',
             fromSeatId: '',
-            fromName: '锅',
+            fromName: '底池',
             toSeatId: target.seatId,
             toName: target.name,
             amount,
@@ -453,7 +500,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             id: `led_opt_${op.opId}_potSplit`,
             kind: 'potSplit',
             fromSeatId: '',
-            fromName: '锅',
+            fromName: '底池',
             toSeatId: '',
             toName: '',
             amount: share,
@@ -638,6 +685,12 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           applySyncedRoom(data, { force: true })
           return
         }
+        // setPhase null (non-404): confirm whether relay wiped the room.
+        const synced = await syncRoomFromRelay(roomCode)
+        if (synced.status === 'missing') {
+          handleRelayRoomGone(roomCode)
+          return
+        }
         setRoom((prev) => {
           if (!prev) return prev
           const next = { ...prev, phase: prevPhase }
@@ -646,6 +699,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         })
         pushToast('开桌失败，请重开一桌或检查网络')
       } catch (e) {
+        const missing =
+          e instanceof Error &&
+          (e.name === 'RelayRoomMissingError' ||
+            (e as { code?: string }).code === 'ROOM_MISSING')
+        if (missing) {
+          handleRelayRoomGone(roomCode)
+          return
+        }
         setRoom((prev) => {
           if (!prev) return prev
           const next = { ...prev, phase: prevPhase }
@@ -659,7 +720,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         )
       }
     })()
-  }, [roomCode, session, applySyncedRoom, pushToast])
+  }, [roomCode, session, applySyncedRoom, pushToast, handleRelayRoomGone])
 
   const signalHostDisconnect = useCallback(() => {
     if (!roomCode || !session || !room) return
@@ -808,6 +869,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     bindSession,
     clearSession,
     setOffline,
+    markLeaving,
+    handleRelayRoomGone,
     setPersisted: (data: PersistedRoom) => {
       setPendingOps(new Set())
       pendingOpsRef.current.clear()

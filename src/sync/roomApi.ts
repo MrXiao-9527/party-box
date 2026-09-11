@@ -22,7 +22,13 @@ import {
 import type { Phase } from '../types'
 import { ACK_REASONS } from '../types'
 import {
+  clearHadSeat,
+  loadIdentity,
+  saveIdentity,
+} from './seatRestore'
+import {
   isRelayEnabled,
+  notifyRoomUpdate,
   RelayNetworkError,
   relayClaimHostSeat,
   relayCreateEmptyHostRoom,
@@ -43,6 +49,61 @@ export type SyncRoomResult =
   | { status: 'ok'; data: PersistedRoom }
   | { status: 'missing' }
   | { status: 'network' }
+
+/** True if this browser had joined / cached this room (not a cold join). */
+export function wasInRoomLocally(roomCode: string): boolean {
+  const code = roomCode.toUpperCase()
+  if (loadRoom(code)) return true
+  try {
+    const sessionRaw = localStorage.getItem('party-box:session')
+    if (sessionRaw) {
+      const session = JSON.parse(sessionRaw) as Session
+      if (session?.roomCode?.toUpperCase() === code) return true
+    }
+  } catch {
+    /* ignore */
+  }
+  const id = loadIdentity()
+  if (id && id.roomCode.toUpperCase() === code) return true
+  try {
+    return localStorage.getItem(`party-box:had-seat:${code}`) !== null
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Drop zombie local lobby after relay 404 / wipe.
+ * Does not call remote DELETE (room already gone).
+ */
+export function clearLocalRoomArtifacts(roomCode: string): void {
+  const code = roomCode.toUpperCase()
+  localDeleteRoom(code)
+  clearHadSeat(code)
+  try {
+    const sessionRaw = localStorage.getItem('party-box:session')
+    if (sessionRaw) {
+      const session = JSON.parse(sessionRaw) as Session
+      if (session?.roomCode?.toUpperCase() === code) {
+        saveSession(null)
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  const id = loadIdentity()
+  if (id && id.roomCode.toUpperCase() === code) {
+    saveIdentity(null, code)
+  }
+  notifyRoomUpdate(code, null)
+}
+
+/** Toast when relay room is gone: restart copy if we were seated, else missing. */
+export function roomGoneToast(roomCode: string): string {
+  return wasInRoomLocally(roomCode)
+    ? ACK_REASONS.RELAY_RESTARTED
+    : ACK_REASONS.ROOM_MISSING
+}
 
 /** Pull shared room into localStorage. Distinguishes missing vs network. */
 export async function syncRoomFromRelay(

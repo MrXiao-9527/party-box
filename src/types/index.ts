@@ -96,7 +96,7 @@ export interface ChipOp {
 
 /** Human summary of a ledger row (for preview / 撤销 · … / 流水文案).
  * seatAdjust 产品文案：`昵称 +N` / `昵称 -N`（例：「甲 +10」「甲 -5」）.
- * pot：`甲 → 锅 +N` / `锅 → 乙 +N` / `锅均分 · 在座K人 · 各 +M · 余R留锅`.
+ * pot：`甲 → 底池 +N` / `底池 → 乙 +N` / `底池均分 · 在座K人 · 各 +M · 余R留底池`.
  */
 export function ledgerEntrySummary(entry: LedgerEntry): string {
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
@@ -106,23 +106,23 @@ export function ledgerEntrySummary(entry: LedgerEntry): string {
     return `${entry.fromName} ${n > 0 ? '+' : ''}${n}`
   }
   if (entry.kind === 'potIn') {
-    return `${entry.fromName} → 锅 +${entry.amount}`
+    return `${entry.fromName} → 底池 +${entry.amount}`
   }
   if (entry.kind === 'potOut') {
-    return `锅 → ${entry.toName} +${entry.amount}`
+    return `底池 → ${entry.toName} +${entry.amount}`
   }
   if (entry.kind === 'potSplit') {
     const k = entry.splitSeatIds?.length ?? 0
     const m = entry.amount
     const r = entry.splitRemainder ?? 0
-    return `锅均分 · 在座${k}人 · 各 +${m} · 余${r}留锅`
+    return `底池均分 · 在座${k}人 · 各 +${m} · 余${r}留底池`
   }
   return `${entry.fromName}→${entry.toName} +${entry.amount}`
 }
 
 /** Locked pot-split preview / ledger copy. */
 export function potSplitSummary(k: number, m: number, r: number): string {
-  return `锅均分 · 在座${k}人 · 各 +${m} · 余${r}留锅`
+  return `底池均分 · 在座${k}人 · 各 +${m} · 余${r}留底池`
 }
 
 /** Newest successful settle that has not yet been undone (skips undo rows). */
@@ -179,12 +179,14 @@ export const ACK_REASONS = {
   ROLLBACK: '操作未生效，已回滚',
   INVALID: '操作无效',
   ROOM_MISSING: '房间不存在或已解散',
+  /** Was-in-room + relay 404 / wipe — locked QA copy (no zombie lobby). */
+  RELAY_RESTARTED: '房间服务已重启，请重新开桌',
   RELAY_UNREACHABLE: '连不上房间服务，请重试',
   ROOM_CODE_INVALID: '房码无效',
   TABLE_FULL: '本桌已满（最多8人）',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
   INSUFFICIENT: '余额不足',
-  POT_INSUFFICIENT: '锅内不足',
+  POT_INSUFFICIENT: '底池不足',
   SELF_TRANSFER: '不能转给自己',
   POSITIVE_INT: '请输入正整数',
   NOTHING_TO_UNDO: '没有可撤销的记录',

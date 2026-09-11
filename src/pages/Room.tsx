@@ -16,10 +16,14 @@ import {
 } from '../store/localRoom'
 import {
   deleteRoom,
+  isRelayEnabled,
   restoreSeat,
   setMemberConnected,
   syncRoomFromRelay,
+  clearLocalRoomArtifacts,
+  wasInRoomLocally,
 } from '../sync/roomApi'
+import { setFlashToast } from '../sync/flashToast'
 import { ACK_REASONS, MAX_SEATS, parseRoomCode } from '../types'
 import {
   decideRestore,
@@ -203,7 +207,11 @@ export function RoomPage() {
     }
 
     const run = async () => {
+      // Capture before await — WS null may clear local during sync.
+      const hadLocal = wasInRoomLocally(roomCode)
       // Cross-device: pull shared RoomState before restore / nick gate.
+      // Never fall back to localStorage when relay says missing — that is the
+      // zombie「等候开桌」path after Node remount without durable restore.
       const synced = await syncRoomFromRelay(roomCode)
       if (synced.status === 'network') {
         roomApi.pushToast(ACK_REASONS.RELAY_UNREACHABLE)
@@ -211,8 +219,21 @@ export function RoomPage() {
         setGate({ type: 'gone' })
         return
       }
-      const roomDataNow =
-        synced.status === 'ok' ? synced.data : loadRoom(roomCode)
+      if (synced.status === 'missing') {
+        const toast = !isRelayEnabled()
+          ? RESTORE_COPY.ROOM_GONE
+          : hadLocal
+            ? ACK_REASONS.RELAY_RESTARTED
+            : ACK_REASONS.ROOM_MISSING
+        clearLocalRoomArtifacts(roomCode)
+        setFlashToast(toast)
+        roomApi.pushToast(toast)
+        saveIdentity(null, roomCode)
+        navigate('/', { replace: true })
+        setGate({ type: 'gone' })
+        return
+      }
+      const roomDataNow = synced.data
       const roomViewNow = roomDataNow
         ? {
             roomCode: roomDataNow.room.roomCode,
@@ -346,6 +367,17 @@ export function RoomPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomCode])
 
+  // Mid-session relay wipe: leave page (toast already from useRoom).
+  // FORBIDDEN: stay on zombie「等候开桌」with dead 开桌.
+  useEffect(() => {
+    if (gate.type !== 'ready' || !roomCode) return
+    if (roomApi.room) return
+    // Still booting into ready — room apply may lag one frame.
+    if (roomApi.session?.roomCode?.toUpperCase() === roomCode) return
+    setGate({ type: 'gone' })
+    navigate('/', { replace: true })
+  }, [gate.type, roomCode, roomApi.room, roomApi.session, navigate])
+
   const claimHold = (session: Session) => {
     holdingSeatRef.current = session.seatId
     setTabReadOnly(false)
@@ -447,6 +479,7 @@ export function RoomPage() {
 
   /** Active host exit may dissolve the room; read-only only clears local identity. */
   const exitLocalIdentity = () => {
+    roomApi.markLeaving()
     saveIdentity(null, roomCode)
     roomApi.clearSession()
     roomApi.setOffline(false)
@@ -460,6 +493,7 @@ export function RoomPage() {
       exitLocalIdentity()
       return
     }
+    roomApi.markLeaving()
     if (roomApi.isHost) void deleteRoom(roomCode)
     exitLocalIdentity()
   }
@@ -564,17 +598,25 @@ export function RoomPage() {
     roomApi.session.roomCode.toUpperCase() !== roomCode ||
     !roomApi.session.name
   ) {
+    // Mid-session relay wipe: useRoom cleared session + toasted restart.
+    if (gate.type === 'ready' && !roomApi.room) {
+      return (
+        <>
+          <ToastStack toasts={roomApi.toasts} onDismiss={roomApi.dismissToast} />
+          <div className="page" />
+        </>
+      )
+    }
     return <div className="page" />
   }
 
   if (!roomApi.room) {
+    // Prefer navigate-home via effect when relay wiped; avoid zombie lobby.
     return (
-      <div className="page">
-        <p className="error">房间已结束</p>
-        <button type="button" className="btn primary" onClick={() => navigate('/')}>
-          回首页
-        </button>
-      </div>
+      <>
+        <ToastStack toasts={roomApi.toasts} onDismiss={roomApi.dismissToast} />
+        <div className="page" />
+      </>
     )
   }
 

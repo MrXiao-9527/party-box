@@ -2,24 +2,58 @@
  * party-box shared room relay — HTTP + WebSocket.
  *
  * Env:
- *   PORT          listen port (default 45322)
- *   CORS_ORIGIN   comma-separated allowed origins (* = all, default *)
- *   ROOM_TTL_MS   idle room TTL (optional; logic default 4h)
+ *   PORT                 listen port (default 45322)
+ *   CORS_ORIGIN          comma-separated allowed origins (* = all, default *)
+ *   ROOM_TTL_MS          idle room TTL (optional; logic default 4h)
+ *   PARTY_BOX_DATA_DIR   durable snapshot dir (default: ./data)
  *
  * Run: node server/index.mjs
+ *
+ * Rooms are persisted to disk so process remount restores the same snapshot.
+ * Production preference: Cloudflare Worker + Durable Object (workers/relay).
  */
 
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
 import { createRoomStore, ACK_REASONS } from './roomLogic.mjs'
+import { dataDir, loadSnapshot, saveSnapshot, snapshotPath } from './persist.mjs'
 
 const PORT = Number(process.env.PORT || 45322)
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*'
 
 const store = createRoomStore()
+const hydrated = store.importAll(loadSnapshot())
+console.log(
+  `[party-box relay] persist=${snapshotPath()} restored=${hydrated} rooms`,
+)
 
 /** @type {Map<string, Set<import('ws').WebSocket>>} */
 const subscribers = new Map()
+
+let persistTimer = 0
+function schedulePersist() {
+  if (persistTimer) return
+  persistTimer = setTimeout(() => {
+    persistTimer = 0
+    try {
+      saveSnapshot(store.exportAll())
+    } catch (e) {
+      console.error('[relay persist] save failed', e)
+    }
+  }, 50)
+}
+
+function persistNow() {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = 0
+  }
+  try {
+    saveSnapshot(store.exportAll())
+  } catch (e) {
+    console.error('[relay persist] save failed', e)
+  }
+}
 
 function allowOrigin(origin) {
   if (CORS_ORIGIN === '*') return '*'
@@ -77,6 +111,7 @@ function broadcast(roomCode, data) {
 
 function afterMutation(data) {
   if (!data) return
+  schedulePersist()
   broadcast(data.room.roomCode, data)
 }
 
@@ -93,7 +128,12 @@ async function handle(req, res) {
 
   try {
     if (req.method === 'GET' && path === '/health') {
-      sendJson(res, 200, { ok: true, rooms: store.size() })
+      sendJson(res, 200, {
+        ok: true,
+        backend: 'node-file',
+        rooms: store.size(),
+        persistDir: dataDir(),
+      })
       return
     }
 
@@ -116,12 +156,14 @@ async function handle(req, res) {
           sendJson(res, 404, { error: ACK_REASONS.ROOM_MISSING })
           return
         }
+        schedulePersist()
         sendJson(res, 200, { data })
         return
       }
 
       if (req.method === 'DELETE' && !action) {
         store.del(code)
+        schedulePersist()
         broadcast(code, null)
         sendJson(res, 200, { ok: true })
         return
@@ -268,6 +310,20 @@ wss.on('connection', (ws, req) => {
   })
 })
 
+function shutdown() {
+  persistNow()
+  server.close(() => process.exit(0))
+  setTimeout(() => process.exit(0), 1500).unref()
+}
+
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)
+process.on('beforeExit', () => {
+  persistNow()
+})
+
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[party-box relay] http://0.0.0.0:${PORT}  ws://0.0.0.0:${PORT}/ws`)
+  console.log(
+    `[party-box relay] http://0.0.0.0:${PORT}  ws://0.0.0.0:${PORT}/ws  data=${dataDir()}`,
+  )
 })

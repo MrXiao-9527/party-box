@@ -11,6 +11,8 @@
     "lint": "oxlint",
     "preview": "vite preview --host 127.0.0.1 --port 45321",
     "test:relay": "node scripts/check-relay.mjs",
+    "test:relay-persist": "node scripts/test-relay-persist.mjs",
+    "test:e2e-relay-restart": "node scripts/e2e-relay-restart.mjs",
     "test:transfer": "node scripts/test-transfer.mjs",
     "test:buyin": "node scripts/test-buyin.mjs",
     "test:undo": "node scripts/test-undo.mjs",
