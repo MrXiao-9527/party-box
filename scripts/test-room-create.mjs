@@ -9,6 +9,7 @@ import {
   stampCreateSettings,
   tableFullReason,
 } from '../server/roomLogic.mjs'
+import { tableSettingsView } from '../src/types/index.ts'
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
@@ -48,6 +49,23 @@ function assert(cond, msg) {
   assert(stamped.smallBlind === 1 && stamped.bigBlind === 2, 'stamp blinds')
   const skipped = stampCreateSettings(base, { phase: 'playing' })
   assert(skipped.buyInN === 0 && skipped.maxSeats === 8, 'phase-only no stamp')
+}
+
+{
+  const both = tableSettingsView({
+    buyInN: 100,
+    maxSeats: 4,
+    smallBlind: 1,
+    bigBlind: 2,
+  })
+  assert(both.buyInN === 100 && both.maxSeats === 4, 'view always 买入/人数')
+  assert(both.smallBlind === 1 && both.bigBlind === 2, 'view filled blinds')
+  const none = tableSettingsView({ buyInN: 100, maxSeats: 4 })
+  assert(none.smallBlind === undefined && none.bigBlind === undefined, 'omit empty blinds')
+  const onlySb = tableSettingsView({ buyInN: 100, maxSeats: 4, smallBlind: 1 })
+  assert(onlySb.smallBlind === 1 && onlySb.bigBlind === undefined, 'omit unfilled 大盲')
+  const onlyBb = tableSettingsView({ buyInN: 100, maxSeats: 4, bigBlind: 2 })
+  assert(onlyBb.smallBlind === undefined && onlyBb.bigBlind === 2, 'omit unfilled 小盲')
 }
 
 assert(tableFullReason(2) === '本桌已满（最多2人）', 'full copy X=2')

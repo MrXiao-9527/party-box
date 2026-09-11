@@ -161,6 +161,7 @@ try {
     (el) => el.textContent,
   )
   assert(tableSettings.includes('100') && tableSettings.includes('2'), 'read-only settings')
+  assert(!tableSettings.includes('—'), 'read-only settings no dash')
   await shot('table-invite-settings')
 
   // invalid room code

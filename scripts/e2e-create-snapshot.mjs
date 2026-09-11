@@ -79,16 +79,38 @@ async function stop(child) {
 async function readSettings(page) {
   await page.waitForSelector('.room-settings [data-setting="buyInN"]')
   return page.$eval('.room-settings', (el) => ({
+    text: el.textContent || '',
     buyIn: el.querySelector('[data-setting="buyInN"]')?.textContent?.trim(),
     seats: el.querySelector('[data-setting="maxSeats"]')?.textContent?.trim(),
-    blinds: el.querySelector('[data-setting="blinds"]')?.textContent?.trim() ?? null,
+    smallBlind:
+      el.querySelector('[data-setting="smallBlind"]')?.textContent?.trim() ??
+      null,
+    bigBlind:
+      el.querySelector('[data-setting="bigBlind"]')?.textContent?.trim() ?? null,
   }))
+}
+
+function assertNoDash(settings, where) {
+  assert(!settings.text.includes('—'), `${where} must not show —`)
 }
 
 function assertSnapshot(settings, where) {
   assert(settings.buyIn === '100', `${where} buy-in ${settings.buyIn}`)
   assert(settings.seats === '4', `${where} seats ${settings.seats}`)
-  assert(settings.blinds === '1 / 2', `${where} blinds ${settings.blinds}`)
+  assert(settings.smallBlind === '1', `${where} 小盲 ${settings.smallBlind}`)
+  assert(settings.bigBlind === '2', `${where} 大盲 ${settings.bigBlind}`)
+  assertNoDash(settings, where)
+}
+
+function assertSnapshotNoBlinds(settings, where) {
+  assert(settings.buyIn === '100', `${where} buy-in ${settings.buyIn}`)
+  assert(settings.seats === '4', `${where} seats ${settings.seats}`)
+  assert(settings.smallBlind == null, `${where} 小盲 omitted`)
+  assert(settings.bigBlind == null, `${where} 大盲 omitted`)
+  assert(!settings.text.includes('小盲'), `${where} no 小盲 label`)
+  assert(!settings.text.includes('大盲'), `${where} no 大盲 label`)
+  assert(!settings.text.includes('盲注'), `${where} no 盲注 label`)
+  assertNoDash(settings, where)
 }
 
 let relay
@@ -198,6 +220,30 @@ try {
   assertSnapshot(await readSettings(guest), 'guest table 邀请')
   await guest.screenshot({
     path: `${ART}/create-snapshot-guest-table.png`,
+    fullPage: true,
+  })
+
+  // Line 3: blinds left empty at create → omit 小盲/大盲 rows, never 「—」
+  const host2Ctx = await browser.createBrowserContext()
+  const host2 = await host2Ctx.newPage()
+  await prep(host2)
+  await host2.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await host2.waitForSelector('.brand')
+  await clickText(host2, '开一桌')
+  await fillCreateRoom(host2, { buyIn: '100', maxSeats: '4' })
+  await clickText(host2, '确认')
+  await host2.waitForSelector('.nickname-card input')
+  await host2.type('.nickname-card input', '桌主B')
+  await clickText(host2, '进入')
+  await host2.waitForSelector('.page.lobby')
+  assertSnapshotNoBlinds(await readSettings(host2), 'host2 lobby')
+  await clickText(host2, '开桌')
+  await host2.waitForSelector('.seat-self')
+  await clickText(host2, '邀请')
+  await host2.waitForSelector('.invite-box .room-settings')
+  assertSnapshotNoBlinds(await readSettings(host2), 'host2 table 邀请')
+  await host2.screenshot({
+    path: `${ART}/create-snapshot-no-blinds.png`,
     fullPage: true,
   })
 
