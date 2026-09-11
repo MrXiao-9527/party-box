@@ -4,7 +4,7 @@
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
-import { fillCreateRoom } from './e2e-lib.mjs'
+import { fillCreateRoom, setInputValue } from './e2e-lib.mjs'
 
 const BASE = 'http://127.0.0.1:45321'
 const ART = '/opt/cursor/artifacts/screenshots'
@@ -95,7 +95,7 @@ try {
   await clickText('撤销上一笔')
   await page.waitForSelector('[aria-label="撤销上一笔"]')
   await page.waitForFunction(() =>
-    (document.body.textContent || '').includes('将撤销：地主 +100'),
+    (document.body.textContent || '').includes('将撤销：地主 席位+100'),
   )
   await shot('undo-seat-adjust-preview')
   await clickText('确认撤销')
@@ -108,8 +108,12 @@ try {
   await openMenu()
   await clickText('全员买入')
   await page.waitForSelector('.buyin-amount-input')
-  await page.click('.buyin-amount-input', { clickCount: 3 })
-  await page.type('.buyin-amount-input', '50')
+  await setInputValue(page, '.buyin-amount-input', '50')
+  await page.waitForFunction(() =>
+    (document.querySelector('.transfer-preview')?.textContent || '').includes(
+      '全员余额将设为 50',
+    ),
+  )
   await clickText('确认买入')
   await page.waitForFunction(() => {
     const el = document.querySelector('.hero-balance')
@@ -141,11 +145,10 @@ try {
       .map((r) => r.textContent || '')
       .join('\n')
     return (
-      text.includes('撤销 · 全员买入 50') &&
-      text.includes('撤销 · 地主 +100') &&
-      // success row copy: nickname + signed amount in who
+      text.includes('撤销：全员买入 50') &&
+      text.includes('撤销：地主 席位+100') &&
       [...document.querySelectorAll('.ledger-who')].some(
-        (el) => (el.textContent || '').trim() === '地主 +100',
+        (el) => (el.textContent || '').trim() === '地主 席位+100',
       )
     )
   })

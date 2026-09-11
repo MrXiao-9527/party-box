@@ -48,7 +48,7 @@ function op(partial) {
   assert(bal(hostId) === 0 && bal(aId) === 0 && bal(bId) === 0, 'empty no bal')
 }
 
-// 2) 本席加减文案锁定：「甲 +10」/「甲 -5」+ undo 同队列
+// 2) 本席加减文案锁定：「甲 席位+10」/「甲 席位-5」+ undo 同队列
 {
   const rAddJia = op({
     opId: 'adj_jia_plus',
@@ -56,11 +56,11 @@ function op(partial) {
     amount: 10,
     targetSeatId: aId,
   })
-  assert(rAddJia.ack.ok, '甲 +10 ok')
+  assert(rAddJia.ack.ok, '甲 席位+10 ok')
   assert(bal(aId) === 10, '甲 bal 10')
   const rowJia = rAddJia.data.table.ledger.at(-1)
   assert(rowJia.kind === 'seatAdjust' && rowJia.amount === 10, 'kind/amount')
-  assert(ledgerEntrySummary(rowJia) === '甲 +10', 'copy 甲 +10')
+  assert(ledgerEntrySummary(rowJia) === '甲 席位+10', 'copy 甲 席位+10')
 
   const rSubJia = op({
     opId: 'adj_jia_minus',
@@ -68,13 +68,13 @@ function op(partial) {
     denom: 5,
     targetSeatId: aId,
   })
-  assert(rSubJia.ack.ok, '甲 -5 ok')
+  assert(rSubJia.ack.ok, '甲 席位-5 ok')
   assert(bal(aId) === 5, '甲 bal 5')
   const rowJiaSub = rSubJia.data.table.ledger.at(-1)
   assert(rowJiaSub.amount === -5, 'amount -5')
-  assert(ledgerEntrySummary(rowJiaSub) === '甲 -5', 'copy 甲 -5')
+  assert(ledgerEntrySummary(rowJiaSub) === '甲 席位-5', 'copy 甲 席位-5')
 
-  // Host self adjust still nickname + signed
+  // Host self adjust still nickname + signed 席位±
   const rAdd = op({
     opId: 'adj1',
     type: '+batch',
@@ -85,7 +85,7 @@ function op(partial) {
   assert(bal(hostId) === 100, 'host 100')
   const row = rAdd.data.table.ledger.at(-1)
   assert(row.kind === 'seatAdjust' && row.amount === 100, 'seatAdjust +100')
-  assert(ledgerEntrySummary(row) === '地主 +100', 'summary 地主 +100')
+  assert(ledgerEntrySummary(row) === '地主 席位+100', 'summary 地主 席位+100')
 
   const rSub = op({
     opId: 'adj2',
@@ -97,7 +97,7 @@ function op(partial) {
   assert(bal(hostId) === 75, 'host 75')
   const subRow = rSub.data.table.ledger.at(-1)
   assert(subRow.kind === 'seatAdjust' && subRow.amount === -25, 'seatAdjust -25')
-  assert(ledgerEntrySummary(subRow) === '地主 -25', 'summary 地主 -25')
+  assert(ledgerEntrySummary(subRow) === '地主 席位-25', 'summary 地主 席位-25')
 
   // No-op subtract at floor: balance 0 seat 乙 −batch → no new seatAdjust
   const ledLenBefore = store.get(code).table.ledger.length
@@ -111,21 +111,22 @@ function op(partial) {
   assert(bal(bId) === 0, '乙 still 0')
   assert(store.get(code).table.ledger.length === ledLenBefore, 'no ledger when actual delta 0')
 
-  // Walk-back undo queue: latest 地主 -25 → 地主 +100 → 甲 -5 → 甲 +10
+  // Walk-back undo queue: latest 地主 席位-25 → +100 → 甲 席位-5 → +10
   const u1 = op({ opId: 'u_adj_1', type: 'undoLast' })
-  assert(u1.ack.ok && u1.data.table.ledger.at(-1).fromName === '地主 -25', 'undo 地主 -25')
+  assert(u1.ack.ok && u1.data.table.ledger.at(-1).fromName === '地主 席位-25', 'undo 地主 席位-25')
+  assert(ledgerEntrySummary(u1.data.table.ledger.at(-1)) === '撤销：地主 席位-25', '撤销： prefix')
   assert(bal(hostId) === 100, 'host 100')
 
   const u2 = op({ opId: 'u_adj_2', type: 'undoLast' })
-  assert(u2.ack.ok && u2.data.table.ledger.at(-1).fromName === '地主 +100', 'undo 地主 +100')
+  assert(u2.ack.ok && u2.data.table.ledger.at(-1).fromName === '地主 席位+100', 'undo 地主 席位+100')
   assert(bal(hostId) === 0, 'host 0')
 
   const u3 = op({ opId: 'u_adj_3', type: 'undoLast' })
-  assert(u3.ack.ok && u3.data.table.ledger.at(-1).fromName === '甲 -5', 'undo 甲 -5')
+  assert(u3.ack.ok && u3.data.table.ledger.at(-1).fromName === '甲 席位-5', 'undo 甲 席位-5')
   assert(bal(aId) === 10, '甲 back to 10')
 
   const u4 = op({ opId: 'u_adj_4', type: 'undoLast' })
-  assert(u4.ack.ok && u4.data.table.ledger.at(-1).fromName === '甲 +10', 'undo 甲 +10')
+  assert(u4.ack.ok && u4.data.table.ledger.at(-1).fromName === '甲 席位+10', 'undo 甲 席位+10')
   assert(bal(aId) === 0, '甲 back to 0')
 }
 
@@ -151,7 +152,11 @@ function op(partial) {
   assert(bal(hostId) === 100 && bal(aId) === 40, 'transfer reversed')
   assert(rU.data.table.ledger.length === ledgerLen + 1, 'append undo row')
   assert(rU.data.table.ledger.at(-1).kind === 'undo', 'undo kind')
-  assert(rU.data.table.ledger.at(-1).fromName.includes('地主→甲'), 'undo summary names')
+  assert(rU.data.table.ledger.at(-1).fromName === '地主 → 甲 · 转 15', 'undo summary names')
+  assert(
+    ledgerEntrySummary(rU.data.table.ledger.at(-1)) === '撤销：地主 → 甲 · 转 15',
+    '撤销：原摘要',
+  )
 }
 
 // 4) Walk-back: buy-in then transfer; undo twice

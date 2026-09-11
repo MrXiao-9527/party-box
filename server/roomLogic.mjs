@@ -114,27 +114,20 @@ export function stampCreateSettings(room, input) {
 }
 
 export function ledgerEntrySummary(entry) {
-  // seatAdjust: 「甲 +10」 / 「甲 -5」
-  // pot: 「甲 → 底池 +N」 / 「底池 → 乙 +N」 / 「底池均分 · 在座K人 · 各 +M · 余R留底池」
+  // Locked copy: `{谁} → {谁} · 转 {n}` / `全员买入 {n}` / `进底池 {n}` /
+  // `出底池 {n}` / `均分底池` / `{谁} 席位±{n}` / `撤销：{原摘要}`
   if (entry.kind === 'uniformBuyIn') return `全员买入 ${entry.amount}`
-  if (entry.kind === 'undo') return entry.fromName || '撤销'
+  if (entry.kind === 'undo') {
+    return entry.fromName ? `撤销：${entry.fromName}` : '撤销'
+  }
   if (entry.kind === 'seatAdjust') {
     const n = entry.amount
-    return `${entry.fromName} ${n > 0 ? '+' : ''}${n}`
+    return `${entry.fromName} 席位${n > 0 ? '+' : ''}${n}`
   }
-  if (entry.kind === 'potIn') {
-    return `${entry.fromName} → 底池 +${entry.amount}`
-  }
-  if (entry.kind === 'potOut') {
-    return `底池 → ${entry.toName} +${entry.amount}`
-  }
-  if (entry.kind === 'potSplit') {
-    const k = entry.splitSeatIds?.length ?? 0
-    const m = entry.amount
-    const r = entry.splitRemainder ?? 0
-    return `底池均分 · 在座${k}人 · 各 +${m} · 余${r}留底池`
-  }
-  return `${entry.fromName}→${entry.toName} +${entry.amount}`
+  if (entry.kind === 'potIn') return `进底池 ${entry.amount}`
+  if (entry.kind === 'potOut') return `出底池 ${entry.amount}`
+  if (entry.kind === 'potSplit') return '均分底池'
+  return `${entry.fromName} → ${entry.toName} · 转 ${entry.amount}`
 }
 
 export function potSplitSummary(k, m, r) {
