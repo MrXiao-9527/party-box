@@ -905,6 +905,99 @@ button.seat {
   }
 }
 
+.settlement-pot {
+  margin: 0.35rem 0 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.settlement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.settlement-card {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 0.75rem 0.85rem;
+}
+
+.settlement-card .settlement-name {
+  margin: 0 0 0.45rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settlement-dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.35rem;
+}
+
+.settlement-dl div {
+  min-width: 0;
+}
+
+.settlement-dl dt {
+  margin: 0;
+  font-size: 0.68rem;
+  color: var(--text-secondary);
+}
+
+.settlement-dl dd {
+  margin: 0.15rem 0 0;
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}
+
+.settlement-foot {
+  box-shadow: inset 0 0 0 1px rgba(242, 244, 247, 0.12);
+}
+
+.net-pos {
+  color: var(--denom-5);
+}
+
+.net-neg {
+  color: var(--denom-100);
+}
+
+.settlement-transfers {
+  margin-top: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.settlement-transfers-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+}
+
+.settlement-transfer-list {
+  margin: 0;
+  padding: 0.65rem 0.85rem;
+  list-style: none;
+  background: var(--card);
+  border-radius: var(--radius);
+}
+
+.settlement-transfer-list li {
+  padding: 0.35rem 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.settlement-back,
+.settlement-wait {
+  margin-top: 1.25rem;
+}
+
 @media (min-width: 720px) {
   .page {
     padding-top: 2rem;

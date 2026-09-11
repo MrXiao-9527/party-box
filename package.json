@@ -17,7 +17,8 @@
     "test:buyin": "node scripts/test-buyin.mjs",
     "test:undo": "node scripts/test-undo.mjs",
     "test:pot": "node scripts/test-pot.mjs",
-    "test:stale-sync": "node --experimental-strip-types scripts/test-stale-sync.mjs"
+    "test:stale-sync": "node --experimental-strip-types scripts/test-stale-sync.mjs",
+    "test:settlement": "node --experimental-strip-types scripts/test-settlement.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

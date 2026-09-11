@@ -61,6 +61,23 @@ function normalizePot(raw: unknown): number {
   return Math.max(0, Math.floor(n))
 }
 
+function normalizeBuyIn(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isFinite(n)) return 0
+  return Math.max(0, Math.floor(n))
+}
+
+function applyPlusBuyIn(
+  seat: { buyIn?: number },
+  actual: number,
+): void {
+  if (actual > 0) seat.buyIn = normalizeBuyIn(seat.buyIn) + actual
+}
+
+function undoPlusBuyIn(seat: { buyIn?: number }, delta: number): void {
+  if (delta > 0) seat.buyIn = Math.max(0, normalizeBuyIn(seat.buyIn) - delta)
+}
+
 function normalizeRoom(data: PersistedRoom): PersistedRoom {
   return {
     ...data,
@@ -71,9 +88,13 @@ function normalizeRoom(data: PersistedRoom): PersistedRoom {
     },
     table: {
       ...data.table,
-      seats: data.table.seats.slice(0, MAX_SEATS),
+      seats: data.table.seats.slice(0, MAX_SEATS).map((s) => ({
+        ...s,
+        buyIn: normalizeBuyIn(s.buyIn),
+      })),
       pot: normalizePot(data.table.pot),
       ledger: Array.isArray(data.table.ledger) ? data.table.ledger : [],
+      settling: !!data.table.settling,
     },
   }
 }
@@ -145,6 +166,7 @@ export function createEmptyHostRoom(): {
       seats: [],
       pot: 0,
       ledger: [],
+      settling: false,
     },
   }
   saveRoom(data)
@@ -201,11 +223,12 @@ export function claimHostSeat(
       snapshotAt: Date.now(),
       denoms: existing.table.denoms,
       seats: [
-        { seatId, name, isHost: true, locked: false, balance: 0 },
+        { seatId, name, isHost: true, locked: false, balance: 0, buyIn: 0 },
         ...existing.table.seats.map((s) => ({ ...s, isHost: false })),
       ],
       pot: normalizePot(existing.table.pot),
       ledger: existing.table.ledger ?? [],
+      settling: !!existing.table.settling,
     },
   }
   saveRoom(data)
@@ -231,9 +254,10 @@ export function createRoomAsHost(name: string): {
     table: {
       snapshotAt: now,
       denoms: [...DEFAULT_DENOMS],
-      seats: [{ seatId, name, isHost: true, locked: false, balance: 0 }],
+      seats: [{ seatId, name, isHost: true, locked: false, balance: 0, buyIn: 0 }],
       pot: 0,
       ledger: [],
+      settling: false,
     },
   }
   saveRoom(data)
@@ -276,7 +300,7 @@ export function joinRoom(
       snapshotAt: Date.now(),
       seats: [
         ...existing.table.seats,
-        { seatId, name, isHost: false, locked: false, balance: 0 },
+        { seatId, name, isHost: false, locked: false, balance: 0, buyIn: 0 },
       ],
       pot: normalizePot(existing.table.pot),
       ledger: existing.table.ledger ?? [],
@@ -300,7 +324,14 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
     const seatId = uid('seat')
     const name = `座位${n++}`
     members.push({ seatId, name, isHost: false, connected: true })
-    seats.push({ seatId, name, isHost: false, locked: false, balance: 0 })
+    seats.push({
+      seatId,
+      name,
+      isHost: false,
+      locked: false,
+      balance: 0,
+      buyIn: 0,
+    })
   }
 
   const data: PersistedRoom = {
@@ -428,6 +459,7 @@ export function applyChipOp(op: ChipOp): {
   const target = seats.find((s) => s.seatId === op.targetSeatId)
   let ledger = [...(existing.table.ledger ?? [])]
   let pot = normalizePot(existing.table.pot)
+  let settling = !!existing.table.settling
 
   const fail = (reason: string) => ({
     ack: {
@@ -440,6 +472,14 @@ export function applyChipOp(op: ChipOp): {
   })
 
   if (
+    settling &&
+    op.type !== 'openSettlement' &&
+    op.type !== 'closeSettlement'
+  ) {
+    return fail(ACK_REASONS.TABLE_SETTLING)
+  }
+
+  if (
     !target &&
     op.type !== 'resetTable' &&
     op.type !== 'transfer' &&
@@ -447,7 +487,9 @@ export function applyChipOp(op: ChipOp): {
     op.type !== 'potIn' &&
     op.type !== 'potOut' &&
     op.type !== 'potSplit' &&
-    op.type !== 'undoLast'
+    op.type !== 'undoLast' &&
+    op.type !== 'openSettlement' &&
+    op.type !== 'closeSettlement'
   ) {
     return fail(ACK_REASONS.INVALID)
   }
@@ -467,6 +509,7 @@ export function applyChipOp(op: ChipOp): {
       target.balance = Math.max(0, target.balance + delta)
       const actual = target.balance - before
       if (actual !== 0) {
+        applyPlusBuyIn(target, actual)
         ledger.push({
           id: uid('led'),
           kind: 'seatAdjust',
@@ -495,6 +538,7 @@ export function applyChipOp(op: ChipOp): {
       target.balance = Math.max(0, target.balance + delta)
       const actual = target.balance - before
       if (actual !== 0) {
+        applyPlusBuyIn(target, actual)
         ledger.push({
           id: uid('led'),
           kind: 'seatAdjust',
@@ -605,10 +649,12 @@ export function applyChipOp(op: ChipOp): {
       const prevBalances = seats.map((s) => ({
         seatId: s.seatId,
         balance: s.balance,
+        buyIn: normalizeBuyIn(s.buyIn),
       }))
       // 开局清桌优先于锁定：locked seats also set to N (lock flag kept).
       for (const s of seats) {
         s.balance = amount
+        s.buyIn = amount
       }
       ledger.push({
         id: uid('led'),
@@ -716,11 +762,12 @@ export function applyChipOp(op: ChipOp): {
         if (!entry.prevBalances || entry.prevBalances.length === 0) {
           return fail(ACK_REASONS.NOTHING_TO_UNDO)
         }
-        const byId = new Map(
-          entry.prevBalances.map((p) => [p.seatId, p.balance]),
-        )
+        const byId = new Map(entry.prevBalances.map((p) => [p.seatId, p]))
         for (const s of seats) {
-          if (byId.has(s.seatId)) s.balance = byId.get(s.seatId)!
+          const prev = byId.get(s.seatId)
+          if (!prev) continue
+          s.balance = prev.balance
+          if (typeof prev.buyIn === 'number') s.buyIn = normalizeBuyIn(prev.buyIn)
         }
       } else if (entry.kind === 'seatAdjust') {
         const seat = seats.find((s) => s.seatId === entry.fromSeatId)
@@ -731,6 +778,7 @@ export function applyChipOp(op: ChipOp): {
         }
         // Reverse signed delta (买码 +N → −N; 下分 −N → +N).
         seat.balance = Math.max(0, seat.balance - delta)
+        undoPlusBuyIn(seat, delta)
       } else if (entry.kind === 'potIn') {
         const seat = seats.find((s) => s.seatId === entry.fromSeatId)
         if (!seat) return fail(ACK_REASONS.NOTHING_TO_UNDO)
@@ -788,6 +836,16 @@ export function applyChipOp(op: ChipOp): {
       if (ledger.length > 100) ledger = ledger.slice(-100)
       break
     }
+    case 'openSettlement': {
+      if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+      settling = true
+      break
+    }
+    case 'closeSettlement': {
+      if (!isHost) return fail(ACK_REASONS.NOT_HOST)
+      settling = false
+      break
+    }
     default:
       return fail(ACK_REASONS.INVALID)
   }
@@ -801,6 +859,7 @@ export function applyChipOp(op: ChipOp): {
       seats,
       pot,
       ledger,
+      settling,
     },
   }
   saveRoom(data)

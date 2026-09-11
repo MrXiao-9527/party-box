@@ -595,6 +595,17 @@ export function ChipTable({
               撤销上一笔
             </button>
           )}
+          {isHost && (
+            <button
+              type="button"
+              onClick={() => {
+                setMenuOpen(false)
+                onOp('openSettlement', self.seatId)
+              }}
+            >
+              结束桌
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {

@@ -7,6 +7,7 @@ import { NicknameGate } from './Nickname'
 import { Lobby } from './Lobby'
 import { ChipTable } from './ChipTable'
 import { PausedTable } from './PausedTable'
+import { Settlement } from './Settlement'
 import {
   loadRoom,
   loadSession,
@@ -515,7 +516,7 @@ export function RoomPage() {
   }
 
   const debug =
-    roomApi.room && !readOnly ? (
+    roomApi.room && !readOnly && !roomApi.table?.settling ? (
       <DevPanel
         onHostPause={roomApi.signalHostDisconnect}
         onFillSeats={roomApi.fillSeats}
@@ -653,6 +654,16 @@ export function RoomPage() {
                 }
               : roomApi.claimHost
           }
+          pushToast={roomApi.pushToast}
+        />
+      ) : roomApi.table?.settling ? (
+        <Settlement
+          room={roomApi.room}
+          table={roomApi.table}
+          isHost={roomApi.isHost}
+          onClose={denyIfReadOnly(() => {
+            void guardedOp('closeSettlement', roomApi.session!.seatId)
+          })}
           pushToast={roomApi.pushToast}
         />
       ) : roomApi.table ? (

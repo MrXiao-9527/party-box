@@ -57,6 +57,7 @@ function seatsFromSnapshot(
     isHost: s.isHost,
     locked: s.locked,
     balance: Math.max(0, s.balance),
+    buyIn: Math.max(0, Math.floor(Number.isFinite(s.buyIn) ? s.buyIn : 0)),
   }))
 }
 
@@ -89,6 +90,8 @@ function denomKey(
   if (type === 'undoLast') {
     return 'undoLast'
   }
+  if (type === 'openSettlement') return 'openSettlement'
+  if (type === 'closeSettlement') return 'closeSettlement'
   return null
 }
 
@@ -274,7 +277,11 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
 
   const applyLocalOptimistic = useCallback(
     (op: ChipOp, base: TableSnapshot): TableSnapshot => {
-      const seats = base.seats.map((s) => ({ ...s, balance: Math.max(0, s.balance) }))
+      const seats = base.seats.map((s) => ({
+        ...s,
+        balance: Math.max(0, s.balance),
+        buyIn: Math.max(0, Math.floor(Number.isFinite(s.buyIn) ? s.buyIn : 0)),
+      }))
       const target = seats.find((s) => s.seatId === op.targetSeatId)
       if (
         !target &&
@@ -284,7 +291,16 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         op.type !== 'potIn' &&
         op.type !== 'potOut' &&
         op.type !== 'potSplit' &&
-        op.type !== 'undoLast'
+        op.type !== 'undoLast' &&
+        op.type !== 'openSettlement' &&
+        op.type !== 'closeSettlement'
+      ) {
+        return base
+      }
+      if (
+        base.settling &&
+        op.type !== 'openSettlement' &&
+        op.type !== 'closeSettlement'
       ) {
         return base
       }
@@ -293,6 +309,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         0,
         Math.floor(Number.isFinite(base.pot) ? base.pot : 0),
       )
+      let settling = !!base.settling
 
       switch (op.type) {
         case '+denom':
@@ -301,6 +318,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             target.balance = Math.max(0, target.balance + op.denom)
             const actual = target.balance - before
             if (actual !== 0) {
+              if (actual > 0) target.buyIn += actual
               ledger.push({
                 id: `led_opt_${op.opId}_adj`,
                 kind: 'seatAdjust',
@@ -320,6 +338,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             target.balance = Math.max(0, target.balance - op.denom)
             const actual = target.balance - before
             if (actual !== 0) {
+              if (actual > 0) target.buyIn += actual
               ledger.push({
                 id: `led_opt_${op.opId}_adj`,
                 kind: 'seatAdjust',
@@ -339,6 +358,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             target.balance = Math.max(0, target.balance + op.amount)
             const actual = target.balance - before
             if (actual !== 0) {
+              if (actual > 0) target.buyIn += actual
               ledger.push({
                 id: `led_opt_${op.opId}_adj`,
                 kind: 'seatAdjust',
@@ -358,6 +378,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             target.balance = Math.max(0, target.balance - op.amount)
             const actual = target.balance - before
             if (actual !== 0) {
+              if (actual > 0) target.buyIn += actual
               ledger.push({
                 id: `led_opt_${op.opId}_adj`,
                 kind: 'seatAdjust',
@@ -431,9 +452,11 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           const prevBalances = seats.map((s) => ({
             seatId: s.seatId,
             balance: s.balance,
+            buyIn: s.buyIn,
           }))
           for (const s of seats) {
             s.balance = amount
+            s.buyIn = amount
           }
           ledger.push({
             id: `led_opt_${op.opId}_buyin`,
@@ -516,11 +539,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           const summary = ledgerEntrySummary(entry)
           if (entry.kind === 'uniformBuyIn') {
             if (!entry.prevBalances || entry.prevBalances.length === 0) return base
-            const byId = new Map(
-              entry.prevBalances.map((p) => [p.seatId, p.balance]),
-            )
+            const byId = new Map(entry.prevBalances.map((p) => [p.seatId, p]))
             for (const s of seats) {
-              if (byId.has(s.seatId)) s.balance = byId.get(s.seatId)!
+              const prev = byId.get(s.seatId)
+              if (!prev) continue
+              s.balance = prev.balance
+              if (typeof prev.buyIn === 'number') {
+                s.buyIn = Math.max(0, Math.floor(prev.buyIn))
+              }
             }
           } else if (entry.kind === 'seatAdjust') {
             const seat = seats.find((s) => s.seatId === entry.fromSeatId)
@@ -528,6 +554,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             const delta = entry.amount
             if (!Number.isInteger(delta) || delta === 0) return base
             seat.balance = Math.max(0, seat.balance - delta)
+            if (delta > 0) seat.buyIn = Math.max(0, seat.buyIn - delta)
           } else if (entry.kind === 'potIn') {
             const seat = seats.find((s) => s.seatId === entry.fromSeatId)
             if (!seat) return base
@@ -574,8 +601,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           })
           break
         }
+        case 'openSettlement':
+          settling = true
+          break
+        case 'closeSettlement':
+          settling = false
+          break
       }
-      return { ...base, seats, pot, ledger, snapshotAt: base.snapshotAt }
+      return { ...base, seats, pot, ledger, settling, snapshotAt: base.snapshotAt }
     },
     [],
   )
