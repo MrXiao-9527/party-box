@@ -901,6 +901,13 @@ button.seat {
   z-index: 60;
 }
 
+@media (pointer: coarse) {
+  .toast-stack {
+    /* Clear WeChat / in-app title bars that sit over safe-area-inset-top: 0 */
+    top: calc(3.75rem + env(safe-area-inset-top, 0px));
+  }
+}
+
 /* Fail toast: secondary text; success ack has no special color */
 .toast {
   border: none;

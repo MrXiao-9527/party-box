@@ -662,6 +662,7 @@ export function RoomPage() {
           room={roomApi.room}
           session={roomApi.session}
           isHost={roomApi.isHost}
+          starting={roomApi.starting}
           onStart={denyIfReadOnly(roomApi.startPlaying)}
         />
       ) : phase === 'paused' ? (

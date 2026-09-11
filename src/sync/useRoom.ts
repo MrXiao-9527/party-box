@@ -104,6 +104,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   const [connectionState, setConnectionState] = useState<'online' | 'offline'>(
     () => transport.getConnectionState(),
   )
+  const [starting, setStarting] = useState(false)
+  const startingRef = useRef(false)
   const snapshotRef = useRef<TableSnapshot | null>(null)
   const roomRef = useRef<RoomState | null>(null)
   /** Drop same-key denom taps while awaiting ack. */
@@ -703,15 +705,12 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       pushToast('开桌失败，请重开一桌或检查网络')
       return
     }
+    if (startingRef.current) return
+    startingRef.current = true
+    setStarting(true)
     void (async () => {
-      const prevPhase = roomRef.current?.phase ?? 'lobby'
-      // Optimistic: enter ChipTable immediately; phase anti-regression holds it.
-      setRoom((prev) => {
-        if (!prev || prev.phase === 'playing') return prev
-        const next = { ...prev, phase: 'playing' as const }
-        roomRef.current = next
-        return next
-      })
+      // Stay on lobby until setPhase ACKs so「开桌中…」is visible and a hung
+      // relay cannot leave the host on a local-only ChipTable.
       try {
         const data = await setPhase(roomCode, 'playing')
         if (data) {
@@ -724,12 +723,6 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           handleRelayRoomGone(roomCode)
           return
         }
-        setRoom((prev) => {
-          if (!prev) return prev
-          const next = { ...prev, phase: prevPhase }
-          roomRef.current = next
-          return next
-        })
         pushToast('开桌失败，请重开一桌或检查网络')
       } catch (e) {
         const missing =
@@ -740,17 +733,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           handleRelayRoomGone(roomCode)
           return
         }
-        setRoom((prev) => {
-          if (!prev) return prev
-          const next = { ...prev, phase: prevPhase }
-          roomRef.current = next
-          return next
-        })
         pushToast(
           e instanceof RelayNetworkError
             ? ACK_REASONS.RELAY_UNREACHABLE
             : '开桌失败，请重开一桌或检查网络',
         )
+      } finally {
+        startingRef.current = false
+        setStarting(false)
       }
     })()
   }, [roomCode, session, applySyncedRoom, pushToast, handleRelayRoomGone])
@@ -887,6 +877,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     table,
     seats,
     isHost,
+    starting,
     connectionState,
     pendingOps,
     toasts,
