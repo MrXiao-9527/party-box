@@ -11,9 +11,14 @@
 ## Fix
 
 - Shared relay (Node `server/` and/or Cloudflare Worker + Durable Object `workers/relay/`)
-- `VITE_RELAY_URL` → `SharedRelayTransport` + `roomApi`
+- Node relay persists to `PARTY_BOX_DATA_DIR/rooms.json` (survives process remount)
+- Cloudflare DO `persist()` survives Worker remount
+- `VITE_RELAY_URL` → `SharedRelayTransport` + `roomApi` (bake at **build** time for 稳预览验)
 - Unset → `LocalStoreTransport` (solo/dev)
-- Toasts: missing →「房间不存在或已解散」; network →「连不上房间服务，请重试」
+- Toasts: missing →「房间不存在或已解散」; network →「连不上房间服务，请重试」;
+  was-in-room + wipe →「房间服务已重启，请重新开桌」+ home (no zombie lobby)
+
+See [`docs/stable-preview.md`](stable-preview.md).
 
 ## Verify（真·双端验）
 
