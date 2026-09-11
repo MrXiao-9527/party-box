@@ -114,9 +114,11 @@ try {
   console.log('pot visibility', vis)
 
   await host.evaluate(() => {
+    const pageEl = document.querySelector('.page.table')
+    if (pageEl) pageEl.style.minHeight = '2200px'
     const rail = document.querySelector('.seats-rail')
     if (rail) rail.scrollLeft = rail.scrollWidth
-    window.scrollTo(0, 280)
+    window.scrollTo(0, 420)
   })
   const afterScroll = await host.evaluate(() => {
     const pot = document.querySelector('.pot-top')
@@ -125,10 +127,17 @@ try {
       top: r?.top ?? -1,
       bottom: r?.bottom ?? -1,
       vh: window.innerHeight,
+      scrollY: window.scrollY,
     }
   })
   console.log('pot after scroll', afterScroll)
-  await host.evaluate(() => window.scrollTo(0, 0))
+  await host.evaluate(() => {
+    const pageEl = document.querySelector('.page.table')
+    if (pageEl) pageEl.style.minHeight = ''
+    const rail = document.querySelector('.seats-rail')
+    if (rail) rail.scrollLeft = 0
+    window.scrollTo(0, 0)
+  })
 
   const ops = []
   guest.on('response', async (res) => {
@@ -230,7 +239,10 @@ try {
   const pinned = vis.pos === 'sticky' || vis.pos === 'fixed'
   const sizeOk = vis.potPx + 0.05 >= vis.seatPx && vis.seatPx > 0
   const stillPinned =
-    afterScroll.top >= 0 && afterScroll.bottom > 0 && afterScroll.top < 160
+    afterScroll.scrollY > 200 &&
+    afterScroll.top >= 0 &&
+    afterScroll.bottom > 0 &&
+    afterScroll.top < 160
   const ok =
     !invalidToast &&
     vis.text === '底池 · 0' &&

@@ -79,23 +79,39 @@ try {
   await page.waitForSelector('.page.table')
   await clickText('填满座位 (1/8)')
   await page.waitForSelector('.seat-other')
+  await page.evaluate(() => {
+    document.querySelectorAll('.toast').forEach((t) => t.click())
+  })
+  await new Promise((r) => setTimeout(r, 200))
 
   const atZero = await potMetrics()
   console.log('at zero', atZero)
   await page.screenshot({ path: `${ART}/pot-top-zero.png` })
 
   await page.evaluate(() => {
+    document.querySelectorAll('.toast').forEach((t) => t.click())
     document.querySelector('.ledger-toggle')?.click()
-  })
-  await page.evaluate(() => {
+    const pageEl = document.querySelector('.page.table')
+    if (pageEl) pageEl.style.minHeight = '2200px'
     const rail = document.querySelector('.seats-rail')
     if (rail) rail.scrollLeft = rail.scrollWidth
-    window.scrollTo(0, 320)
+    window.scrollTo(0, 420)
   })
   const afterScroll = await potMetrics()
+  const scrollY = await page.evaluate(() => window.scrollY)
+  afterScroll.scrollY = scrollY
   console.log('after scroll', afterScroll)
   await page.screenshot({ path: `${ART}/pot-top-scrolled.png` })
-  await page.evaluate(() => window.scrollTo(0, 0))
+  await page.evaluate(() => {
+    const rail = document.querySelector('.seats-rail')
+    if (rail) rail.scrollLeft = 0
+    const pageEl = document.querySelector('.page.table')
+    if (pageEl) pageEl.style.minHeight = ''
+    window.scrollTo(0, 0)
+  })
+  await page.evaluate(() => {
+    document.querySelectorAll('.toast').forEach((t) => t.click())
+  })
 
   await page.click('.denom-100')
   await page.waitForFunction(() => {
@@ -119,6 +135,7 @@ try {
   const sizeOk = atZero.potPx + 0.05 >= atZero.seatPx && atZero.seatPx > 0
   const stillPinned =
     afterScroll.visible &&
+    afterScroll.scrollY > 200 &&
     afterScroll.top >= 0 &&
     afterScroll.bottom > 0 &&
     afterScroll.top < 160
