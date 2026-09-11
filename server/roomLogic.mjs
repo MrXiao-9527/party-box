@@ -3,6 +3,7 @@
  * Mirrors src/store/localRoom.ts + src/types (keep in sync).
  */
 
+export const MIN_SEATS = 2
 export const MAX_SEATS = 8
 export const DEFAULT_DENOMS = [1, 5, 10, 25, 100]
 export const ACK_REASONS = {
@@ -15,6 +16,7 @@ export const ACK_REASONS = {
   ROOM_MISSING: '房间不存在或已解散',
   ROOM_CODE_INVALID: '房码无效',
   TABLE_FULL: '本桌已满（最多8人）',
+  SEATS_RANGE: '人数须为2–8',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
   INSUFFICIENT: '余额不足',
   POT_INSUFFICIENT: '底池不足',
@@ -22,6 +24,65 @@ export const ACK_REASONS = {
   POSITIVE_INT: '请输入正整数',
   NOTHING_TO_UNDO: '没有可撤销的记录',
   TABLE_SETTLING: '结算中，请先返回桌面',
+}
+
+export function normalizeMaxSeats(raw) {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n < MIN_SEATS || n > MAX_SEATS) return MAX_SEATS
+  return n
+}
+
+export function tableFullReason(maxSeats = MAX_SEATS) {
+  return `本桌已满（最多${normalizeMaxSeats(maxSeats)}人）`
+}
+
+function optionalPositiveInt(raw) {
+  if (raw === undefined || raw === null || raw === '') {
+    return { ok: true, value: undefined }
+  }
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n <= 0) return { ok: false }
+  return { ok: true, value: n }
+}
+
+/** Create-room body. Omitted buy-in → 0; omitted seats → 8. Invalid 1/9 / ≤0 rejected. */
+export function parseRoomCreate(input = {}) {
+  const src = input && typeof input === 'object' ? input : {}
+  const buyRaw = src.buyInN
+  const buyMissing = buyRaw === undefined || buyRaw === null || buyRaw === ''
+  let buyInN = 0
+  if (!buyMissing) {
+    const n = typeof buyRaw === 'number' ? buyRaw : Number(buyRaw)
+    if (!Number.isInteger(n) || n <= 0) {
+      return { error: ACK_REASONS.POSITIVE_INT }
+    }
+    buyInN = n
+  }
+  const seatsRaw = src.maxSeats
+  const seatsMissing =
+    seatsRaw === undefined || seatsRaw === null || seatsRaw === ''
+  let maxSeats = MAX_SEATS
+  if (!seatsMissing) {
+    const n = typeof seatsRaw === 'number' ? seatsRaw : Number(seatsRaw)
+    if (!Number.isInteger(n) || n < MIN_SEATS || n > MAX_SEATS) {
+      return { error: ACK_REASONS.SEATS_RANGE }
+    }
+    maxSeats = n
+  }
+  const small = optionalPositiveInt(src.smallBlind)
+  if (!small.ok) return { error: ACK_REASONS.POSITIVE_INT }
+  const big = optionalPositiveInt(src.bigBlind)
+  if (!big.ok) return { error: ACK_REASONS.POSITIVE_INT }
+  const seatId =
+    typeof src.seatId === 'string' && src.seatId ? src.seatId : undefined
+  return {
+    ok: true,
+    buyInN,
+    maxSeats,
+    smallBlind: small.value,
+    bigBlind: big.value,
+    seatId,
+  }
 }
 
 export function ledgerEntrySummary(entry) {
@@ -110,17 +171,28 @@ function undoPlusBuyIn(seat, delta) {
 }
 
 function normalize(data) {
+  const maxSeats = normalizeMaxSeats(data.room.maxSeats)
+  const buyInN = normalizeBuyIn(data.room.buyInN)
+  const smallBlind = optionalPositiveInt(data.room.smallBlind).ok
+    ? optionalPositiveInt(data.room.smallBlind).value
+    : undefined
+  const bigBlind = optionalPositiveInt(data.room.bigBlind).ok
+    ? optionalPositiveInt(data.room.bigBlind).value
+    : undefined
   return {
     ...data,
     room: {
       ...data.room,
       roomCode: data.room.roomCode.toUpperCase(),
-      maxSeats: MAX_SEATS,
-      members: data.room.members.slice(0, MAX_SEATS),
+      maxSeats,
+      buyInN,
+      smallBlind,
+      bigBlind,
+      members: data.room.members.slice(0, maxSeats),
     },
     table: {
       ...data.table,
-      seats: data.table.seats.slice(0, MAX_SEATS).map(normalizeSeat),
+      seats: data.table.seats.slice(0, maxSeats).map(normalizeSeat),
       pot: normalizePot(data.table.pot),
       ledger: Array.isArray(data.table.ledger) ? data.table.ledger : [],
       settling: !!data.table.settling,
@@ -163,17 +235,23 @@ export function createRoomStore() {
     }
   }
 
-  function createEmptyHostRoom(preferredSeatId) {
+  function createEmptyHostRoom(input) {
     sweep()
+    const src = typeof input === 'string' ? { seatId: input } : input || {}
+    const parsed = parseRoomCreate(src)
+    if (parsed.error) return { error: parsed.error }
     const roomCode = generateRoomCode(rooms)
-    const seatId = preferredSeatId || uid('seat')
+    const seatId = parsed.seatId || uid('seat')
     const now = Date.now()
     const data = set({
       room: {
         roomCode,
         hostSeatId: seatId,
         phase: 'lobby',
-        maxSeats: MAX_SEATS,
+        maxSeats: parsed.maxSeats,
+        buyInN: parsed.buyInN,
+        smallBlind: parsed.smallBlind,
+        bigBlind: parsed.bigBlind,
         members: [],
       },
       table: {
@@ -205,18 +283,19 @@ export function createRoomStore() {
         s.seatId === seatId ? { ...s, name, isHost: true } : s,
       )
       return set({
-        room: { ...existing.room, members, maxSeats: MAX_SEATS },
+        room: { ...existing.room, members },
         table: { ...existing.table, seats, snapshotAt: Date.now() },
       })
     }
 
-    if (existing.room.members.length >= MAX_SEATS) return null
+    if (existing.room.members.length >= normalizeMaxSeats(existing.room.maxSeats)) {
+      return null
+    }
 
     return set({
       room: {
         ...existing.room,
         hostSeatId: seatId,
-        maxSeats: MAX_SEATS,
         members: [
           { seatId, name, isHost: true, connected: true },
           ...existing.room.members.map((m) => ({ ...m, isHost: false })),
@@ -246,14 +325,14 @@ export function createRoomStore() {
     }
     const existing = get(code)
     if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
-    if (existing.room.members.length >= MAX_SEATS) {
-      return { error: ACK_REASONS.TABLE_FULL }
+    const cap = normalizeMaxSeats(existing.room.maxSeats)
+    if (existing.room.members.length >= cap) {
+      return { error: tableFullReason(cap) }
     }
     const seatId = uid('seat')
     const data = set({
       room: {
         ...existing.room,
-        maxSeats: MAX_SEATS,
         members: [
           ...existing.room.members,
           { seatId, name, isHost: false, connected: true },
@@ -274,10 +353,11 @@ export function createRoomStore() {
   function fillSeatsToMax(roomCode) {
     const existing = get(roomCode)
     if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+    const cap = normalizeMaxSeats(existing.room.maxSeats)
     const members = [...existing.room.members]
     const seats = [...existing.table.seats]
     let n = 1
-    while (members.length < MAX_SEATS) {
+    while (members.length < cap) {
       const seatId = uid('seat')
       const name = `座位${n++}`
       members.push({ seatId, name, isHost: false, connected: true })
@@ -291,7 +371,7 @@ export function createRoomStore() {
       })
     }
     return set({
-      room: { ...existing.room, members, maxSeats: MAX_SEATS },
+      room: { ...existing.room, members },
       table: { ...existing.table, seats, snapshotAt: Date.now() },
     })
   }
@@ -302,7 +382,7 @@ export function createRoomStore() {
     const snapshotAt = Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
     return set({
       ...existing,
-      room: { ...existing.room, phase, maxSeats: MAX_SEATS },
+      room: { ...existing.room, phase },
       table: { ...existing.table, snapshotAt },
     })
   }
@@ -314,7 +394,7 @@ export function createRoomStore() {
       m.seatId === seatId ? { ...m, connected } : m,
     )
     return set({
-      room: { ...existing.room, members, maxSeats: MAX_SEATS },
+      room: { ...existing.room, members },
       table: { ...existing.table, snapshotAt: Date.now() },
     })
   }
@@ -341,7 +421,6 @@ export function createRoomStore() {
         hostSeatId: newHostSeatId,
         members,
         phase: 'playing',
-        maxSeats: MAX_SEATS,
       },
       table: { ...existing.table, seats, snapshotAt: Date.now() },
     })

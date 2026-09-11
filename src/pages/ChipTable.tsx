@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ACK_REASONS, findLastUndoable, ledgerEntrySummary, potSplitSummary, type LedgerEntry, type RoomState, type Seat, type TableSnapshot } from '../types'
 import type { ChipOpType } from '../types'
+import { JoinInvite } from '../components/JoinInvite'
 
 interface ChipTableProps {
   room: RoomState
@@ -57,6 +58,7 @@ export function ChipTable({
   const [undoOpen, setUndoOpen] = useState(false)
   const [undoTarget, setUndoTarget] = useState<LedgerEntry | null>(null)
   const [ledgerOpen, setLedgerOpen] = useState(false)
+  const [inviteOpen, setInviteOpen] = useState(false)
   const [potInOpen, setPotInOpen] = useState(false)
   const [potInAmount, setPotInAmount] = useState('')
   const [potOutOpen, setPotOutOpen] = useState(false)
@@ -241,7 +243,7 @@ export function ChipTable({
       pushToast(ACK_REASONS.NOT_HOST)
       return
     }
-    setBuyInAmount('')
+    setBuyInAmount(room.buyInN > 0 ? String(room.buyInN) : '')
     setBuyInOpen(true)
     setMenuOpen(false)
   }
@@ -394,14 +396,24 @@ export function ChipTable({
           <span className="dot">·</span>
           <span>{isHost ? '桌主' : '玩家'}</span>
         </div>
-        <button
-          type="button"
-          className="icon-btn"
-          aria-label="菜单"
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          ☰
-        </button>
+        <div className="table-top-actions">
+          <button
+            type="button"
+            className="icon-btn wide-label"
+            aria-label="邀请"
+            onClick={() => setInviteOpen(true)}
+          >
+            邀请
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="菜单"
+            onClick={() => setMenuOpen((v) => !v)}
+          >
+            ☰
+          </button>
+        </div>
         <span className="pot-top">底池 · {potBalance}</span>
       </header>
 
@@ -638,6 +650,24 @@ export function ChipTable({
           <button type="button" className="muted" onClick={() => setMenuOpen(false)}>
             取消
           </button>
+        </div>
+      )}
+
+      {inviteOpen && (
+        <div className="confirm-overlay" role="dialog" aria-label="邀请入桌">
+          <div className="confirm-box transfer-box invite-box">
+            <p className="transfer-title">邀请入桌</p>
+            <JoinInvite room={room} compact showSettings />
+            <div className="cta-row">
+              <button
+                type="button"
+                className="btn ghost wide"
+                onClick={() => setInviteOpen(false)}
+              >
+                关闭
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

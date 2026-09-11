@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { JoinInvite } from '../components/JoinInvite'
 import type { RoomState } from '../types'
-import { MAX_SEATS } from '../types'
+import { normalizeMaxSeats, tableFullReason } from '../types'
 import type { Session } from '../store/localRoom'
 
 interface LobbyProps {
@@ -11,34 +11,23 @@ interface LobbyProps {
 }
 
 export function Lobby({ room, session, isHost, onStart }: LobbyProps) {
-  const [copied, setCopied] = useState(false)
-  const full = room.members.length >= MAX_SEATS
-
-  const copyCode = async () => {
-    try {
-      await navigator.clipboard.writeText(room.roomCode.toUpperCase())
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1600)
-    } catch {
-      setCopied(false)
-    }
-  }
+  const cap = normalizeMaxSeats(room.maxSeats)
+  const full = room.members.length >= cap
 
   return (
     <div className="page lobby">
       <header className="lobby-header">
         <p className="eyebrow">等候开桌</p>
         <h1>房间 {room.roomCode.toUpperCase()}</h1>
-        <button type="button" className="btn ghost compact" onClick={copyCode}>
-          {copied ? '已复制' : '复制房间码'}
-        </button>
       </header>
+
+      <JoinInvite room={room} showSettings />
 
       <section className="member-list" aria-label="成员">
         <h2>
-          成员 · {room.members.length}/{MAX_SEATS}
+          成员 · {room.members.length}/{cap}
         </h2>
-        {full && <p className="hint">本桌已满（最多8人）</p>}
+        {full && <p className="hint">{tableFullReason(cap)}</p>}
         <ul>
           {room.members.map((m) => (
             <li key={m.seatId} className={m.seatId === session.seatId ? 'self' : ''}>

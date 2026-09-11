@@ -25,7 +25,7 @@ import {
   wasInRoomLocally,
 } from '../sync/roomApi'
 import { setFlashToast } from '../sync/flashToast'
-import { ACK_REASONS, MAX_SEATS, parseRoomCode } from '../types'
+import { ACK_REASONS, MAX_SEATS, normalizeMaxSeats, parseRoomCode, tableFullReason } from '../types'
 import {
   decideRestore,
   hasHadSeat,
@@ -44,7 +44,7 @@ type GateMode =
   | { type: 'booting' }
   | { type: 'nick'; prefill?: string; notice?: string }
   | { type: 'takeover'; identity: SeatIdentity }
-  | { type: 'blocked'; reason: 'full' }
+  | { type: 'blocked'; reason: 'full'; maxSeats: number }
   | { type: 'ready' }
   | { type: 'gone' }
 
@@ -57,8 +57,8 @@ function identityFromSession(session: Session, isHost: boolean): SeatIdentity {
   }
 }
 
-function isTableFull(memberCount: number): boolean {
-  return memberCount >= MAX_SEATS
+function isTableFull(memberCount: number, maxSeats?: number): boolean {
+  return memberCount >= normalizeMaxSeats(maxSeats)
 }
 
 export function RoomPage() {
@@ -117,6 +117,7 @@ export function RoomPage() {
   // Restore decision on enter / refresh
   useEffect(() => {
     if (!parsed.ok) {
+      setFlashToast(parsed.reason)
       roomApi.pushToast(parsed.reason)
       navigate('/', { replace: true })
       return
@@ -246,13 +247,24 @@ export function RoomPage() {
         : null
 
       const blockIfFullNow = (): boolean => {
-        if (!roomDataNow || !isTableFull(roomDataNow.room.members.length)) {
+        if (
+          !roomDataNow ||
+          !isTableFull(
+            roomDataNow.room.members.length,
+            roomDataNow.room.maxSeats,
+          )
+        ) {
           return false
         }
         invalidateStoredSeatId(roomCode)
         saveSession(null)
-        roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
-        setGate({ type: 'blocked', reason: 'full' })
+        const copy = tableFullReason(roomDataNow.room.maxSeats)
+        roomApi.pushToast(copy)
+        setGate({
+          type: 'blocked',
+          reason: 'full',
+          maxSeats: normalizeMaxSeats(roomDataNow.room.maxSeats),
+        })
         return true
       }
 
@@ -415,11 +427,16 @@ export function RoomPage() {
       const data = await restoreSeat(roomCode, id.seatId)
       if (!data) {
         const roomNow = loadRoom(roomCode)
-        if (roomNow && isTableFull(roomNow.room.members.length)) {
+        if (roomNow && isTableFull(roomNow.room.members.length, roomNow.room.maxSeats)) {
           invalidateStoredSeatId(roomCode)
           saveSession(null)
-          roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
-          setGate({ type: 'blocked', reason: 'full' })
+          const copy = tableFullReason(roomNow.room.maxSeats)
+          roomApi.pushToast(copy)
+          setGate({
+            type: 'blocked',
+            reason: 'full',
+            maxSeats: normalizeMaxSeats(roomNow.room.maxSeats),
+          })
           return
         }
         roomApi.pushToast(RESTORE_COPY.SEAT_TAKEN)
@@ -452,11 +469,16 @@ export function RoomPage() {
   const tryNewSeatFromTakeover = () => {
     if (gate.type !== 'takeover' || !roomCode) return
     const roomNow = loadRoom(roomCode)
-    if (roomNow && isTableFull(roomNow.room.members.length)) {
+    if (roomNow && isTableFull(roomNow.room.members.length, roomNow.room.maxSeats)) {
       invalidateStoredSeatId(roomCode)
       saveSession(null)
-      roomApi.pushToast(RESTORE_COPY.TABLE_FULL)
-      setGate({ type: 'blocked', reason: 'full' })
+      const copy = tableFullReason(roomNow.room.maxSeats)
+      roomApi.pushToast(copy)
+      setGate({
+        type: 'blocked',
+        reason: 'full',
+        maxSeats: normalizeMaxSeats(roomNow.room.maxSeats),
+      })
       return
     }
     const name = gate.identity.name
@@ -535,7 +557,7 @@ export function RoomPage() {
         <ToastStack toasts={roomApi.toasts} onDismiss={roomApi.dismissToast} />
         <div className="nickname-card">
           <p className="eyebrow">房间 {roomCode}</p>
-          <h1>{RESTORE_COPY.TABLE_FULL}</h1>
+          <h1>{tableFullReason(gate.maxSeats)}</h1>
           <p className="hint">原席不可用且本桌已满，无法新坐一席。</p>
           <button
             type="button"

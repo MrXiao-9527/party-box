@@ -4,7 +4,7 @@ import { A2HSHint } from '../components/A2HSHint'
 import { ToastStack } from '../components/Toast'
 import { createEmptyHostRoom, syncRoomFromRelay, syncStatusToast } from '../sync/roomApi'
 import { takeFlashToast } from '../sync/flashToast'
-import { ACK_REASONS, parseRoomCode } from '../types'
+import { ACK_REASONS, parseRoomCode, parseRoomCreate } from '../types'
 
 const TOOLS = [
   {
@@ -43,6 +43,12 @@ export function HomePage() {
   const navigate = useNavigate()
   const [joinCode, setJoinCode] = useState('')
   const [showJoin, setShowJoin] = useState(false)
+  const [showCreate, setShowCreate] = useState(false)
+  const [buyInN, setBuyInN] = useState('')
+  const [maxSeats, setMaxSeats] = useState('8')
+  const [smallBlind, setSmallBlind] = useState('')
+  const [bigBlind, setBigBlind] = useState('')
+  const [busy, setBusy] = useState(false)
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([])
 
   const toast = (text: string) => {
@@ -59,13 +65,33 @@ export function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const openTable = () => {
+  const confirmCreate = () => {
+    const parsed = parseRoomCreate(
+      { buyInN, maxSeats, smallBlind, bigBlind },
+      { strictBuyIn: true },
+    )
+    if (!parsed.ok) {
+      toast(parsed.error)
+      return
+    }
     void (async () => {
+      setBusy(true)
       try {
-        const { session } = await createEmptyHostRoom()
-        navigate(`/r/${session.roomCode}`)
+        const result = await createEmptyHostRoom({
+          buyInN: parsed.buyInN,
+          maxSeats: parsed.maxSeats,
+          smallBlind: parsed.smallBlind,
+          bigBlind: parsed.bigBlind,
+        })
+        if ('error' in result) {
+          toast(result.error)
+          return
+        }
+        navigate(`/r/${result.session.roomCode}`)
       } catch {
         toast(ACK_REASONS.RELAY_UNREACHABLE)
+      } finally {
+        setBusy(false)
       }
     })()
   }
@@ -107,17 +133,103 @@ export function HomePage() {
         <h1 className="brand">聚会盒子</h1>
         <p className="tagline">开一桌，筹码、计时、分账随身带</p>
         <div className="cta-row">
-          <button type="button" className="btn primary" onClick={openTable}>
+          <button
+            type="button"
+            className="btn primary"
+            onClick={() => {
+              setShowJoin(false)
+              setShowCreate((v) => !v)
+            }}
+          >
             开一桌
           </button>
           <button
             type="button"
             className="btn ghost"
-            onClick={() => setShowJoin((v) => !v)}
+            onClick={() => {
+              setShowCreate(false)
+              setShowJoin((v) => !v)
+            }}
           >
             加入
           </button>
         </div>
+        {showCreate && (
+          <form
+            className="create-room-form"
+            data-create-room="1"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!busy) confirmCreate()
+            }}
+          >
+            <label>
+              买入
+              <input
+                className="input"
+                name="buyInN"
+                type="number"
+                inputMode="numeric"
+                step={1}
+                placeholder="正整数"
+                value={buyInN}
+                onChange={(e) => setBuyInN(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+            <label>
+              人数
+              <input
+                className="input"
+                name="maxSeats"
+                type="number"
+                inputMode="numeric"
+                step={1}
+                value={maxSeats}
+                onChange={(e) => setMaxSeats(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+            <label>
+              小盲（选填）
+              <input
+                className="input"
+                name="smallBlind"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                placeholder="仅展示"
+                value={smallBlind}
+                onChange={(e) => setSmallBlind(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+            <label>
+              大盲（选填）
+              <input
+                className="input"
+                name="bigBlind"
+                type="number"
+                inputMode="numeric"
+                min={1}
+                step={1}
+                placeholder="仅展示"
+                value={bigBlind}
+                onChange={(e) => setBigBlind(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+            <p className="hint">盲注仅展示，不会自动扣除</p>
+            <button
+              type="submit"
+              className="btn primary wide"
+              disabled={busy}
+            >
+              确认
+            </button>
+          </form>
+        )}
         {showJoin && (
           <div className="join-panel">
             <input

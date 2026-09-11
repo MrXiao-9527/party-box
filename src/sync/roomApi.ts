@@ -19,7 +19,7 @@ import {
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
-import type { Phase } from '../types'
+import type { Phase, RoomCreateInput } from '../types'
 import { ACK_REASONS } from '../types'
 import {
   clearHadSeat,
@@ -129,12 +129,12 @@ export function syncStatusToast(status: SyncRoomResult['status']): string | null
   return null
 }
 
-export async function createEmptyHostRoom(): Promise<{
-  session: Session
-  data: PersistedRoom
-}> {
-  if (!isRelayEnabled()) return localCreateEmptyHostRoom()
-  const result = await relayCreateEmptyHostRoom()
+export async function createEmptyHostRoom(
+  input: RoomCreateInput = {},
+): Promise<{ session: Session; data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localCreateEmptyHostRoom(input)
+  const result = await relayCreateEmptyHostRoom(input)
+  if ('error' in result) return result
   saveSession(result.session)
   return result
 }

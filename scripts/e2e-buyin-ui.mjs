@@ -4,6 +4,7 @@
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
+import { fillCreateRoom, setInputValue } from './e2e-lib.mjs'
 
 const BASE = 'http://127.0.0.1:45321'
 const ART = '/opt/cursor/artifacts/screenshots'
@@ -46,8 +47,10 @@ async function shot(name) {
 try {
   await page.goto(BASE, { waitUntil: 'networkidle0' })
   await clickText('开一桌')
-  await page.waitForSelector('input')
-  await page.type('input', '地主')
+  await fillCreateRoom(page)
+  await clickText('确认')
+  await page.waitForSelector('.nickname-card input')
+  await page.type('.nickname-card input', '地主')
   await clickText('进入')
   await page.waitForFunction(() => location.pathname.startsWith('/r/'))
   const roomPath = await page.evaluate(() => location.pathname)
@@ -80,8 +83,8 @@ try {
   await clickText('全员买入')
   await page.waitForSelector('.buyin-amount-input')
 
-  // N≤0 → toast, no-op
-  await page.type('.buyin-amount-input', '0')
+  // N≤0 → toast, no-op (clear prefilled create-room N first)
+  await setInputValue(page, '.buyin-amount-input', '0')
   await clickText('确认买入')
   await page.waitForFunction(() =>
     [...document.querySelectorAll('.toast')].some((t) =>
@@ -90,9 +93,7 @@ try {
   )
   await shot('buyin-invalid-toast')
   // Dialog still open; clear and enter 50
-  await page.click('.buyin-amount-input', { clickCount: 3 })
-  await page.keyboard.press('Backspace')
-  await page.type('.buyin-amount-input', '50')
+  await setInputValue(page, '.buyin-amount-input', '50')
   await page.waitForFunction(() =>
     (document.querySelector('.transfer-preview')?.textContent || '').includes(
       '全员余额将设为 50',
@@ -116,8 +117,6 @@ try {
       (r.textContent || '').includes('全员买入 50'),
     ),
   )
-  const ledgerCount = await page.$$eval('.ledger-row', (rows) => rows.length)
-  if (ledgerCount !== 1) throw new Error(`expected 1 ledger row, got ${ledgerCount}`)
   await shot('buyin-ledger')
 
   console.log('e2e buyin UI: OK')

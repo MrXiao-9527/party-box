@@ -4,6 +4,7 @@
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
+import { fillCreateRoom } from './e2e-lib.mjs'
 
 const BASE = 'http://127.0.0.1:45321'
 const ART = '/opt/cursor/artifacts'
@@ -79,6 +80,8 @@ try {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.brand')
   await clickText(page, '开一桌')
+  await fillCreateRoom(page)
+  await clickText(page, '确认')
   await page.waitForSelector('.nickname-card input')
   await page.type('.nickname-card input', '桌主')
   await clickText(page, '进入')
