@@ -108,6 +108,11 @@ function deepEqual(a, b, msg) {
   assert(SETTLEMENT_COPY.MISMATCH === '买入与结算对不上，多半漏了补码，请先核对')
   assert(SETTLEMENT_COPY.POT_REMAINING === '底池还有筹码，请先分完再结算')
   assert(SETTLEMENT_COPY.FLAT === '本局打平，无需转账', 'flat exact')
+  assert(
+    SETTLEMENT_COPY.TRANSFERS_TITLE === '建议转账（最少笔数）',
+    'title exact',
+  )
+  assert(SETTLEMENT_COPY.COPY_LIST === '复制清单', 'copy btn exact')
 
   const flat = buildSettlement({
     seats: [

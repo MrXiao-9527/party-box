@@ -7,6 +7,8 @@ export const SETTLEMENT_COPY = {
   MISMATCH: '买入与结算对不上，多半漏了补码，请先核对',
   POT_REMAINING: '底池还有筹码，请先分完再结算',
   FLAT: '本局打平，无需转账',
+  TRANSFERS_TITLE: '建议转账（最少笔数）',
+  COPY_LIST: '复制清单',
 } as const
 
 export function normalizeBuyIn(raw: unknown): number {

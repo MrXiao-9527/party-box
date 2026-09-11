@@ -135,8 +135,13 @@ export function Settlement({
           {settlementToast(summary.block)}
         </p>
       ) : (
-        <section className="settlement-transfers" aria-label="转账建议">
-          <p className="settlement-transfers-title">转账建议</p>
+        <section
+          className="settlement-transfers"
+          aria-label={SETTLEMENT_COPY.TRANSFERS_TITLE}
+        >
+          <p className="settlement-transfers-title">
+            {SETTLEMENT_COPY.TRANSFERS_TITLE}
+          </p>
           {summary.transfers.length === 0 ? (
             <p className="hint">{SETTLEMENT_COPY.FLAT}</p>
           ) : (
@@ -154,7 +159,7 @@ export function Settlement({
               className="btn primary wide"
               onClick={() => void copyList()}
             >
-              复制转账列表
+              {SETTLEMENT_COPY.COPY_LIST}
             </button>
           )}
         </section>

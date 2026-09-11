@@ -75,9 +75,10 @@ async function assertBlocked(copy) {
   const list = await page.$('.settlement-transfer-list')
   if (list) throw new Error('transfer list must hide when blocked')
   const hasCopy = await page.evaluate(() =>
-    [...document.querySelectorAll('button')].some(
-      (b) => (b.textContent || '').trim() === '复制转账列表',
-    ),
+    [...document.querySelectorAll('button')].some((b) => {
+      const t = (b.textContent || '').trim()
+      return t === '复制清单' || t === '复制转账列表'
+    }),
   )
   if (hasCopy) throw new Error('copy button must hide when blocked')
   await new Promise((r) => setTimeout(r, 3000))
@@ -191,13 +192,17 @@ try {
   if (!flatText.includes('本局打平，无需转账')) {
     throw new Error(`flat copy missing: ${flatText}`)
   }
+  if (!flatText.includes('建议转账（最少笔数）')) {
+    throw new Error(`flat title missing: ${flatText}`)
+  }
   if (await page.$('.settlement-transfer-list')) {
     throw new Error('flat must not render transfer list')
   }
   const flatCopy = await page.evaluate(() =>
-    [...document.querySelectorAll('button')].some(
-      (b) => (b.textContent || '').trim() === '复制转账列表',
-    ),
+    [...document.querySelectorAll('button')].some((b) => {
+      const t = (b.textContent || '').trim()
+      return t === '复制清单' || t === '复制转账列表'
+    }),
   )
   if (flatCopy) throw new Error('flat must not show copy button')
   if (await page.$('.settlement-banner')) {
@@ -239,9 +244,16 @@ try {
   if (!totals.includes('净额合计') || !totals.includes('0')) {
     throw new Error(`bad footer net: ${totals}`)
   }
+  const title = await page.$eval(
+    '.settlement-transfers-title',
+    (el) => (el.textContent || '').trim(),
+  )
+  if (title !== '建议转账（最少笔数）') {
+    throw new Error(`bad transfers title: ${title}`)
+  }
   await page.waitForFunction(() =>
     [...document.querySelectorAll('button')].some(
-      (b) => (b.textContent || '').trim() === '复制转账列表',
+      (b) => (b.textContent || '').trim() === '复制清单',
     ),
   )
   await shot('settlement-ok')
