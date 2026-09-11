@@ -2,7 +2,7 @@
  * Quick host-authoritative transfer QA gates (roomLogic).
  * Run: node scripts/test-transfer.mjs
  */
-import { createRoomStore, ACK_REASONS } from '../server/roomLogic.mjs'
+import { createRoomStore, ACK_REASONS, ledgerEntrySummary } from '../server/roomLogic.mjs'
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
@@ -62,6 +62,7 @@ store.applyChipOp({
   const last = r.data.table.ledger.at(-1)
   assert(last.amount === 3, 'ledger amount')
   assert(last.fromSeatId === hostId && last.toSeatId === aId, 'ledger who')
+  assert(ledgerEntrySummary(last) === '地主 → 甲 · 转 3', 'copy 地主 → 甲 · 转 3')
 }
 
 // 2) One-to-many ×3

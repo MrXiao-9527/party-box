@@ -714,12 +714,12 @@ button.seat {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin: 0;
   border: none;
   background: transparent;
   color: var(--text-secondary);
   padding: 0.35rem 0.1rem;
   font-size: 0.82rem;
-  cursor: pointer;
 }
 
 .ledger-list {
@@ -742,7 +742,7 @@ button.seat {
 
 .ledger-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto;
   gap: 0.55rem;
   align-items: baseline;
   font-size: 0.82rem;

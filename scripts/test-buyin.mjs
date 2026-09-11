@@ -2,7 +2,7 @@
  * Host-authoritative uniformBuyIn QA gates (roomLogic) — 「买入验」.
  * Run: npm run test:buyin
  */
-import { createRoomStore, ACK_REASONS } from '../server/roomLogic.mjs'
+import { createRoomStore, ACK_REASONS, ledgerEntrySummary } from '../server/roomLogic.mjs'
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
@@ -69,6 +69,7 @@ store.applyChipOp({
   const row = buyInRows[0]
   assert(row.kind === 'uniformBuyIn', 'ledger kind')
   assert(row.amount === 100, 'ledger amount N')
+  assert(ledgerEntrySummary(row) === '全员买入 100', 'copy 全员买入 100')
 }
 
 // 2) N≤0 → 请输入正整数, no-op (balances + ledger unchanged)

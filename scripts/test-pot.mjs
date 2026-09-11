@@ -68,7 +68,7 @@ assert(pot() === 0, 'pot starts 0')
   assert(pot() === 10, '底池 +10')
   const row = r.data.table.ledger.at(-1)
   assert(row.kind === 'potIn' && row.amount === 10, 'potIn ledger')
-  assert(ledgerEntrySummary(row) === '甲 → 底池 +10', 'copy 甲 → 底池 +10')
+  assert(ledgerEntrySummary(row) === '进底池 10', 'copy 进底池 10')
 }
 
 // 2) potOut: 底池 → 乙 +4
@@ -86,7 +86,7 @@ assert(pot() === 0, 'pot starts 0')
   assert(bal(bId) === beforeB + 4, '乙 +4')
   const row = r.data.table.ledger.at(-1)
   assert(row.kind === 'potOut', 'potOut kind')
-  assert(ledgerEntrySummary(row) === '底池 → 乙 +4', 'copy 底池 → 乙 +4')
+  assert(ledgerEntrySummary(row) === '出底池 4', 'copy 出底池 4')
 }
 
 // 3) potSplit floor + remainder stays
@@ -113,7 +113,7 @@ assert(pot() === 0, 'pot starts 0')
   assert(row.kind === 'potSplit' && row.amount === 5, 'share 5')
   assert(row.splitSeatIds?.length === 2, '2 recipients')
   assert(!row.splitSeatIds.includes(aId), 'locked not in splitSeatIds')
-  assert(ledgerEntrySummary(row) === '底池均分 · 在座2人 · 各 +5 · 余0留底池', 'copy 底池均分')
+  assert(ledgerEntrySummary(row) === '均分底池', 'copy 均分底池')
   op({ opId: 'unlockA', type: 'unlock', targetSeatId: aId })
 }
 
@@ -139,11 +139,7 @@ assert(pot() === 0, 'pot starts 0')
   assert(r.ack.ok, 'split 7/3')
   assert(r.data.table.ledger.at(-1).amount === 2, 'floor share 2')
   assert(r.data.table.ledger.at(-1).splitRemainder === 1, 'remainder 1')
-  assert(
-    ledgerEntrySummary(r.data.table.ledger.at(-1)) ===
-      '底池均分 · 在座3人 · 各 +2 · 余1留底池',
-    'copy remainder',
-  )
+  assert(ledgerEntrySummary(r.data.table.ledger.at(-1)) === '均分底池', 'copy remainder')
   assert(bal(hostId) === before.host + 2, 'h+2')
   assert(bal(aId) === before.a + 2, 'a+2')
   assert(bal(bId) === before.b + 2, 'b+2')
@@ -282,7 +278,7 @@ assert(pot() === 0, 'pot starts 0')
   }
   // Ensure known pot via potIn from host
   const rIn = op({ opId: 'u_pi', type: 'potIn', amount: 6 })
-  assert(rIn.ack.ok && ledgerEntrySummary(rIn.data.table.ledger.at(-1)).includes('→ 底池'), 'in')
+  assert(rIn.ack.ok && ledgerEntrySummary(rIn.data.table.ledger.at(-1)) === '进底池 6', 'in')
   assert(pot() === before.pot + 6, 'pot after in')
 
   const rOut = op({
@@ -302,18 +298,19 @@ assert(pot() === 0, 'pot starts 0')
   // Undo split
   const u1 = op({ opId: 'undo_ps', type: 'undoLast' })
   assert(u1.ack.ok, 'undo split')
-  assert(u1.data.table.ledger.at(-1).fromName === '底池均分 · 在座3人 · 各 +1 · 余0留底池', 'undo summary split')
+  assert(u1.data.table.ledger.at(-1).fromName === '均分底池', 'undo summary split')
+  assert(ledgerEntrySummary(u1.data.table.ledger.at(-1)) === '撤销：均分底池', '撤销：均分底池')
   assert(pot() === before.pot + 6 - 2, 'pot after undo split')
 
   // Undo potOut
   const u2 = op({ opId: 'undo_po', type: 'undoLast' })
-  assert(u2.ack.ok && u2.data.table.ledger.at(-1).fromName === '底池 → 甲 +2', 'undo out')
+  assert(u2.ack.ok && u2.data.table.ledger.at(-1).fromName === '出底池 2', 'undo out')
   assert(bal(aId) === before.a, 'a restored')
   assert(pot() === before.pot + 6, 'pot restored out')
 
   // Undo potIn
   const u3 = op({ opId: 'undo_pi', type: 'undoLast' })
-  assert(u3.ack.ok && u3.data.table.ledger.at(-1).fromName.includes('→ 底池 +6'), 'undo in')
+  assert(u3.ack.ok && u3.data.table.ledger.at(-1).fromName === '进底池 6', 'undo in')
   assert(pot() === before.pot, 'pot restored in')
   assert(bal(hostId) === before.host, 'host restored')
 }

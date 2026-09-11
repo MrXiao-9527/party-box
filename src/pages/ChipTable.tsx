@@ -57,7 +57,6 @@ export function ChipTable({
   const [buyInAmount, setBuyInAmount] = useState('')
   const [undoOpen, setUndoOpen] = useState(false)
   const [undoTarget, setUndoTarget] = useState<LedgerEntry | null>(null)
-  const [ledgerOpen, setLedgerOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
   const [potInOpen, setPotInOpen] = useState(false)
   const [potInAmount, setPotInAmount] = useState('')
@@ -491,66 +490,21 @@ export function ChipTable({
       </article>
 
       <section className="ledger-panel" aria-label="流水">
-        <button
-          type="button"
-          className="ledger-toggle"
-          onClick={() => setLedgerOpen((v) => !v)}
-        >
+        <p className="ledger-toggle">
           流水 {ledger.length > 0 ? `(${ledger.length})` : ''}
-          <span aria-hidden="true">{ledgerOpen ? '▾' : '▸'}</span>
-        </button>
-        {ledgerOpen && (
-          <ul className="ledger-list">
-            {ledger.length === 0 ? (
-              <li className="ledger-empty">暂无成功转账</li>
-            ) : (
-              ledger.map((row) => (
-                <li key={row.id} className="ledger-row">
-                  {row.kind === 'undo' ? (
-                    <>
-                      <span className="ledger-who">撤销 · {row.fromName}</span>
-                      <span className="ledger-amt ledger-amt-set">↩</span>
-                    </>
-                  ) : row.kind === 'uniformBuyIn' ? (
-                    <>
-                      <span className="ledger-who">全员买入 {row.amount}</span>
-                      <span className="ledger-amt ledger-amt-set">={row.amount}</span>
-                    </>
-                  ) : row.kind === 'seatAdjust' ? (
-                    <>
-                      <span className="ledger-who">
-                        {ledgerEntrySummary(row)}
-                      </span>
-                      <span
-                        className={`ledger-amt${row.amount < 0 ? ' ledger-amt-set' : ''}`}
-                      >
-                        {row.amount > 0 ? '+' : ''}
-                        {row.amount}
-                      </span>
-                    </>
-                  ) : row.kind === 'potIn' ||
-                    row.kind === 'potOut' ||
-                    row.kind === 'potSplit' ? (
-                    <>
-                      <span className="ledger-who">
-                        {ledgerEntrySummary(row)}
-                      </span>
-                      <span className="ledger-amt">+{row.amount}</span>
-                    </>
-                  ) : (
-                    <>
-                      <span className="ledger-who">
-                        {row.fromName}→{row.toName}
-                      </span>
-                      <span className="ledger-amt">+{row.amount}</span>
-                    </>
-                  )}
-                  <span className="ledger-time">{formatLedgerTime(row.at)}</span>
-                </li>
-              ))
-            )}
-          </ul>
-        )}
+        </p>
+        <ul className="ledger-list">
+          {ledger.length === 0 ? (
+            <li className="ledger-empty">暂无流水</li>
+          ) : (
+            ledger.map((row) => (
+              <li key={row.id} className="ledger-row">
+                <span className="ledger-who">{ledgerEntrySummary(row)}</span>
+                <span className="ledger-time">{formatLedgerTime(row.at)}</span>
+              </li>
+            ))
+          )}
+        </ul>
       </section>
 
       <div className="denom-bar" role="toolbar" aria-label="筹码面额">

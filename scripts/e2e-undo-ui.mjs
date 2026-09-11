@@ -95,7 +95,7 @@ try {
   await clickText('撤销上一笔')
   await page.waitForSelector('[aria-label="撤销上一笔"]')
   await page.waitForFunction(() =>
-    (document.body.textContent || '').includes('将撤销：地主 +100'),
+    (document.body.textContent || '').includes('将撤销：地主 席位+100'),
   )
   await shot('undo-seat-adjust-preview')
   await clickText('确认撤销')
@@ -141,11 +141,10 @@ try {
       .map((r) => r.textContent || '')
       .join('\n')
     return (
-      text.includes('撤销 · 全员买入 50') &&
-      text.includes('撤销 · 地主 +100') &&
-      // success row copy: nickname + signed amount in who
+      text.includes('撤销：全员买入 50') &&
+      text.includes('撤销：地主 席位+100') &&
       [...document.querySelectorAll('.ledger-who')].some(
-        (el) => (el.textContent || '').trim() === '地主 +100',
+        (el) => (el.textContent || '').trim() === '地主 席位+100',
       )
     )
   })
