@@ -7,10 +7,17 @@ interface LobbyProps {
   room: RoomState
   session: Session
   isHost: boolean
+  starting?: boolean
   onStart: () => void
 }
 
-export function Lobby({ room, session, isHost, onStart }: LobbyProps) {
+export function Lobby({
+  room,
+  session,
+  isHost,
+  starting = false,
+  onStart,
+}: LobbyProps) {
   const cap = normalizeMaxSeats(room.maxSeats)
   const full = room.members.length >= cap
 
@@ -44,8 +51,14 @@ export function Lobby({ room, session, isHost, onStart }: LobbyProps) {
 
       <footer className="lobby-footer">
         {isHost ? (
-          <button type="button" className="btn primary wide" onClick={onStart}>
-            开桌
+          <button
+            type="button"
+            className="btn primary wide"
+            disabled={starting}
+            aria-busy={starting}
+            onClick={onStart}
+          >
+            {starting ? '开桌中…' : '开桌'}
           </button>
         ) : (
           <p className="waiting">等待桌主开桌…</p>

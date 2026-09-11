@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { A2HSHint } from '../components/A2HSHint'
 import { ToastStack } from '../components/Toast'
@@ -49,7 +49,9 @@ export function HomePage() {
   const [smallBlind, setSmallBlind] = useState('')
   const [bigBlind, setBigBlind] = useState('')
   const [busy, setBusy] = useState(false)
+  const [createError, setCreateError] = useState('')
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([])
+  const busyRef = useRef(false)
 
   const toast = (text: string) => {
     const id = `t_${Date.now()}`
@@ -71,11 +73,15 @@ export function HomePage() {
       { strictBuyIn: true },
     )
     if (!parsed.ok) {
+      setCreateError(parsed.error)
       toast(parsed.error)
       return
     }
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setCreateError('')
     void (async () => {
-      setBusy(true)
       try {
         const result = await createEmptyHostRoom({
           buyInN: parsed.buyInN,
@@ -84,13 +90,17 @@ export function HomePage() {
           bigBlind: parsed.bigBlind,
         })
         if ('error' in result) {
+          setCreateError(result.error)
           toast(result.error)
           return
         }
         navigate(`/r/${result.session.roomCode}`)
       } catch {
-        toast(ACK_REASONS.RELAY_UNREACHABLE)
+        const msg = ACK_REASONS.RELAY_UNREACHABLE
+        setCreateError(msg)
+        toast(msg)
       } finally {
+        busyRef.current = false
         setBusy(false)
       }
     })()
@@ -136,12 +146,14 @@ export function HomePage() {
           <button
             type="button"
             className="btn primary"
+            disabled={busy}
+            aria-busy={busy}
             onClick={() => {
               setShowJoin(false)
               setShowCreate((v) => !v)
             }}
           >
-            开一桌
+            {busy ? '开桌中…' : '开一桌'}
           </button>
           <button
             type="button"
@@ -225,9 +237,11 @@ export function HomePage() {
               type="submit"
               className="btn primary wide"
               disabled={busy}
+              aria-busy={busy}
             >
-              确认
+              {busy ? '开桌中…' : '确认'}
             </button>
+            {createError && <p className="error">{createError}</p>}
           </form>
         )}
         {showJoin && (
