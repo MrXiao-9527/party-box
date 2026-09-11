@@ -9,7 +9,7 @@
 见 [`docs/stable-preview.md`](docs/stable-preview.md)。QA 标签：**稳预览验**。
 
 - **禁止** ephemeral `trycloudflare` / 临时 tunnel 作为验收预览。
-- Cloudflare Worker DO（推荐）或 Node `PARTY_BOX_DATA_DIR` 文件快照，重启后同房码恢复座位/余额/锅/流水/阶段。
+- Cloudflare Worker DO（推荐）或 Node `PARTY_BOX_DATA_DIR` 文件快照，重启后同房码恢复座位/余额/底池/流水/阶段。
 - 无法恢复时 toast 必须为：`房间服务已重启，请重新开桌`，并回首页（禁止僵尸「等候开桌」）。
 
 ```bash

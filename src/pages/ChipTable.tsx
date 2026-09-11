@@ -394,7 +394,7 @@ export function ChipTable({
           <span className="dot">·</span>
           <span>{isHost ? '桌主' : '玩家'}</span>
           <span className="dot">·</span>
-          <span className="pot-top">锅 · {potBalance}</span>
+          <span className="pot-top">底池 · {potBalance}</span>
         </div>
         <button
           type="button"
@@ -445,18 +445,18 @@ export function ChipTable({
       )}
 
       {showPotActions && (
-        <div className="pot-bar" role="toolbar" aria-label="公共锅操作">
+        <div className="pot-bar" role="toolbar" aria-label="公共底池操作">
           <button type="button" className="btn ghost compact" onClick={openPotIn}>
-            进锅
+            放进底池
           </button>
           {isHost && (
             <button type="button" className="btn ghost compact" onClick={openPotOut}>
-              出锅
+              从底池发给
             </button>
           )}
           {isHost && (
             <button type="button" className="btn primary compact" onClick={openPotSplit}>
-              均分
+              底池均分
             </button>
           )}
         </div>
@@ -769,9 +769,9 @@ export function ChipTable({
       )}
 
       {potInOpen && (
-        <div className="confirm-overlay" role="dialog" aria-label="进锅">
+        <div className="confirm-overlay" role="dialog" aria-label="放进底池">
           <div className="confirm-box transfer-box">
-            <p className="transfer-title">进锅</p>
+            <p className="transfer-title">放进底池</p>
             <label className="transfer-amount-label">
               金额（任意正整数）
               <input
@@ -788,7 +788,7 @@ export function ChipTable({
             {potInValid && (
               <div className="transfer-preview" aria-live="polite">
                 <p>
-                  {self.name} → 锅 +{potInNum}
+                  {self.name} → 底池 +{potInNum}
                 </p>
               </div>
             )}
@@ -804,7 +804,7 @@ export function ChipTable({
                 取消
               </button>
               <button type="button" className="btn primary" onClick={confirmPotIn}>
-                确认进锅
+                确认放进底池
               </button>
             </div>
           </div>
@@ -812,9 +812,9 @@ export function ChipTable({
       )}
 
       {potOutOpen && isHost && (
-        <div className="confirm-overlay" role="dialog" aria-label="出锅">
+        <div className="confirm-overlay" role="dialog" aria-label="从底池发给">
           <div className="confirm-box transfer-box">
-            <p className="transfer-title">出锅</p>
+            <p className="transfer-title">从底池发给</p>
             <label className="transfer-amount-label">
               付给
               <select
@@ -846,7 +846,7 @@ export function ChipTable({
             {potOutValid && potOutTarget && (
               <div className="transfer-preview" aria-live="polite">
                 <p>
-                  锅 → {potOutTarget.name} +{potOutNum}
+                  底池 → {potOutTarget.name} +{potOutNum}
                 </p>
               </div>
             )}
@@ -862,7 +862,7 @@ export function ChipTable({
                 取消
               </button>
               <button type="button" className="btn primary" onClick={confirmPotOut}>
-                确认出锅
+                确认从底池发给
               </button>
             </div>
           </div>
@@ -870,9 +870,9 @@ export function ChipTable({
       )}
 
       {potSplitOpen && isHost && (
-        <div className="confirm-overlay" role="dialog" aria-label="均分">
+        <div className="confirm-overlay" role="dialog" aria-label="底池均分">
           <div className="confirm-box transfer-box">
-            <p className="transfer-title">均分</p>
+            <p className="transfer-title">底池均分</p>
             <label className="transfer-amount-label">
               金额（任意正整数）
               <input
@@ -903,7 +903,7 @@ export function ChipTable({
                 取消
               </button>
               <button type="button" className="btn primary" onClick={confirmPotSplit}>
-                确认均分
+                确认底池均分
               </button>
             </div>
           </div>

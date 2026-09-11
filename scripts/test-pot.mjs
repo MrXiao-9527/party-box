@@ -1,5 +1,5 @@
 /**
- * Host-authoritative public pot QA gates (roomLogic) — 「公共锅验」.
+ * Host-authoritative public pot QA gates (roomLogic) — 「公共底池验」.
  * Run: npm run test:pot
  *
  * Covers: potIn / potOut / potSplit + undo + locked/paused/insufficient.
@@ -52,7 +52,7 @@ op({ opId: 'seedA', type: '+batch', amount: 40, targetSeatId: aId })
 op({ opId: 'seedB', type: '+batch', amount: 20, targetSeatId: bId })
 assert(pot() === 0, 'pot starts 0')
 
-// 1) potIn: 甲 → 锅 +10
+// 1) potIn: 甲 → 底池 +10
 {
   const beforeA = bal(aId)
   const r = store.applyChipOp({
@@ -65,13 +65,13 @@ assert(pot() === 0, 'pot starts 0')
   })
   assert(r.ack.ok, 'potIn ok')
   assert(bal(aId) === beforeA - 10, '甲 -10')
-  assert(pot() === 10, '锅 +10')
+  assert(pot() === 10, '底池 +10')
   const row = r.data.table.ledger.at(-1)
   assert(row.kind === 'potIn' && row.amount === 10, 'potIn ledger')
-  assert(ledgerEntrySummary(row) === '甲 → 锅 +10', 'copy 甲 → 锅 +10')
+  assert(ledgerEntrySummary(row) === '甲 → 底池 +10', 'copy 甲 → 底池 +10')
 }
 
-// 2) potOut: 锅 → 乙 +4
+// 2) potOut: 底池 → 乙 +4
 {
   const beforeB = bal(bId)
   const beforePot = pot()
@@ -82,11 +82,11 @@ assert(pot() === 0, 'pot starts 0')
     targetSeatId: bId,
   })
   assert(r.ack.ok, 'potOut ok')
-  assert(pot() === beforePot - 4, '锅 -4')
+  assert(pot() === beforePot - 4, '底池 -4')
   assert(bal(bId) === beforeB + 4, '乙 +4')
   const row = r.data.table.ledger.at(-1)
   assert(row.kind === 'potOut', 'potOut kind')
-  assert(ledgerEntrySummary(row) === '锅 → 乙 +4', 'copy 锅 → 乙 +4')
+  assert(ledgerEntrySummary(row) === '底池 → 乙 +4', 'copy 底池 → 乙 +4')
 }
 
 // 3) potSplit floor + remainder stays
@@ -113,7 +113,7 @@ assert(pot() === 0, 'pot starts 0')
   assert(row.kind === 'potSplit' && row.amount === 5, 'share 5')
   assert(row.splitSeatIds?.length === 2, '2 recipients')
   assert(!row.splitSeatIds.includes(aId), 'locked not in splitSeatIds')
-  assert(ledgerEntrySummary(row) === '锅均分 · 在座2人 · 各 +5 · 余0留锅', 'copy 锅均分')
+  assert(ledgerEntrySummary(row) === '底池均分 · 在座2人 · 各 +5 · 余0留底池', 'copy 底池均分')
   op({ opId: 'unlockA', type: 'unlock', targetSeatId: aId })
 }
 
@@ -141,7 +141,7 @@ assert(pot() === 0, 'pot starts 0')
   assert(r.data.table.ledger.at(-1).splitRemainder === 1, 'remainder 1')
   assert(
     ledgerEntrySummary(r.data.table.ledger.at(-1)) ===
-      '锅均分 · 在座3人 · 各 +2 · 余1留锅',
+      '底池均分 · 在座3人 · 各 +2 · 余1留底池',
     'copy remainder',
   )
   assert(bal(hostId) === before.host + 2, 'h+2')
@@ -177,7 +177,7 @@ assert(pot() === 0, 'pot starts 0')
   })
   assert(
     !rPot.ack.ok && rPot.ack.reason === ACK_REASONS.POT_INSUFFICIENT,
-    '锅内不足 out',
+    '底池不足 out',
   )
   assert(store.get(code).table.ledger.length === ledLen, 'no ledger pot fail')
 
@@ -195,7 +195,7 @@ assert(pot() === 0, 'pot starts 0')
   })
   assert(
     !rZero.ack.ok && rZero.ack.reason === ACK_REASONS.POT_INSUFFICIENT,
-    'pot=0 still 锅内不足',
+    'pot=0 still 底池不足',
   )
   assert(store.get(code).table.ledger.length === ledLen2, 'no ledger on pot0')
   void rSplit0
@@ -282,7 +282,7 @@ assert(pot() === 0, 'pot starts 0')
   }
   // Ensure known pot via potIn from host
   const rIn = op({ opId: 'u_pi', type: 'potIn', amount: 6 })
-  assert(rIn.ack.ok && ledgerEntrySummary(rIn.data.table.ledger.at(-1)).includes('→ 锅'), 'in')
+  assert(rIn.ack.ok && ledgerEntrySummary(rIn.data.table.ledger.at(-1)).includes('→ 底池'), 'in')
   assert(pot() === before.pot + 6, 'pot after in')
 
   const rOut = op({
@@ -302,18 +302,18 @@ assert(pot() === 0, 'pot starts 0')
   // Undo split
   const u1 = op({ opId: 'undo_ps', type: 'undoLast' })
   assert(u1.ack.ok, 'undo split')
-  assert(u1.data.table.ledger.at(-1).fromName === '锅均分 · 在座3人 · 各 +1 · 余0留锅', 'undo summary split')
+  assert(u1.data.table.ledger.at(-1).fromName === '底池均分 · 在座3人 · 各 +1 · 余0留底池', 'undo summary split')
   assert(pot() === before.pot + 6 - 2, 'pot after undo split')
 
   // Undo potOut
   const u2 = op({ opId: 'undo_po', type: 'undoLast' })
-  assert(u2.ack.ok && u2.data.table.ledger.at(-1).fromName === '锅 → 甲 +2', 'undo out')
+  assert(u2.ack.ok && u2.data.table.ledger.at(-1).fromName === '底池 → 甲 +2', 'undo out')
   assert(bal(aId) === before.a, 'a restored')
   assert(pot() === before.pot + 6, 'pot restored out')
 
   // Undo potIn
   const u3 = op({ opId: 'undo_pi', type: 'undoLast' })
-  assert(u3.ack.ok && u3.data.table.ledger.at(-1).fromName.includes('→ 锅 +6'), 'undo in')
+  assert(u3.ack.ok && u3.data.table.ledger.at(-1).fromName.includes('→ 底池 +6'), 'undo in')
   assert(pot() === before.pot, 'pot restored in')
   assert(bal(hostId) === before.host, 'host restored')
 }
@@ -397,4 +397,4 @@ assert(pot() === 0, 'pot starts 0')
   assert(r.ack.reason !== ACK_REASONS.INVALID, 'not 操作无效')
 }
 
-console.log('公共锅验 QA gates: OK')
+console.log('公共底池验 QA gates: OK')
