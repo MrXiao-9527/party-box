@@ -110,6 +110,44 @@ try {
   assert(settings.includes('2'), 'settings seats')
   await shot('lobby-qr')
 
+  async function prepGuest() {
+    const ctx = await browser.createBrowserContext()
+    const g = await ctx.newPage()
+    g.setDefaultTimeout(20_000)
+    await g.setRequestInterception(true)
+    g.on('request', (req) => {
+      const url = req.url()
+      if (url.includes('fonts.googleapis') || url.includes('fonts.gstatic')) {
+        req.abort()
+        return
+      }
+      req.continue()
+    })
+    return g
+  }
+
+  // QR path = /r/CODE: second seat ok, third → 本桌已满（最多2人）
+  const g1 = await prepGuest()
+  await g1.goto(`${BASE}/r/${code}`, { waitUntil: 'domcontentloaded' })
+  await g1.waitForSelector('.nickname-card input')
+  await g1.type('.nickname-card input', '甲')
+  await clickText(g1, '进入')
+  await g1.waitForSelector('.page.lobby')
+  await page.waitForFunction(() => document.body.innerText.includes('甲'))
+
+  const g2 = await prepGuest()
+  await g2.goto(`${BASE}/r/${code}`, { waitUntil: 'domcontentloaded' })
+  await g2.waitForSelector('.nickname-card input')
+  await g2.type('.nickname-card input', '乙')
+  await clickText(g2, '进入')
+  await g2.waitForFunction(() =>
+    [...document.querySelectorAll('.toast, .error, h1')].some((t) =>
+      (t.textContent || '').includes('本桌已满（最多2人）'),
+    ),
+  )
+  await g2.screenshot({ path: `${ART}/table-full-2.png`, fullPage: true })
+  console.log('shot', `${ART}/table-full-2.png`)
+
   await clickText(page, '开桌')
   await page.waitForSelector('.seat-self')
   await clickText(page, '邀请')
@@ -127,11 +165,14 @@ try {
 
   // invalid room code
   await page.goto(`${BASE}/r/@@@`, { waitUntil: 'domcontentloaded' })
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll('.toast')].some((t) =>
+  await page.waitForFunction(() => {
+    const home = location.pathname === '/' || location.pathname === ''
+    const toast = [...document.querySelectorAll('.toast')].some((t) =>
       (t.textContent || '').includes('房码无效'),
-    ),
-  )
+    )
+    const inline = (document.body?.innerText || '').includes('房码无效')
+    return home && (toast || inline)
+  })
   await shot('invalid-code')
 
   console.log('OK e2e-qr-create', code)

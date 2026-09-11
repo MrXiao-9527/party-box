@@ -17,31 +17,37 @@ export async function clickText(page, text) {
   }, text)
 }
 
+/** Set a React-controlled <input> value (native setter + input event). */
+export async function setInputValue(page, selector, value) {
+  await page.waitForSelector(selector)
+  await page.$eval(
+    selector,
+    (el, v) => {
+      const desc = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype,
+        'value',
+      )
+      desc.set.call(el, String(v))
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    },
+    value,
+  )
+}
+
 /** After homepage「开一桌」is showing the create form. */
 export async function fillCreateRoom(
   page,
   { buyIn = '100', maxSeats, smallBlind, bigBlind } = {},
 ) {
   await page.waitForSelector('[data-create-room] [name="buyInN"]')
-  const buy = await page.$('[name="buyInN"]')
-  await buy.click({ clickCount: 3 })
-  await page.keyboard.press('Backspace')
-  await buy.type(String(buyIn))
-  if (maxSeats != null) {
-    const el = await page.$('[name="maxSeats"]')
-    await el.click({ clickCount: 3 })
-    await page.keyboard.press('Backspace')
-    await el.type(String(maxSeats))
-  }
+  await setInputValue(page, '[data-create-room] [name="buyInN"]', buyIn)
+  await setInputValue(page, '[data-create-room] [name="maxSeats"]', maxSeats ?? '8')
   if (smallBlind != null) {
-    const el = await page.$('[name="smallBlind"]')
-    await el.click({ clickCount: 3 })
-    await el.type(String(smallBlind))
+    await setInputValue(page, '[data-create-room] [name="smallBlind"]', smallBlind)
   }
   if (bigBlind != null) {
-    const el = await page.$('[name="bigBlind"]')
-    await el.click({ clickCount: 3 })
-    await el.type(String(bigBlind))
+    await setInputValue(page, '[data-create-room] [name="bigBlind"]', bigBlind)
   }
 }
 

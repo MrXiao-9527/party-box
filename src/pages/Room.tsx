@@ -117,6 +117,7 @@ export function RoomPage() {
   // Restore decision on enter / refresh
   useEffect(() => {
     if (!parsed.ok) {
+      setFlashToast(parsed.reason)
       roomApi.pushToast(parsed.reason)
       navigate('/', { replace: true })
       return
