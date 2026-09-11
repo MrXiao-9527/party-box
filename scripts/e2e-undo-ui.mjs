@@ -4,7 +4,7 @@
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
-import { fillCreateRoom } from './e2e-lib.mjs'
+import { fillCreateRoom, setInputValue } from './e2e-lib.mjs'
 
 const BASE = 'http://127.0.0.1:45321'
 const ART = '/opt/cursor/artifacts/screenshots'
@@ -108,8 +108,12 @@ try {
   await openMenu()
   await clickText('全员买入')
   await page.waitForSelector('.buyin-amount-input')
-  await page.click('.buyin-amount-input', { clickCount: 3 })
-  await page.type('.buyin-amount-input', '50')
+  await setInputValue(page, '.buyin-amount-input', '50')
+  await page.waitForFunction(() =>
+    (document.querySelector('.transfer-preview')?.textContent || '').includes(
+      '全员余额将设为 50',
+    ),
+  )
   await clickText('确认买入')
   await page.waitForFunction(() => {
     const el = document.querySelector('.hero-balance')

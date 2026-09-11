@@ -4,7 +4,7 @@
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
-import { fillCreateRoom } from './e2e-lib.mjs'
+import { fillCreateRoom, setInputValue } from './e2e-lib.mjs'
 
 const BASE = 'http://127.0.0.1:45321'
 const ART = '/opt/cursor/artifacts/screenshots'
@@ -128,16 +128,23 @@ try {
   await host.waitForSelector('.menu-sheet')
   await clickText(host, '全员买入')
   await host.waitForSelector('.buyin-amount-input')
-  await host.click('.buyin-amount-input', { clickCount: 3 })
-  await host.type('.buyin-amount-input', '40')
+  await setInputValue(host, '.buyin-amount-input', '40')
+  await host.waitForFunction(() =>
+    (document.querySelector('.transfer-preview')?.textContent || '').includes(
+      '全员余额将设为 40',
+    ),
+  )
   await clickText(host, '确认买入')
+  await host.waitForFunction(() => {
+    const el = document.querySelector('.hero-balance')
+    return el && Number(el.textContent) === 40
+  })
   await waitLedgerHas(host, '全员买入 40')
   await waitLedgerHas(guest, '全员买入 40')
 
   await clickText(guest, '放进底池')
   await guest.waitForSelector('.transfer-amount-input')
-  await guest.click('.transfer-amount-input', { clickCount: 3 })
-  await guest.type('.transfer-amount-input', '10')
+  await setInputValue(guest, '.transfer-amount-input', '10')
   await clickText(guest, '确认放进底池')
   await waitLedgerHas(host, '进底池 10')
   await waitLedgerHas(guest, '进底池 10')
@@ -145,7 +152,7 @@ try {
   await host.click('.seat-other')
   await clickText(host, '转筹码')
   await host.waitForSelector('.transfer-amount-input')
-  await host.type('.transfer-amount-input', '5')
+  await setInputValue(host, '.transfer-amount-input', '5')
   await clickText(host, '确认转出')
   await waitLedgerHas(host, '甲 → 乙 · 转 5')
   await waitLedgerHas(guest, '甲 → 乙 · 转 5')
@@ -175,17 +182,14 @@ try {
       }
     }
   })
-  const amountInputs = await host.$$('.transfer-amount-input')
-  await amountInputs[amountInputs.length - 1].click({ clickCount: 3 })
-  await amountInputs[amountInputs.length - 1].type('4')
+  await setInputValue(host, '.transfer-amount-input:not(.pot-target-select)', '4')
   await clickText(host, '确认从底池发给')
   await waitLedgerHas(host, '出底池 4')
   await waitLedgerHas(guest, '出底池 4')
 
   await clickText(host, '底池均分')
   await host.waitForSelector('.transfer-amount-input')
-  await host.click('.transfer-amount-input', { clickCount: 3 })
-  await host.type('.transfer-amount-input', '6')
+  await setInputValue(host, '.transfer-amount-input', '6')
   await clickText(host, '确认底池均分')
   await waitLedgerHas(host, '均分底池')
   await waitLedgerHas(guest, '均分底池')
@@ -221,6 +225,24 @@ try {
   process.exit(0)
 } catch (e) {
   console.error('E2E_LEDGER_FAIL', e)
+  try {
+    const pages = await browser.pages()
+    let i = 0
+    for (const p of pages) {
+      const who = await p
+        .evaluate(() =>
+          [...document.querySelectorAll('.ledger-who,.ledger-empty')].map((el) =>
+            (el.textContent || '').trim(),
+          ),
+        )
+        .catch(() => [])
+      console.error('page', i, p.url(), who)
+      await p.screenshot({ path: `${ART}/ledger-fail-${i}.png`, fullPage: true }).catch(() => {})
+      i += 1
+    }
+  } catch (dumpErr) {
+    console.error('dump failed', dumpErr)
+  }
   await browser.close().catch(() => {})
   process.exit(1)
 }
