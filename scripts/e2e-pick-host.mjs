@@ -1,8 +1,9 @@
 /**
- * Dual-end 选新桌主:
- * 1) Solo paused host → 选新桌主 disabled + 「暂无在线成员可接桌」
- * 2) Host + online guest → host picker (no self) → confirm → both ChipTable
- *    with swapped authority (guest 桌主 / old host 玩家)
+ * Dual-end 选新桌主 (any online member, not host-only):
+ * 1) Host + 1 guest paused → guest 选新桌主 disabled + 「暂无在线成员可接桌」
+ *    (cannot pick self; left host is offline)
+ * 2) Host + 2 guests paused → guest 乙 picks 丙 → all ChipTable
+ *    with 丙 桌主 / 乙·甲 玩家
  *
  * Requires: vite :45321 + relay :45322 (dev:all).
  */
@@ -52,6 +53,19 @@ async function clickText(page, text) {
   }, text)
 }
 
+async function joinAs(page, code, name) {
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('.brand')
+  await clickText(page, '加入')
+  await page.waitForSelector('.join-panel input')
+  await page.type('.join-panel input', code)
+  await clickText(page, '进入')
+  await page.waitForSelector('.nickname-card input')
+  await page.type('.nickname-card input', name)
+  await clickText(page, '进入')
+  await page.waitForSelector('.page.lobby')
+}
+
 function pageState(page) {
   return page.evaluate(() => {
     const code = location.pathname.replace(/^\/r\//, '').toUpperCase()
@@ -79,6 +93,9 @@ function pageState(page) {
     }
     const pick = document.querySelector('[data-pick-host]')
     const tip = document.querySelector('[data-no-host-candidate]')
+    const pickerNames = [...document.querySelectorAll('.pick-host-list button')].map(
+      (b) => (b.textContent || '').trim(),
+    )
     return {
       phase,
       hostSeatId,
@@ -91,9 +108,7 @@ function pageState(page) {
       hasPick: !!pick,
       pickDisabled: pick ? pick.disabled : null,
       tip: tip?.textContent?.trim() ?? '',
-      hasSelfInPicker: [...document.querySelectorAll('.pick-host-list button')].some(
-        (b) => (b.textContent || '').includes('（我）'),
-      ),
+      pickerNames,
       text: document.body.innerText.slice(0, 400),
     }
   })
@@ -112,48 +127,61 @@ const check = (label, ok) => {
 }
 
 try {
-  // --- 1) Solo host: disabled + exact tip ---
-  const soloCtx = await browser.createBrowserContext()
-  const solo = await soloCtx.newPage()
-  await prep(solo)
-  await solo.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await solo.waitForSelector('.brand')
-  await clickText(solo, '开一桌')
-  await fillCreateRoom(solo, { maxSeats: '2' })
-  await clickText(solo, '确认')
-  await solo.waitForSelector('.nickname-card input')
-  await solo.type('.nickname-card input', '独桌')
-  await clickText(solo, '进入')
-  await solo.waitForSelector('.page.lobby')
-  const soloCode = await solo.evaluate(() =>
+  // --- 1) Host + one guest: guest cannot pick self ---
+  const soloHostCtx = await browser.createBrowserContext()
+  const soloGuestCtx = await browser.createBrowserContext()
+  const soloHost = await soloHostCtx.newPage()
+  const soloGuest = await soloGuestCtx.newPage()
+  await prep(soloHost)
+  await prep(soloGuest)
+  await soloHost.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await soloHost.waitForSelector('.brand')
+  await clickText(soloHost, '开一桌')
+  await fillCreateRoom(soloHost, { maxSeats: '2' })
+  await clickText(soloHost, '确认')
+  await soloHost.waitForSelector('.nickname-card input')
+  await soloHost.type('.nickname-card input', '独桌')
+  await clickText(soloHost, '进入')
+  await soloHost.waitForSelector('.page.lobby')
+  const soloCode = await soloHost.evaluate(() =>
     location.pathname.replace(/^\/r\//, '').toUpperCase(),
   )
-  await clickText(solo, '开桌')
-  await solo.waitForSelector('.page.table')
-  await solo.goto(`${BASE}/r/${soloCode}?dev=1`, { waitUntil: 'domcontentloaded' })
-  await solo.waitForSelector('.page.table')
-  await clickText(solo, '模拟桌主离线/暂停')
-  await solo.waitForSelector('.page.paused')
-  const soloState = await pageState(solo)
-  check('1a solo paused', soloState.hasPaused)
-  check('1b pick visible for host', soloState.hasPick)
-  check('1c pick disabled', soloState.pickDisabled === true)
-  check('1d exact tip', soloState.tip === '暂无在线成员可接桌')
-  await shot(solo, 'pick-host-solo-disabled')
-  await soloCtx.close()
+  await joinAs(soloGuest, soloCode, '甲')
+  await soloHost.waitForFunction(() => document.body.innerText.includes('甲'))
+  await clickText(soloHost, '开桌')
+  await soloHost.waitForSelector('.page.table')
+  await soloGuest.waitForSelector('.page.table')
+  await soloHost.goto(`${BASE}/r/${soloCode}?dev=1`, {
+    waitUntil: 'domcontentloaded',
+  })
+  await soloHost.waitForSelector('.page.table')
+  await clickText(soloHost, '模拟桌主离线/暂停')
+  await soloHost.waitForSelector('.page.paused')
+  await soloGuest.waitForSelector('.page.paused')
+  const guestAlone = await pageState(soloGuest)
+  check('1a guest paused', guestAlone.hasPaused)
+  check('1b guest pick visible', guestAlone.hasPick)
+  check('1c guest pick disabled', guestAlone.pickDisabled === true)
+  check('1d exact tip', guestAlone.tip === '暂无在线成员可接桌')
+  await shot(soloGuest, 'pick-host-guest-no-candidate')
+  await soloHostCtx.close()
+  await soloGuestCtx.close()
 
-  // --- 2) Dual-end transfer ---
+  // --- 2) Dual-end transfer: guest 乙 picks 丙 ---
   const hostCtx = await browser.createBrowserContext()
-  const guestCtx = await browser.createBrowserContext()
+  const guestBCtx = await browser.createBrowserContext()
+  const guestCCtx = await browser.createBrowserContext()
   const host = await hostCtx.newPage()
-  const guest = await guestCtx.newPage()
+  const guestB = await guestBCtx.newPage()
+  const guestC = await guestCCtx.newPage()
   await prep(host)
-  await prep(guest)
+  await prep(guestB)
+  await prep(guestC)
 
   await host.goto(BASE, { waitUntil: 'domcontentloaded' })
   await host.waitForSelector('.brand')
   await clickText(host, '开一桌')
-  await fillCreateRoom(host, { maxSeats: '2' })
+  await fillCreateRoom(host, { maxSeats: '3' })
   await clickText(host, '确认')
   await host.waitForSelector('.nickname-card input')
   await host.type('.nickname-card input', '甲')
@@ -163,67 +191,72 @@ try {
     location.pathname.replace(/^\/r\//, '').toUpperCase(),
   )
 
-  await guest.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await guest.waitForSelector('.brand')
-  await clickText(guest, '加入')
-  await guest.waitForSelector('.join-panel input')
-  await guest.type('.join-panel input', code)
-  await clickText(guest, '进入')
-  await guest.waitForSelector('.nickname-card input')
-  await guest.type('.nickname-card input', '乙')
-  await clickText(guest, '进入')
-  await guest.waitForSelector('.page.lobby')
-
-  await host.waitForFunction(() => document.body.innerText.includes('乙'))
+  await joinAs(guestB, code, '乙')
+  await joinAs(guestC, code, '丙')
+  await host.waitForFunction(
+    () =>
+      document.body.innerText.includes('乙') &&
+      document.body.innerText.includes('丙'),
+  )
   await clickText(host, '开桌')
   await host.waitForSelector('.page.table')
-  await guest.waitForSelector('.page.table')
+  await guestB.waitForSelector('.page.table')
+  await guestC.waitForSelector('.page.table')
 
   await host.goto(`${BASE}/r/${code}?dev=1`, { waitUntil: 'domcontentloaded' })
   await host.waitForSelector('.page.table')
   await clickText(host, '模拟桌主离线/暂停')
   await host.waitForSelector('.page.paused')
-  await guest.waitForSelector('.page.paused')
+  await guestB.waitForSelector('.page.paused')
+  await guestC.waitForSelector('.page.paused')
 
-  const guestPaused = await pageState(guest)
-  check('2a guest paused no pick control', guestPaused.hasPaused && !guestPaused.hasPick)
+  const bPaused = await pageState(guestB)
+  check('2a guest B pick enabled', bPaused.hasPick && bPaused.pickDisabled === false)
+  check('2b guest B no empty tip', bPaused.tip === '')
+  const cPaused = await pageState(guestC)
+  check('2c guest C pick enabled', cPaused.hasPick && cPaused.pickDisabled === false)
+  await shot(guestB, 'pick-host-guest-paused')
+  await shot(host, 'pick-host-left-host-paused')
 
-  const hostPaused = await pageState(host)
-  check('2b host pick enabled', hostPaused.hasPick && hostPaused.pickDisabled === false)
-  check('2c host no empty tip', hostPaused.tip === '')
-  await shot(host, 'pick-host-host-paused')
-  await shot(guest, 'pick-host-guest-paused')
+  await clickText(guestB, '选新桌主')
+  await guestB.waitForSelector('.pick-host-list')
+  const picker = await pageState(guestB)
+  check('2d picker is 丙 only', picker.pickerNames.join(',') === '丙')
+  check('2e picker excludes self', !picker.pickerNames.includes('乙'))
+  await shot(guestB, 'pick-host-picker')
 
-  await clickText(host, '选新桌主')
-  await host.waitForSelector('.pick-host-list')
-  const picker = await pageState(host)
-  check('2d picker excludes self', !picker.hasSelfInPicker)
-  await shot(host, 'pick-host-picker')
-
-  await clickText(host, '乙')
-  await host.waitForSelector('[aria-label="确认转让桌主"]')
-  await shot(host, 'pick-host-confirm')
-  await clickText(host, '确认转让')
+  await clickText(guestB, '丙')
+  await guestB.waitForSelector('[aria-label="确认转让桌主"]')
+  await shot(guestB, 'pick-host-confirm')
+  await clickText(guestB, '确认转让')
 
   await host.waitForSelector('.page.table')
-  await guest.waitForSelector('.page.table')
+  await guestB.waitForSelector('.page.table')
+  await guestC.waitForSelector('.page.table')
 
   const afterHost = await pageState(host)
-  const afterGuest = await pageState(guest)
-  check('2e host left paused', afterHost.hasChip && !afterHost.hasPaused)
-  check('2f guest left paused', afterGuest.hasChip && !afterGuest.hasPaused)
-  check('2g same hostSeatId', afterHost.hostSeatId === afterGuest.hostSeatId)
-  check('2h guest is authoritative host', afterGuest.isHost === true)
-  check('2i old host is player', afterHost.isHost === false)
-  check('2j host top-meta 玩家', afterHost.topMeta.includes('玩家'))
-  check('2k guest top-meta 桌主', afterGuest.topMeta.includes('桌主'))
-  await shot(host, 'pick-host-after-host')
-  await shot(guest, 'pick-host-after-guest')
+  const afterB = await pageState(guestB)
+  const afterC = await pageState(guestC)
+  check('2f host left paused', afterHost.hasChip && !afterHost.hasPaused)
+  check('2g B left paused', afterB.hasChip && !afterB.hasPaused)
+  check('2h C left paused', afterC.hasChip && !afterC.hasPaused)
+  check(
+    '2i same hostSeatId',
+    afterHost.hostSeatId === afterB.hostSeatId &&
+      afterB.hostSeatId === afterC.hostSeatId,
+  )
+  check('2j 丙 is authoritative host', afterC.isHost === true)
+  check('2k picker 乙 is player', afterB.isHost === false)
+  check('2l old host 甲 is player', afterHost.isHost === false)
+  check('2m C top-meta 桌主', afterC.topMeta.includes('桌主'))
+  check('2n B top-meta 玩家', afterB.topMeta.includes('玩家'))
+  await shot(guestC, 'pick-host-after-new-host')
+  await shot(guestB, 'pick-host-after-picker')
 
-  await guest.reload({ waitUntil: 'domcontentloaded' })
-  await guest.waitForSelector('.page.table', { timeout: 15_000 })
-  const refreshed = await pageState(guest)
-  check('2l refresh keeps new host', refreshed.isHost === true && refreshed.hasChip)
+  await guestC.reload({ waitUntil: 'domcontentloaded' })
+  await guestC.waitForSelector('.page.table', { timeout: 15_000 })
+  const refreshed = await pageState(guestC)
+  check('2o refresh keeps new host', refreshed.isHost === true && refreshed.hasChip)
 
   if (failed) throw new Error(`${failed} checks failed`)
   console.log('E2E_PICK_HOST_OK')
