@@ -87,6 +87,58 @@ try {
   await host.waitForSelector('.page.table')
   await guest.waitForSelector('.page.table')
 
+  const vis = await host.evaluate(() => {
+    const pot = document.querySelector('.pot-top')
+    const seatBal = document.querySelector('.seat-other .seat-balance')
+    const header =
+      document.querySelector('.table-top--pin') ||
+      document.querySelector('.table-top')
+    if (!pot) {
+      return { text: '', potPx: 0, seatPx: 0, pos: '', visible: false }
+    }
+    const cs = getComputedStyle(pot)
+    const hs = header ? getComputedStyle(header) : null
+    const rect = pot.getBoundingClientRect()
+    return {
+      text: (pot.textContent || '').trim(),
+      potPx: parseFloat(cs.fontSize),
+      seatPx: seatBal ? parseFloat(getComputedStyle(seatBal).fontSize) : 0,
+      pos: hs ? hs.position : '',
+      visible:
+        rect.width > 0 &&
+        rect.height > 0 &&
+        cs.display !== 'none' &&
+        cs.visibility !== 'hidden',
+    }
+  })
+  console.log('pot visibility', vis)
+
+  await host.evaluate(() => {
+    const pageEl = document.querySelector('.page.table')
+    if (pageEl) pageEl.style.minHeight = '2200px'
+    const rail = document.querySelector('.seats-rail')
+    if (rail) rail.scrollLeft = rail.scrollWidth
+    window.scrollTo(0, 420)
+  })
+  const afterScroll = await host.evaluate(() => {
+    const pot = document.querySelector('.pot-top')
+    const r = pot?.getBoundingClientRect()
+    return {
+      top: r?.top ?? -1,
+      bottom: r?.bottom ?? -1,
+      vh: window.innerHeight,
+      scrollY: window.scrollY,
+    }
+  })
+  console.log('pot after scroll', afterScroll)
+  await host.evaluate(() => {
+    const pageEl = document.querySelector('.page.table')
+    if (pageEl) pageEl.style.minHeight = ''
+    const rail = document.querySelector('.seats-rail')
+    if (rail) rail.scrollLeft = 0
+    window.scrollTo(0, 0)
+  })
+
   const ops = []
   guest.on('response', async (res) => {
     if (res.url().includes('/ops')) {
@@ -184,8 +236,20 @@ try {
   await guest.screenshot({ path: `${ART}/pot-guest-after-split.png` })
 
   const invalidToast = toasts.some((t) => t.includes('操作无效'))
+  const pinned = vis.pos === 'sticky' || vis.pos === 'fixed'
+  const sizeOk = vis.potPx + 0.05 >= vis.seatPx && vis.seatPx > 0
+  const stillPinned =
+    afterScroll.scrollY > 200 &&
+    afterScroll.top >= 0 &&
+    afterScroll.bottom > 0 &&
+    afterScroll.top < 160
   const ok =
     !invalidToast &&
+    vis.text === '底池 · 0' &&
+    vis.visible &&
+    pinned &&
+    sizeOk &&
+    stillPinned &&
     guestPot.includes('底池 · 10') &&
     hostPot.includes('底池 · 10') &&
     guestPotRefresh.includes('底池 · 10') &&

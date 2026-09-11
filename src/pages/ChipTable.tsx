@@ -386,15 +386,13 @@ export function ChipTable({
 
   return (
     <div className="page table">
-      <header className="table-top">
+      <header className="table-top table-top--pin">
         <div className="top-meta">
           <span className="code">{room.roomCode.toUpperCase()}</span>
           <span className="dot">·</span>
           <span>{seats.length} 人</span>
           <span className="dot">·</span>
           <span>{isHost ? '桌主' : '玩家'}</span>
-          <span className="dot">·</span>
-          <span className="pot-top">底池 · {potBalance}</span>
         </div>
         <button
           type="button"
@@ -404,6 +402,7 @@ export function ChipTable({
         >
           ☰
         </button>
+        <span className="pot-top">底池 · {potBalance}</span>
       </header>
 
       {connectionState === 'offline' && (
