@@ -118,9 +118,17 @@ try {
   })
   await waitUrl(`${RELAY_URL}/health`)
 
-  vite = spawnLogged('npx', ['vite', '--host', '127.0.0.1', '--port', String(FE)], {
-    VITE_RELAY_URL: RELAY_URL,
-  })
+  vite = spawnLogged(
+    process.execPath,
+    [
+      path.join(ROOT, 'node_modules/vite/bin/vite.js'),
+      '--host',
+      '127.0.0.1',
+      '--port',
+      String(FE),
+    ],
+    { VITE_RELAY_URL: RELAY_URL },
+  )
   await waitUrl(BASE)
 
   browser = await puppeteer.launch({
@@ -148,12 +156,12 @@ try {
         return
       }
       if (isCreateRoomPost(url, method) && roomsMode === 'slow-fail') {
-        await new Promise((r) => setTimeout(r, 700))
+        await new Promise((r) => setTimeout(r, 1100))
         await req.abort('failed')
         return
       }
       if (method === 'POST' && url.includes('/phase') && phaseMode === 'slow-fail') {
-        await new Promise((r) => setTimeout(r, 700))
+        await new Promise((r) => setTimeout(r, 1100))
         await req.abort('failed')
         return
       }
@@ -173,6 +181,10 @@ try {
   await fillCreateRoom(home.page)
   await clickText(home.page, '确认')
   await hasButton(home.page, BUSY)
+  await home.page.screenshot({
+    path: `${ART}/open-table-home-loading.png`,
+    fullPage: true,
+  })
   await toastText(home.page, UNREACHABLE)
   const homeToast = await home.page.$eval('.toast', (el) => el.textContent.trim())
   assert(homeToast === UNREACHABLE, `home toast: ${homeToast}`)
@@ -204,6 +216,10 @@ try {
   phaseMode = 'slow-fail'
   await clickText(lobby.page, '开桌')
   await hasButton(lobby.page, BUSY)
+  await lobby.page.screenshot({
+    path: `${ART}/open-table-lobby-loading.png`,
+    fullPage: true,
+  })
   await toastText(lobby.page, UNREACHABLE)
   const lobbyToast = await lobby.page.$eval('.toast', (el) =>
     el.textContent.trim(),
@@ -233,6 +249,7 @@ try {
   await lobby.ctx.close()
 } catch (e) {
   console.error('FAIL', e)
+  process.exitCode = 1
   try {
     const pages = (await browser?.pages?.()) ?? []
     const p = pages[pages.length - 1]
@@ -245,9 +262,17 @@ try {
   } catch {
     /* ignore */
   }
-  process.exitCode = 1
 } finally {
-  if (browser) await browser.close()
+  try {
+    await Promise.race([
+      browser?.close() ?? Promise.resolve(),
+      new Promise((resolve) => setTimeout(resolve, 3000)),
+    ])
+  } catch {
+    /* ignore */
+  }
   await stop(vite)
   await stop(relay)
+  fs.rmSync(DATA, { recursive: true, force: true })
+  process.exit(process.exitCode ?? 0)
 }
