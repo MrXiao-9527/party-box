@@ -21,7 +21,8 @@
     "test:settlement": "node --experimental-strip-types scripts/test-settlement.mjs",
     "test:room-create": "node --experimental-strip-types scripts/test-room-create.mjs",
     "test:e2e-create-snapshot": "node scripts/e2e-create-snapshot.mjs",
-    "test:e2e-open-table-ux": "node scripts/e2e-open-table-ux.mjs"
+    "test:e2e-open-table-ux": "node scripts/e2e-open-table-ux.mjs",
+    "test:e2e-deeplink": "node scripts/e2e-deeplink-join.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

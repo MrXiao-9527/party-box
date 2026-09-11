@@ -143,4 +143,18 @@ store.setPhase(noStamp.data.room.roomCode, 'playing', { phase: 'playing' })
 const kept = store.get(noStamp.data.room.roomCode)
 assert(kept.room.buyInN === 0 && kept.room.maxSeats === 8, 'empty phase body does not invent snapshot')
 
+{
+  const created = store.createEmptyHostRoom({ buyInN: 10, maxSeats: 8 })
+  assert(!('error' in created), 'mono create')
+  const code = created.data.room.roomCode
+  created.data.table.snapshotAt = 9_000_000_000_000
+  store.set(created.data)
+  const host = store.claimHostSeat(code, created.session.seatId, '桌主')
+  assert(host && host.table.snapshotAt > 9_000_000_000_000, 'claim strictly newer')
+  const atHost = host.table.snapshotAt
+  const joined = store.joinRoom(code, '甲')
+  assert(!('error' in joined), 'mono join')
+  assert(joined.data.table.snapshotAt > atHost, 'join strictly newer than claim')
+}
+
 console.log('OK test-room-create')

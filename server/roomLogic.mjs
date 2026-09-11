@@ -228,6 +228,10 @@ function normalize(data) {
   }
 }
 
+function nextSnapshotAt(existing) {
+  return Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
+}
+
 export function createRoomStore() {
   /** @type {Map<string, { data: object, touchedAt: number }>} */
   const rooms = new Map()
@@ -313,7 +317,7 @@ export function createRoomStore() {
       )
       return set({
         room: { ...room, members },
-        table: { ...existing.table, seats, snapshotAt: Date.now() },
+        table: { ...existing.table, seats, snapshotAt: nextSnapshotAt(existing) },
       })
     }
 
@@ -331,7 +335,7 @@ export function createRoomStore() {
         ],
       },
       table: {
-        snapshotAt: Date.now(),
+        snapshotAt: nextSnapshotAt(existing),
         denoms: existing.table.denoms,
         seats: [
           { seatId, name, isHost: true, locked: false, balance: 0, buyIn: 0 },
@@ -369,7 +373,7 @@ export function createRoomStore() {
       },
       table: {
         ...existing.table,
-        snapshotAt: Date.now(),
+        snapshotAt: nextSnapshotAt(existing),
         seats: [
           ...existing.table.seats,
           { seatId, name, isHost: false, locked: false, balance: 0, buyIn: 0 },
@@ -401,14 +405,14 @@ export function createRoomStore() {
     }
     return set({
       room: { ...existing.room, members },
-      table: { ...existing.table, seats, snapshotAt: Date.now() },
+      table: { ...existing.table, seats, snapshotAt: nextSnapshotAt(existing) },
     })
   }
 
   function setPhase(roomCode, phase, settings) {
     const existing = get(roomCode)
     if (!existing) return null
-    const snapshotAt = Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
+    const snapshotAt = nextSnapshotAt(existing)
     return set({
       ...existing,
       room: { ...stampCreateSettings(existing.room, settings), phase },
@@ -424,7 +428,7 @@ export function createRoomStore() {
     )
     return set({
       room: { ...existing.room, members },
-      table: { ...existing.table, snapshotAt: Date.now() },
+      table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
     })
   }
 
@@ -451,7 +455,7 @@ export function createRoomStore() {
         members,
         phase: 'playing',
       },
-      table: { ...existing.table, seats, snapshotAt: Date.now() },
+      table: { ...existing.table, seats, snapshotAt: nextSnapshotAt(existing) },
     })
   }
 
@@ -887,7 +891,7 @@ export function createRoomStore() {
         return fail(ACK_REASONS.INVALID)
     }
 
-    const snapshotAt = Date.now()
+    const snapshotAt = nextSnapshotAt(existing)
     const data = set({
       room: existing.room,
       table: {

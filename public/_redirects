@@ -1,0 +1,5 @@
+# Cold open / QR / external link: /r/{CODE} must serve the SPA.
+# Cloudflare Pages serves real files first; these 200s are fallbacks only.
+/r/*     /index.html  200
+/tools/* /index.html  200
+/*       /index.html  200

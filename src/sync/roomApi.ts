@@ -51,15 +51,14 @@ export type SyncRoomResult =
   | { status: 'missing' }
   | { status: 'network' }
 
-/** True if this browser had joined / cached this room (not a cold join). */
+/** True if this browser had joined / cached a seat in this room (not a cold GET). */
 export function wasInRoomLocally(roomCode: string): boolean {
   const code = roomCode.toUpperCase()
-  if (loadRoom(code)) return true
   try {
     const sessionRaw = localStorage.getItem('party-box:session')
     if (sessionRaw) {
       const session = JSON.parse(sessionRaw) as Session
-      if (session?.roomCode?.toUpperCase() === code) return true
+      if (session?.roomCode?.toUpperCase() === code && session.seatId) return true
     }
   } catch {
     /* ignore */

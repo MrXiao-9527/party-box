@@ -1,8 +1,5 @@
 import { useState } from 'react'
-import {
-  loadSession,
-  type Session,
-} from '../store/localRoom'
+import { loadSession, type Session } from '../store/localRoom'
 import type { PersistedRoom } from '../store/localRoom'
 import { claimHostSeat, joinRoom, syncRoomFromRelay, syncStatusToast } from '../sync/roomApi'
 import { ACK_REASONS, parseRoomCode } from '../types'
@@ -58,13 +55,15 @@ export function NicknameGate({
         const existing = synced.data
 
         const session = loadSession()
-        // First claim after「开一桌」(host seat reserved on create)
-        if (
+        const reservedHost =
           session?.roomCode === parsed.code &&
-          session.seatId === existing.room.hostSeatId &&
-          (!session.name ||
-            !existing.room.members.some((m) => m.seatId === session.seatId))
-        ) {
+          session.seatId === existing.room.hostSeatId
+        const hostSeatTaken = existing.room.members.some(
+          (m) => m.seatId === existing.room.hostSeatId && m.name,
+        )
+        // First claim after「开一桌」(host seat reserved on create).
+        // Cold /r/{CODE} guests must joinRoom — never claim-host.
+        if (session && reservedHost && !hostSeatTaken) {
           const data = await claimHostSeat(parsed.code, session.seatId, trimmed)
           if (data) {
             const next = {

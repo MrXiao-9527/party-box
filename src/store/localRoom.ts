@@ -62,6 +62,14 @@ export function saveSession(session: Session | null): void {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session))
 }
 
+/** Drop a leftover session from another room so /r/{CODE} cannot claim-host. */
+export function dropForeignSession(roomCode: string): void {
+  const s = loadSession()
+  if (s && s.roomCode.toUpperCase() !== roomCode.toUpperCase()) {
+    saveSession(null)
+  }
+}
+
 function normalizePot(raw: unknown): number {
   const n = typeof raw === 'number' ? raw : Number(raw)
   if (!Number.isFinite(n)) return 0
@@ -83,6 +91,11 @@ function applyPlusBuyIn(
 
 function undoPlusBuyIn(seat: { buyIn?: number }, delta: number): void {
   if (delta > 0) seat.buyIn = Math.max(0, normalizeBuyIn(seat.buyIn) - delta)
+}
+
+/** Strictly newer than the current table — join/member mutations must beat the host gate. */
+function nextSnapshotAt(existing: PersistedRoom): number {
+  return Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
 }
 
 function optionalBlind(raw: unknown): number | undefined {
@@ -267,7 +280,7 @@ export function claimHostSeat(
       table: {
         ...existing.table,
         seats,
-        snapshotAt: Date.now(),
+        snapshotAt: nextSnapshotAt(existing),
         pot: normalizePot(existing.table.pot),
         ledger: existing.table.ledger ?? [],
       },
@@ -291,7 +304,7 @@ export function claimHostSeat(
       ],
     },
     table: {
-      snapshotAt: Date.now(),
+      snapshotAt: nextSnapshotAt(existing),
       denoms: existing.table.denoms,
       seats: [
         { seatId, name, isHost: true, locked: false, balance: 0, buyIn: 0 },
@@ -369,7 +382,7 @@ export function joinRoom(
     },
     table: {
       ...existing.table,
-      snapshotAt: Date.now(),
+      snapshotAt: nextSnapshotAt(existing),
       seats: [
         ...existing.table.seats,
         { seatId, name, isHost: false, locked: false, balance: 0, buyIn: 0 },
@@ -409,7 +422,7 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
 
   const data: PersistedRoom = {
     room: { ...existing.room, members },
-    table: { ...existing.table, seats, snapshotAt: Date.now() },
+    table: { ...existing.table, seats, snapshotAt: nextSnapshotAt(existing) },
   }
   saveRoom(data)
   return data
@@ -418,7 +431,7 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
 export function setPhase(roomCode: string, phase: Phase): PersistedRoom | null {
   const existing = loadRoom(roomCode)
   if (!existing) return null
-  const snapshotAt = Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
+  const snapshotAt = nextSnapshotAt(existing)
   const data: PersistedRoom = {
     ...existing,
     room: {
@@ -451,7 +464,7 @@ export function setMemberConnected(
       ...existing.room,
       members,
     },
-    table: { ...existing.table, snapshotAt: Date.now() },
+    table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
   }
   saveRoom(data)
   return data
@@ -490,7 +503,7 @@ export function pickNewHost(
       members,
       phase: 'playing',
     },
-    table: { ...existing.table, seats, snapshotAt: Date.now() },
+    table: { ...existing.table, seats, snapshotAt: nextSnapshotAt(existing) },
   }
   saveRoom(data)
   return data
@@ -924,7 +937,7 @@ export function applyChipOp(op: ChipOp): {
       return fail(ACK_REASONS.INVALID)
   }
 
-  const snapshotAt = Date.now()
+  const snapshotAt = nextSnapshotAt(existing)
   const data: PersistedRoom = {
     room: existing.room,
     table: {

@@ -12,6 +12,7 @@ import {
   loadRoom,
   loadSession,
   saveSession,
+  dropForeignSession,
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
@@ -123,6 +124,10 @@ export function RoomPage() {
       return
     }
     if (!roomCode) return
+
+    // Cold /r/{CODE} on a device that still holds another room's session:
+    // never let NicknameGate treat that leftover as this table's host claim.
+    dropForeignSession(roomCode)
 
     // Prefer identity key; fall back to session for same room (refresh resilience).
     const storedIdentity = loadIdentity()
