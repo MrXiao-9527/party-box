@@ -55,18 +55,25 @@ function spawnLogged(cmd, args, env) {
 }
 
 async function stop(child) {
-  if (!child || child.killed) return
-  await new Promise((resolve) => {
-    child.once('exit', () => resolve())
-    child.kill('SIGTERM')
-    setTimeout(() => {
+  if (!child || child.exitCode != null || child.signalCode) return
+  await Promise.race([
+    new Promise((resolve) => {
+      child.once('exit', () => resolve())
       try {
-        child.kill('SIGKILL')
+        child.kill('SIGTERM')
       } catch {
-        /* ignore */
+        resolve()
       }
-    }, 2500).unref()
-  })
+    }),
+    new Promise((resolve) => setTimeout(resolve, 2500)),
+  ])
+  if (child.exitCode == null && !child.signalCode) {
+    try {
+      child.kill('SIGKILL')
+    } catch {
+      /* ignore */
+    }
+  }
 }
 
 async function readSettings(page) {
