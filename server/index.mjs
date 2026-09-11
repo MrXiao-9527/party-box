@@ -236,7 +236,11 @@ async function handle(req, res) {
 
       if (req.method === 'POST' && action === 'pick-host') {
         const body = await readBody(req)
-        const result = store.pickNewHost(code, body.newHostSeatId)
+        const result = store.pickNewHost(
+          code,
+          body.newHostSeatId,
+          body.fromSeatId,
+        )
         if ('error' in result) {
           sendJson(res, 400, result)
           return

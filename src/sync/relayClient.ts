@@ -269,12 +269,13 @@ export async function relayResumeAsHost(
 export async function relayPickNewHost(
   roomCode: string,
   newHostSeatId: string,
+  fromSeatId: string,
 ): Promise<PersistedRoom | { error: string }> {
   const result = await api<{ data: PersistedRoom }>(
     `/rooms/${encodeURIComponent(roomCode)}/pick-host`,
     {
       method: 'POST',
-      body: JSON.stringify({ newHostSeatId }),
+      body: JSON.stringify({ newHostSeatId, fromSeatId }),
     },
   )
   if (!result.ok) {

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { RoomState } from '../types'
+import { ACK_REASONS, type RoomState } from '../types'
 import type { Session } from '../store/localRoom'
 
 interface PausedTableProps {
@@ -7,7 +7,6 @@ interface PausedTableProps {
   session: Session
   onResume: () => void
   onPickHost: (newHostSeatId: string) => void
-  pushToast: (text: string) => void
 }
 
 export function PausedTable({
@@ -15,26 +14,31 @@ export function PausedTable({
   session,
   onResume,
   onPickHost,
-  pushToast,
 }: PausedTableProps) {
   const [picking, setPicking] = useState(false)
+  const [pendingSeatId, setPendingSeatId] = useState<string | null>(null)
   const host = room.members.find((m) => m.seatId === room.hostSeatId)
+  const isCurrentHost = session.seatId === room.hostSeatId
 
-  // Connected members who can take over — exclude the left host seat.
+  // Online = RoomMember.connected. Host cannot select self.
   const candidates = room.members.filter(
-    (m) => m.connected && m.seatId !== room.hostSeatId,
+    (m) =>
+      m.connected &&
+      m.seatId !== room.hostSeatId &&
+      m.seatId !== session.seatId,
   )
+  const pending = candidates.find((m) => m.seatId === pendingSeatId) ?? null
+  const canPick = candidates.length > 0
 
-  const openPickHost = () => {
-    if (candidates.length === 0) {
-      pushToast('暂无其他成员可接桌主')
-      return
-    }
-    setPicking(true)
+  const closePick = () => {
+    setPicking(false)
+    setPendingSeatId(null)
   }
 
-  const chooseHost = (seatId: string) => {
-    setPicking(false)
+  const confirmPick = () => {
+    if (!pending) return
+    const seatId = pending.seatId
+    closePick()
     onPickHost(seatId)
   }
 
@@ -44,7 +48,7 @@ export function PausedTable({
       <p className="hint">
         不会自动转让桌主。请等待
         {host ? `「${host.name}」` : '桌主'}
-        重新进入并重开，或由在线成员主动选出新桌主。
+        重开一桌，或由桌主将桌主转让给在线成员。
       </p>
 
       <ul className="member-list paused-members">
@@ -75,12 +79,30 @@ export function PausedTable({
         <button type="button" className="btn primary wide" onClick={onResume}>
           重开一桌
         </button>
-        <button type="button" className="btn ghost wide" onClick={openPickHost}>
-          选新桌主
-        </button>
+        {isCurrentHost && (
+          <>
+            <button
+              type="button"
+              className="btn ghost wide"
+              data-pick-host
+              disabled={!canPick}
+              onClick={() => {
+                if (!canPick) return
+                setPicking(true)
+              }}
+            >
+              选新桌主
+            </button>
+            {!canPick && (
+              <p className="hint" data-no-host-candidate role="status">
+                {ACK_REASONS.NO_HOST_CANDIDATE}
+              </p>
+            )}
+          </>
+        )}
       </div>
 
-      {picking && (
+      {picking && !pending && (
         <div className="confirm-overlay" role="dialog" aria-label="选新桌主">
           <div className="confirm-box">
             <p>选择新桌主</p>
@@ -90,10 +112,9 @@ export function PausedTable({
                   <button
                     type="button"
                     className="btn ghost wide"
-                    onClick={() => chooseHost(m.seatId)}
+                    onClick={() => setPendingSeatId(m.seatId)}
                   >
                     {m.name}
-                    {m.seatId === session.seatId ? '（我）' : ''}
                   </button>
                 </li>
               ))}
@@ -101,10 +122,35 @@ export function PausedTable({
             <button
               type="button"
               className="btn ghost wide"
-              onClick={() => setPicking(false)}
+              onClick={closePick}
             >
               取消
             </button>
+          </div>
+        </div>
+      )}
+
+      {pending && (
+        <div className="confirm-overlay" role="dialog" aria-label="确认转让桌主">
+          <div className="confirm-box">
+            <p>确认将桌主转让给「{pending.name}」？</p>
+            <div className="cta-row">
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setPendingSeatId(null)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                data-confirm-host
+                onClick={confirmPick}
+              >
+                确认转让
+              </button>
+            </div>
           </div>
         </div>
       )}

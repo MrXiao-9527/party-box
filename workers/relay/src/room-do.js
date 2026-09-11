@@ -183,7 +183,11 @@ export class RoomDurableObject {
 
       if (request.method === 'POST' && action === 'pick-host') {
         const body = await request.json()
-        const result = this.store.pickNewHost(code, body.newHostSeatId)
+        const result = this.store.pickNewHost(
+          code,
+          body.newHostSeatId,
+          body.fromSeatId,
+        )
         if ('error' in result) {
           return Response.json(result, { status: 400 })
         }

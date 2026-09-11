@@ -472,13 +472,22 @@ export function setMemberConnected(
 
 /**
  * Explicit host handoff only — never called automatically on disconnect.
+ * Online = RoomMember.connected (same presence flag as lobby / pause list).
  */
 export function pickNewHost(
   roomCode: string,
   newHostSeatId: string,
+  fromSeatId: string,
 ): PersistedRoom | { error: string } {
   const existing = loadRoom(roomCode)
   if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+  if (existing.room.phase !== 'paused') return { error: ACK_REASONS.INVALID }
+  if (!fromSeatId || fromSeatId !== existing.room.hostSeatId) {
+    return { error: ACK_REASONS.NOT_HOST }
+  }
+  if (newHostSeatId === existing.room.hostSeatId) {
+    return { error: ACK_REASONS.INVALID }
+  }
 
   const candidate = existing.room.members.find((m) => m.seatId === newHostSeatId)
   if (!candidate) return { error: ACK_REASONS.INVALID }

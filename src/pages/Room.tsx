@@ -682,7 +682,6 @@ export function RoomPage() {
                 }
               : roomApi.claimHost
           }
-          pushToast={roomApi.pushToast}
         />
       ) : roomApi.table?.settling ? (
         <Settlement
