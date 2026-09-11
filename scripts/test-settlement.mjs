@@ -105,6 +105,20 @@ function deepEqual(a, b, msg) {
   )
   assert(mismatch.buyInTotal === 200 && mismatch.settleTotal === 180, 'totals')
   assert(mismatch.netTotal === -20, 'net total')
+  assert(SETTLEMENT_COPY.MISMATCH === '买入与结算对不上，多半漏了补码，请先核对')
+  assert(SETTLEMENT_COPY.POT_REMAINING === '底池还有筹码，请先分完再结算')
+  assert(SETTLEMENT_COPY.FLAT === '本局打平，无需转账', 'flat exact')
+
+  const flat = buildSettlement({
+    seats: [
+      { seatId: 'a', name: '甲', balance: 100, buyIn: 100 },
+      { seatId: 'b', name: '乙', balance: 100, buyIn: 100 },
+    ],
+    pot: 0,
+  })
+  assert(flat.block === null, 'flat ok')
+  assert(flat.transfers.length === 0, 'flat no transfers')
+  assert(flat.netTotal === 0, 'flat net 0')
 
   const ok = buildSettlement({
     seats: [
