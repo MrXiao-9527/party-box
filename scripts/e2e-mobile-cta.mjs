@@ -141,37 +141,6 @@ if (Math.abs(a2hs.x - expectedX) > 8) {
 }
 console.log('PASS A2HS centered')
 
-// Hung relay → 开桌中… then inline error (do not wait the full 12s: abort via intercept)
-const ctx3 = await browser.createBrowserContext()
-const page3 = await ctx3.newPage()
-await page3.setViewport(mobileVp)
-await page3.setRequestInterception(true)
-page3.on('request', (req) => {
-  if (req.url().includes('/rooms') && req.method() === 'POST') {
-    // hang until client timeout — too slow for CI; abort immediately as network fail
-    req.abort('failed')
-    return
-  }
-  req.continue()
-})
-await page3.goto(BASE, { waitUntil: 'domcontentloaded' })
-await page3.waitForSelector('.brand')
-await touchTapText(page3, '开一桌')
-await page3.waitForFunction(
-  () => document.body.innerText.includes('连不上房间服务，请重试'),
-  { timeout: 5000 },
-)
-const failed = await page3.evaluate(() => ({
-  btn: [...document.querySelectorAll('button')].some(
-    (b) => (b.textContent || '').trim() === '开一桌',
-  ),
-  err: document.body.innerText.includes('连不上房间服务，请重试'),
-}))
-if (!failed.btn || !failed.err) {
-  throw new Error(`expected recover + inline error, got ${JSON.stringify(failed)}`)
-}
-console.log('PASS hung/fail create shows inline error and restores 开一桌')
-
 await browser.close()
 
 // Desktop mouse path

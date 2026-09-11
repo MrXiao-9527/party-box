@@ -62,8 +62,12 @@ export function HomePage() {
   }, [])
 
   const openingRef = useRef(false)
+  const lastPressAt = useRef(0)
   const openTable = () => {
+    const now = performance.now()
+    if (now - lastPressAt.current < 500) return
     if (openingRef.current) return
+    lastPressAt.current = now
     openingRef.current = true
     setOpening(true)
     setOpenError('')
