@@ -4,9 +4,13 @@ import {
   MAX_SEATS,
   findLastUndoable,
   ledgerEntrySummary,
+  normalizeMaxSeats,
+  parseRoomCreate,
+  tableFullReason,
   type ChipAck,
   type ChipOp,
   type Phase,
+  type RoomCreateInput,
   type RoomState,
   type TableSnapshot,
 } from '../types'
@@ -78,17 +82,28 @@ function undoPlusBuyIn(seat: { buyIn?: number }, delta: number): void {
   if (delta > 0) seat.buyIn = Math.max(0, normalizeBuyIn(seat.buyIn) - delta)
 }
 
+function optionalBlind(raw: unknown): number | undefined {
+  if (raw === undefined || raw === null || raw === '') return undefined
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n <= 0) return undefined
+  return n
+}
+
 function normalizeRoom(data: PersistedRoom): PersistedRoom {
+  const maxSeats = normalizeMaxSeats(data.room.maxSeats)
   return {
     ...data,
     room: {
       ...data.room,
-      maxSeats: MAX_SEATS,
-      members: data.room.members.slice(0, MAX_SEATS),
+      maxSeats,
+      buyInN: normalizeBuyIn(data.room.buyInN),
+      smallBlind: optionalBlind(data.room.smallBlind),
+      bigBlind: optionalBlind(data.room.bigBlind),
+      members: data.room.members.slice(0, maxSeats),
     },
     table: {
       ...data.table,
-      seats: data.table.seats.slice(0, MAX_SEATS).map((s) => ({
+      seats: data.table.seats.slice(0, maxSeats).map((s) => ({
         ...s,
         buyIn: normalizeBuyIn(s.buyIn),
       })),
@@ -145,19 +160,23 @@ export function restoreSeat(
 }
 
 
-export function createEmptyHostRoom(): {
-  session: Session
-  data: PersistedRoom
-} {
+export function createEmptyHostRoom(
+  input: RoomCreateInput = {},
+): { session: Session; data: PersistedRoom } | { error: string } {
+  const parsed = parseRoomCreate(input)
+  if (!parsed.ok) return { error: parsed.error }
   const roomCode = generateRoomCode()
-  const seatId = uid('seat')
+  const seatId = parsed.seatId || uid('seat')
   const now = Date.now()
   const data: PersistedRoom = {
     room: {
       roomCode,
       hostSeatId: seatId,
       phase: 'lobby',
-      maxSeats: MAX_SEATS,
+      maxSeats: parsed.maxSeats,
+      buyInN: parsed.buyInN,
+      smallBlind: parsed.smallBlind,
+      bigBlind: parsed.bigBlind,
       members: [],
     },
     table: {
@@ -193,7 +212,7 @@ export function claimHostSeat(
       s.seatId === seatId ? { ...s, name, isHost: true } : s,
     )
     const data: PersistedRoom = {
-      room: { ...existing.room, members, maxSeats: MAX_SEATS },
+      room: { ...existing.room, members },
       table: {
         ...existing.table,
         seats,
@@ -207,13 +226,16 @@ export function claimHostSeat(
     return data
   }
 
-  if (existing.room.members.length >= MAX_SEATS) return null
+  if (
+    existing.room.members.length >= normalizeMaxSeats(existing.room.maxSeats)
+  ) {
+    return null
+  }
 
   const data: PersistedRoom = {
     room: {
       ...existing.room,
       hostSeatId: seatId,
-      maxSeats: MAX_SEATS,
       members: [
         { seatId, name, isHost: true, connected: true },
         ...existing.room.members.map((m) => ({ ...m, isHost: false })),
@@ -249,6 +271,7 @@ export function createRoomAsHost(name: string): {
       hostSeatId: seatId,
       phase: 'lobby',
       maxSeats: MAX_SEATS,
+      buyInN: 0,
       members: [{ seatId, name, isHost: true, connected: true }],
     },
     table: {
@@ -281,15 +304,15 @@ export function joinRoom(
 
   // Always allocate a new seatId (restore / takeover paths bind an existing seat
   // before NicknameGate; nick after seat_taken / identity_lost lands here).
-  if (existing.room.members.length >= MAX_SEATS) {
-    return { error: ACK_REASONS.TABLE_FULL }
+  const cap = normalizeMaxSeats(existing.room.maxSeats)
+  if (existing.room.members.length >= cap) {
+    return { error: tableFullReason(cap) }
   }
 
   const seatId = uid('seat')
   const data: PersistedRoom = {
     room: {
       ...existing.room,
-      maxSeats: MAX_SEATS,
       members: [
         ...existing.room.members,
         { seatId, name, isHost: false, connected: true },
@@ -317,10 +340,11 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
   const existing = loadRoom(roomCode)
   if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
 
+  const cap = normalizeMaxSeats(existing.room.maxSeats)
   const members = [...existing.room.members]
   const seats = [...existing.table.seats]
   let n = 1
-  while (members.length < MAX_SEATS) {
+  while (members.length < cap) {
     const seatId = uid('seat')
     const name = `座位${n++}`
     members.push({ seatId, name, isHost: false, connected: true })
@@ -335,7 +359,7 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
   }
 
   const data: PersistedRoom = {
-    room: { ...existing.room, members, maxSeats: MAX_SEATS },
+    room: { ...existing.room, members },
     table: { ...existing.table, seats, snapshotAt: Date.now() },
   }
   saveRoom(data)
@@ -348,7 +372,7 @@ export function setPhase(roomCode: string, phase: Phase): PersistedRoom | null {
   const snapshotAt = Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
   const data: PersistedRoom = {
     ...existing,
-    room: { ...existing.room, phase, maxSeats: MAX_SEATS },
+    room: { ...existing.room, phase },
     table: { ...existing.table, snapshotAt },
   }
   saveRoom(data)
@@ -374,7 +398,6 @@ export function setMemberConnected(
     room: {
       ...existing.room,
       members,
-      maxSeats: MAX_SEATS,
     },
     table: { ...existing.table, snapshotAt: Date.now() },
   }
@@ -414,7 +437,6 @@ export function pickNewHost(
       hostSeatId: newHostSeatId,
       members,
       phase: 'playing',
-      maxSeats: MAX_SEATS,
     },
     table: { ...existing.table, seats, snapshotAt: Date.now() },
   }

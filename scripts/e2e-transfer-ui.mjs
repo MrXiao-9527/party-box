@@ -4,6 +4,7 @@
  */
 import puppeteer from 'puppeteer-core'
 import fs from 'node:fs'
+import { fillCreateRoom } from './e2e-lib.mjs'
 
 const BASE = 'http://127.0.0.1:45321'
 const ART = '/opt/cursor/artifacts/screenshots'
@@ -46,8 +47,10 @@ async function shot(name) {
 try {
   await page.goto(BASE, { waitUntil: 'networkidle0' })
   await clickText('开一桌')
-  await page.waitForSelector('input')
-  await page.type('input', '地主')
+  await fillCreateRoom(page)
+  await clickText('确认')
+  await page.waitForSelector('.nickname-card input')
+  await page.type('.nickname-card input', '地主')
   await clickText('进入')
   await page.waitForFunction(() => location.pathname.startsWith('/r/'))
   const roomPath = await page.evaluate(() => location.pathname)

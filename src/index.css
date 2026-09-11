@@ -171,6 +171,94 @@ input {
   animation: fade-up 0.3s ease both;
 }
 
+.create-room-form {
+  margin-top: 1.25rem;
+  display: grid;
+  gap: 0.7rem;
+  animation: fade-up 0.3s ease both;
+}
+
+.create-room-form label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.join-invite {
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.join-invite.compact {
+  margin: 0.5rem 0 0;
+}
+
+.join-qr {
+  display: block;
+  background: #fff;
+  border-radius: 8px;
+  padding: 0;
+}
+
+.join-url {
+  margin: 0;
+  max-width: 100%;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  word-break: break-all;
+  text-align: center;
+}
+
+.room-settings {
+  width: 100%;
+  margin: 0.25rem 0 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.room-settings div {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.45rem 0.7rem;
+  background: var(--bg);
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+}
+
+.room-settings dt {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.room-settings dd {
+  margin: 0;
+  color: var(--text);
+}
+
+.table-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+
+.icon-btn.wide-label {
+  width: auto;
+  padding: 0 0.7rem;
+  font-size: 0.8rem;
+}
+
+.invite-box {
+  max-height: min(85dvh, 640px);
+  overflow: auto;
+}
+
 .error {
   color: var(--danger);
   margin: 0.35rem 0 0;
@@ -374,6 +462,9 @@ input {
   gap: 0.35rem;
   font-size: 0.85rem;
   color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+  flex-wrap: wrap;
 }
 
 .top-meta .code {

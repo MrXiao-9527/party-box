@@ -13,6 +13,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { fillCreateRoom } from './e2e-lib.mjs'
 import puppeteer from 'puppeteer-core'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -133,6 +134,8 @@ await prep(page)
 console.log('open home', BASE)
 await page.goto(BASE, { waitUntil: 'domcontentloaded' })
 await clickText(page, '开一桌')
+await fillCreateRoom(page)
+await clickText(page, '确认')
 await typeName(page, '甲')
 await clickText(page, '进入')
 await page.waitForSelector('.page.lobby')

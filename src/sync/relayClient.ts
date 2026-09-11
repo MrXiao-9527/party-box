@@ -3,7 +3,7 @@
  * Enabled when VITE_RELAY_URL is set (e.g. http://127.0.0.1:45322).
  */
 
-import type { ChipAck, ChipOp, Phase, TableSnapshot } from '../types'
+import type { ChipAck, ChipOp, Phase, RoomCreateInput, TableSnapshot } from '../types'
 import { ACK_REASONS } from '../types'
 import type { PersistedRoom, Session } from '../store/localRoom'
 import { saveRoom } from '../store/localRoom'
@@ -126,17 +126,30 @@ export async function relayGetRoom(
   return cache(result.body.data)
 }
 
-export async function relayCreateEmptyHostRoom(preferredSeatId?: string): Promise<{
-  session: Session
-  data: PersistedRoom
-}> {
-  const result = await api<{ session: Session; data: PersistedRoom }>('/rooms', {
-    method: 'POST',
-    body: JSON.stringify(preferredSeatId ? { seatId: preferredSeatId } : {}),
-  })
-  if (!result.ok) throw new RelayNetworkError()
-  cache(result.body.data)
-  return result.body
+export async function relayCreateEmptyHostRoom(
+  input: RoomCreateInput = {},
+): Promise<{ session: Session; data: PersistedRoom } | { error: string }> {
+  const result = await api<{ session: Session; data: PersistedRoom } | { error: string }>(
+    '/rooms',
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+  )
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return {
+      error: errorFromBody(result.body, ACK_REASONS.RELAY_UNREACHABLE),
+    }
+  }
+  if ('error' in result.body && result.body.error) {
+    return { error: result.body.error }
+  }
+  const body = result.body as { session: Session; data: PersistedRoom }
+  cache(body.data)
+  return body
 }
 
 export async function relayClaimHostSeat(

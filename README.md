@@ -111,7 +111,7 @@ localStorage `party-box:identity`：`{ roomCode, seatId, name, role }`
 |------|------|
 | seatId 仍在房 | 静默恢复 |
 | 原席被占 | toast「原席被占，新坐一席」→ 新 seatId |
-| 原席被占且满座 | 「本桌已满（最多8人）」 |
+| 原席被占且满座 | 「本桌已满（最多X人）」X=开房人数 |
 | 首次进房 | 静默进昵称门 |
 | identity 丢失 | 「本地身份丢失，已为你新坐一席」 |
 | 房间不存在 | 回首页 +「房间已结束」 |
@@ -120,8 +120,8 @@ localStorage `party-box:identity`：`{ roomCode, seatId, name, role }`
 ## 验收
 
 1. ≤3 步到桌  2. 无昵称挡桌；playing 直达  3. 非桌主无开桌；暂停不自动转让  
-4. 最多 8 席  5. 己席 `#FBBF24` + 面额色  6. 点按/长按/锁定/重置 + 中文 fail toast  
-7. 断线条 + 房码 `A-Z0-9` /「房码无效」  
-8. **真·双端验**：跨设备同房码可加入并同步（需中继）
+4. 人数 2–8（默认 8）  5. 己席 `#FBBF24` + 面额色  6. 点按/长按/锁定/重置 + 中文 fail toast  
+7. 断线条 + 房码 `A-Z0-9` /「房码无效」；QR/复制链接固定 `https://party-box-43z.pages.dev/r/{CODE}`  
+8. **真·双端验**：跨设备同房码或扫码可加入并同步（需中继）
 
 包名 `party-box` · 显示名 **聚会盒子**。

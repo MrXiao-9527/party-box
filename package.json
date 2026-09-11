@@ -18,12 +18,14 @@
     "test:undo": "node scripts/test-undo.mjs",
     "test:pot": "node scripts/test-pot.mjs",
     "test:stale-sync": "node --experimental-strip-types scripts/test-stale-sync.mjs",
-    "test:settlement": "node --experimental-strip-types scripts/test-settlement.mjs"
+    "test:settlement": "node --experimental-strip-types scripts/test-settlement.mjs",
+    "test:room-create": "node scripts/test-room-create.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.3",
+    "uqr": "^0.1.3",
     "ws": "^8.18.3"
   },
   "devDependencies": {

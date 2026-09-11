@@ -139,7 +139,11 @@ async function handle(req, res) {
 
     if (req.method === 'POST' && path === '/rooms') {
       const body = await readBody(req)
-      const result = store.createEmptyHostRoom(body.seatId)
+      const result = store.createEmptyHostRoom(body)
+      if ('error' in result) {
+        sendJson(res, 400, { error: result.error })
+        return
+      }
       afterMutation(result.data)
       sendJson(res, 201, result)
       return

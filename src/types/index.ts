@@ -80,8 +80,25 @@ export interface RoomState {
   hostSeatId: string
   members: RoomMember[]
   phase: Phase
-  /** Hard cap — always 8 in this MVP. */
+  /** Seat cap set at creation — integer 2–8 (default 8). */
   maxSeats: number
+  /**
+   * Buy-in N set at room creation (display + 全员买入 default).
+   * 0 = unset (legacy rooms).
+   */
+  buyInN: number
+  /** Display-only blinds; omit when unset. Never auto-deducted. */
+  smallBlind?: number
+  bigBlind?: number
+}
+
+/** POST /rooms + create-room form. */
+export type RoomCreateInput = {
+  seatId?: string
+  buyInN?: number | string
+  maxSeats?: number | string
+  smallBlind?: number | string
+  bigBlind?: number | string
 }
 
 export interface ChipOp {
@@ -175,8 +192,27 @@ export interface TableSnapshot {
   settling?: boolean
 }
 
+export const MIN_SEATS = 2
 export const MAX_SEATS = 8
 export const DEFAULT_DENOMS = [1, 5, 10, 25, 100] as const
+
+/** Locked QR / copy-link origin — never window origin, never trycloudflare. */
+export const JOIN_ORIGIN = 'https://party-box-43z.pages.dev'
+
+export function roomJoinUrl(roomCode: string): string {
+  const code = roomCode.trim().toUpperCase()
+  return `${JOIN_ORIGIN}/r/${code}`
+}
+
+export function normalizeMaxSeats(raw: unknown): number {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n < MIN_SEATS || n > MAX_SEATS) return MAX_SEATS
+  return n
+}
+
+export function tableFullReason(maxSeats: unknown = MAX_SEATS): string {
+  return `本桌已满（最多${normalizeMaxSeats(maxSeats)}人）`
+}
 
 /** Human Chinese fail copy only — no tech error codes. */
 export const ACK_REASONS = {
@@ -192,6 +228,7 @@ export const ACK_REASONS = {
   RELAY_UNREACHABLE: '连不上房间服务，请重试',
   ROOM_CODE_INVALID: '房码无效',
   TABLE_FULL: '本桌已满（最多8人）',
+  SEATS_RANGE: '人数须为2–8',
   TABLE_PAUSED: '桌主已离开 · 桌子已暂停，请等待重开一桌或选新桌主',
   INSUFFICIENT: '余额不足',
   POT_INSUFFICIENT: '底池不足',
@@ -210,4 +247,77 @@ export function parseRoomCode(
     return { ok: false, reason: ACK_REASONS.ROOM_CODE_INVALID }
   }
   return { ok: true, code }
+}
+
+function optionalPositiveInt(
+  raw: unknown,
+): { ok: true; value?: number } | { ok: false } {
+  if (raw === undefined || raw === null || raw === '') {
+    return { ok: true, value: undefined }
+  }
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n <= 0) return { ok: false }
+  return { ok: true, value: n }
+}
+
+/**
+ * Create-room fields.
+ * `strictBuyIn`: empty buy-in is an error (UI form). Relay may omit → buyInN 0.
+ * Seats omitted → 8. Seats 1 / 9 / non-int → SEATS_RANGE.
+ */
+export function parseRoomCreate(
+  input: RoomCreateInput | null | undefined,
+  opts?: { strictBuyIn?: boolean },
+):
+  | {
+      ok: true
+      buyInN: number
+      maxSeats: number
+      smallBlind?: number
+      bigBlind?: number
+      seatId?: string
+    }
+  | { ok: false; error: string } {
+  const src = input && typeof input === 'object' ? input : {}
+  const buyRaw = src.buyInN
+  const buyMissing = buyRaw === undefined || buyRaw === null || buyRaw === ''
+  let buyInN = 0
+  if (!buyMissing) {
+    const n = typeof buyRaw === 'number' ? buyRaw : Number(buyRaw)
+    if (!Number.isInteger(n) || n <= 0) {
+      return { ok: false, error: ACK_REASONS.POSITIVE_INT }
+    }
+    buyInN = n
+  } else if (opts?.strictBuyIn) {
+    return { ok: false, error: ACK_REASONS.POSITIVE_INT }
+  }
+
+  const seatsRaw = src.maxSeats
+  const seatsMissing =
+    seatsRaw === undefined || seatsRaw === null || seatsRaw === ''
+  let maxSeats = MAX_SEATS
+  if (!seatsMissing) {
+    const n = typeof seatsRaw === 'number' ? seatsRaw : Number(seatsRaw)
+    if (!Number.isInteger(n) || n < MIN_SEATS || n > MAX_SEATS) {
+      return { ok: false, error: ACK_REASONS.SEATS_RANGE }
+    }
+    maxSeats = n
+  }
+
+  const small = optionalPositiveInt(src.smallBlind)
+  if (!small.ok) return { ok: false, error: ACK_REASONS.POSITIVE_INT }
+  const big = optionalPositiveInt(src.bigBlind)
+  if (!big.ok) return { ok: false, error: ACK_REASONS.POSITIVE_INT }
+
+  const seatId =
+    typeof src.seatId === 'string' && src.seatId ? src.seatId : undefined
+
+  return {
+    ok: true,
+    buyInN,
+    maxSeats,
+    smallBlind: small.value,
+    bigBlind: big.value,
+    seatId,
+  }
 }
