@@ -6,6 +6,8 @@ import {
   ledgerEntrySummary,
   normalizeMaxSeats,
   parseRoomCreate,
+  stampCreateSettings,
+  hasCreateSnapshot,
   tableFullReason,
   type ChipAck,
   type ChipOp,
@@ -17,6 +19,7 @@ import {
 
 const ROOM_PREFIX = 'party-box:room:'
 const SESSION_KEY = 'party-box:session'
+const CREATE_PREFIX = 'party-box:create:'
 
 export interface Session {
   seatId: string
@@ -89,17 +92,62 @@ function optionalBlind(raw: unknown): number | undefined {
   return n
 }
 
+export function saveCreateSettings(
+  roomCode: string,
+  input: RoomCreateInput,
+): void {
+  const parsed = parseRoomCreate(input)
+  if (!hasCreateSnapshot(parsed)) return
+  try {
+    localStorage.setItem(
+      CREATE_PREFIX + roomCode.toUpperCase(),
+      JSON.stringify({
+        buyInN: parsed.buyInN,
+        maxSeats: parsed.maxSeats,
+        smallBlind: parsed.smallBlind,
+        bigBlind: parsed.bigBlind,
+      }),
+    )
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadCreateSettings(roomCode: string): RoomCreateInput | null {
+  try {
+    const raw = localStorage.getItem(CREATE_PREFIX + roomCode.toUpperCase())
+    return raw ? (JSON.parse(raw) as RoomCreateInput) : null
+  } catch {
+    return null
+  }
+}
+
+export function clearCreateSettings(roomCode: string): void {
+  try {
+    localStorage.removeItem(CREATE_PREFIX + roomCode.toUpperCase())
+  } catch {
+    /* ignore */
+  }
+}
+
 function normalizeRoom(data: PersistedRoom): PersistedRoom {
-  const maxSeats = normalizeMaxSeats(data.room.maxSeats)
-  return {
-    ...data,
-    room: {
+  const locked = loadCreateSettings(data.room.roomCode)
+  const stamped = stampCreateSettings(
+    {
       ...data.room,
-      maxSeats,
+      maxSeats: normalizeMaxSeats(data.room.maxSeats),
       buyInN: normalizeBuyIn(data.room.buyInN),
       smallBlind: optionalBlind(data.room.smallBlind),
       bigBlind: optionalBlind(data.room.bigBlind),
-      members: data.room.members.slice(0, maxSeats),
+    },
+    locked,
+  )
+  const maxSeats = stamped.maxSeats
+  return {
+    ...data,
+    room: {
+      ...stamped,
+      members: stamped.members.slice(0, maxSeats),
     },
     table: {
       ...data.table,
@@ -136,6 +184,7 @@ export function saveRoom(data: PersistedRoom): PersistedRoom {
 
 export function deleteRoom(roomCode: string): void {
   localStorage.removeItem(ROOM_PREFIX + roomCode.toUpperCase())
+  clearCreateSettings(roomCode)
 }
 
 /**
@@ -188,6 +237,7 @@ export function createEmptyHostRoom(
       settling: false,
     },
   }
+  saveCreateSettings(roomCode, input)
   saveRoom(data)
   const session: Session = { seatId, name: '', roomCode }
   saveSession(session)
@@ -202,17 +252,18 @@ export function claimHostSeat(
   const existing = loadRoom(roomCode)
   if (!existing) return null
   if (existing.room.hostSeatId !== seatId) return null
+  const room = stampCreateSettings(existing.room, loadCreateSettings(roomCode))
 
-  const already = existing.room.members.find((m) => m.seatId === seatId)
+  const already = room.members.find((m) => m.seatId === seatId)
   if (already) {
-    const members = existing.room.members.map((m) =>
+    const members = room.members.map((m) =>
       m.seatId === seatId ? { ...m, name, isHost: true, connected: true } : m,
     )
     const seats = existing.table.seats.map((s) =>
       s.seatId === seatId ? { ...s, name, isHost: true } : s,
     )
     const data: PersistedRoom = {
-      room: { ...existing.room, members },
+      room: { ...room, members },
       table: {
         ...existing.table,
         seats,
@@ -226,19 +277,17 @@ export function claimHostSeat(
     return data
   }
 
-  if (
-    existing.room.members.length >= normalizeMaxSeats(existing.room.maxSeats)
-  ) {
+  if (room.members.length >= normalizeMaxSeats(room.maxSeats)) {
     return null
   }
 
   const data: PersistedRoom = {
     room: {
-      ...existing.room,
+      ...room,
       hostSeatId: seatId,
       members: [
         { seatId, name, isHost: true, connected: true },
-        ...existing.room.members.map((m) => ({ ...m, isHost: false })),
+        ...room.members.map((m) => ({ ...m, isHost: false })),
       ],
     },
     table: {
@@ -372,7 +421,10 @@ export function setPhase(roomCode: string, phase: Phase): PersistedRoom | null {
   const snapshotAt = Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
   const data: PersistedRoom = {
     ...existing,
-    room: { ...existing.room, phase },
+    room: {
+      ...stampCreateSettings(existing.room, loadCreateSettings(roomCode)),
+      phase,
+    },
     table: { ...existing.table, snapshotAt },
   }
   saveRoom(data)

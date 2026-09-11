@@ -6,8 +6,10 @@ import {
   ACK_REASONS,
   createRoomStore,
   parseRoomCreate,
+  stampCreateSettings,
   tableFullReason,
 } from '../server/roomLogic.mjs'
+import { tableSettingsView } from '../src/types/index.ts'
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg)
@@ -33,6 +35,37 @@ function assert(cond, msg) {
   assert(ok.smallBlind === 1 && ok.bigBlind === 2, 'blinds')
   const omitted = parseRoomCreate({})
   assert(omitted.ok && omitted.buyInN === 0 && omitted.maxSeats === 8, 'defaults')
+}
+
+{
+  const base = { buyInN: 0, maxSeats: 8 }
+  const stamped = stampCreateSettings(base, {
+    buyInN: 100,
+    maxSeats: 4,
+    smallBlind: 1,
+    bigBlind: 2,
+  })
+  assert(stamped.buyInN === 100 && stamped.maxSeats === 4, 'stamp overlay')
+  assert(stamped.smallBlind === 1 && stamped.bigBlind === 2, 'stamp blinds')
+  const skipped = stampCreateSettings(base, { phase: 'playing' })
+  assert(skipped.buyInN === 0 && skipped.maxSeats === 8, 'phase-only no stamp')
+}
+
+{
+  const both = tableSettingsView({
+    buyInN: 100,
+    maxSeats: 4,
+    smallBlind: 1,
+    bigBlind: 2,
+  })
+  assert(both.buyInN === 100 && both.maxSeats === 4, 'view always 买入/人数')
+  assert(both.smallBlind === 1 && both.bigBlind === 2, 'view filled blinds')
+  const none = tableSettingsView({ buyInN: 100, maxSeats: 4 })
+  assert(none.smallBlind === undefined && none.bigBlind === undefined, 'omit empty blinds')
+  const onlySb = tableSettingsView({ buyInN: 100, maxSeats: 4, smallBlind: 1 })
+  assert(onlySb.smallBlind === 1 && onlySb.bigBlind === undefined, 'omit unfilled 大盲')
+  const onlyBb = tableSettingsView({ buyInN: 100, maxSeats: 4, bigBlind: 2 })
+  assert(onlyBb.smallBlind === undefined && onlyBb.bigBlind === 2, 'omit unfilled 小盲')
 }
 
 assert(tableFullReason(2) === '本桌已满（最多2人）', 'full copy X=2')
@@ -69,5 +102,45 @@ store.setPhase(code, 'playing')
 const afterPhase = store.get(code)
 assert(afterPhase.room.maxSeats === 2, 'phase keeps maxSeats')
 assert(afterPhase.room.buyInN === 50, 'phase keeps buyInN')
+assert(afterPhase.room.smallBlind === 1, 'phase keeps sb')
+assert(afterPhase.room.bigBlind === 2, 'phase keeps bb')
+
+// Repair path: POST /rooms dropped snapshot (legacy relay) → claim/开桌 body restamps
+const legacy = store.createEmptyHostRoom({ seatId: 'seat_legacy' })
+assert(!('error' in legacy), 'legacy create')
+assert(legacy.data.room.buyInN === 0 && legacy.data.room.maxSeats === 8, 'legacy defaults')
+const legacyCode = legacy.data.room.roomCode
+store.claimHostSeat(legacyCode, legacy.session.seatId, '桌主', {
+  buyInN: 100,
+  maxSeats: 4,
+  smallBlind: 1,
+  bigBlind: 2,
+})
+const afterClaim = store.get(legacyCode)
+assert(afterClaim.room.buyInN === 100, 'claim stamps buyInN')
+assert(afterClaim.room.maxSeats === 4, 'claim stamps maxSeats')
+assert(afterClaim.room.smallBlind === 1 && afterClaim.room.bigBlind === 2, 'claim stamps blinds')
+
+const empty = store.createEmptyHostRoom({ seatId: 'seat_phase' })
+const emptyCode = empty.data.room.roomCode
+store.setPhase(emptyCode, 'playing', {
+  buyInN: 100,
+  maxSeats: 4,
+  smallBlind: 1,
+  bigBlind: 2,
+})
+const afterStampPhase = store.get(emptyCode)
+assert(afterStampPhase.room.phase === 'playing', 'phase playing')
+assert(afterStampPhase.room.buyInN === 100, 'phase stamps buyInN')
+assert(afterStampPhase.room.maxSeats === 4, 'phase stamps maxSeats')
+assert(
+  afterStampPhase.room.smallBlind === 1 && afterStampPhase.room.bigBlind === 2,
+  'phase stamps blinds',
+)
+
+const noStamp = store.createEmptyHostRoom({ seatId: 'seat_nostamp' })
+store.setPhase(noStamp.data.room.roomCode, 'playing', { phase: 'playing' })
+const kept = store.get(noStamp.data.room.roomCode)
+assert(kept.room.buyInN === 0 && kept.room.maxSeats === 8, 'empty phase body does not invent snapshot')
 
 console.log('OK test-room-create')

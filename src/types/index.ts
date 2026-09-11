@@ -321,3 +321,84 @@ export function parseRoomCreate(
     seatId,
   }
 }
+
+/** Body carries a real create snapshot, not omitted defaults (buyIn 0 / seats 8). */
+export function hasCreateSnapshot(
+  parsed:
+    | {
+        ok: true
+        buyInN: number
+        maxSeats: number
+        smallBlind?: number
+        bigBlind?: number
+      }
+    | { ok: false; error: string },
+): parsed is {
+  ok: true
+  buyInN: number
+  maxSeats: number
+  smallBlind?: number
+  bigBlind?: number
+} {
+  if (!parsed.ok) return false
+  return (
+    parsed.buyInN > 0 ||
+    parsed.maxSeats !== MAX_SEATS ||
+    parsed.smallBlind != null ||
+    parsed.bigBlind != null
+  )
+}
+
+/**
+ * Overlay create-room snapshot onto room when `input` includes it.
+ * Repairs rooms whose POST /rooms dropped buyInN / maxSeats / blinds.
+ */
+export function stampCreateSettings<
+  T extends Pick<RoomState, 'buyInN' | 'maxSeats' | 'smallBlind' | 'bigBlind'>,
+>(room: T, input: RoomCreateInput | null | undefined): T {
+  if (!input || typeof input !== 'object') return room
+  const parsed = parseRoomCreate(input)
+  if (!hasCreateSnapshot(parsed)) return room
+  return {
+    ...room,
+    buyInN: parsed.buyInN,
+    maxSeats: parsed.maxSeats,
+    smallBlind: parsed.smallBlind,
+    bigBlind: parsed.bigBlind,
+  }
+}
+
+function filledPositiveInt(raw: unknown): number | undefined {
+  const n = typeof raw === 'number' ? raw : Number(raw)
+  if (!Number.isInteger(n) || n <= 0) return undefined
+  return n
+}
+
+/**
+ * Read-only 「桌面设置」 after 开桌.
+ * 买入 / 人数 always shown. 小盲 / 大盲 only when filled at create — never 「—」.
+ */
+export function tableSettingsView(
+  room: Pick<RoomState, 'buyInN' | 'maxSeats' | 'smallBlind' | 'bigBlind'>,
+): {
+  buyInN: number
+  maxSeats: number
+  smallBlind?: number
+  bigBlind?: number
+} {
+  const buyRaw = typeof room.buyInN === 'number' ? room.buyInN : Number(room.buyInN)
+  const view: {
+    buyInN: number
+    maxSeats: number
+    smallBlind?: number
+    bigBlind?: number
+  } = {
+    buyInN: Number.isFinite(buyRaw) ? buyRaw : 0,
+    maxSeats: room.maxSeats,
+  }
+  const sb = filledPositiveInt(room.smallBlind)
+  const bb = filledPositiveInt(room.bigBlind)
+  if (sb != null) view.smallBlind = sb
+  if (bb != null) view.bigBlind = bb
+  return view
+}

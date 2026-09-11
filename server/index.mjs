@@ -133,6 +133,7 @@ async function handle(req, res) {
         backend: 'node-file',
         rooms: store.size(),
         persistDir: dataDir(),
+        roomSettings: true,
       })
       return
     }
@@ -175,7 +176,7 @@ async function handle(req, res) {
 
       if (req.method === 'POST' && action === 'claim-host') {
         const body = await readBody(req)
-        const data = store.claimHostSeat(code, body.seatId, body.name)
+        const data = store.claimHostSeat(code, body.seatId, body.name, body)
         if (!data) {
           sendJson(res, 400, { error: ACK_REASONS.ROOM_MISSING })
           return
@@ -199,7 +200,7 @@ async function handle(req, res) {
 
       if (req.method === 'POST' && action === 'phase') {
         const body = await readBody(req)
-        const data = store.setPhase(code, body.phase)
+        const data = store.setPhase(code, body.phase, body)
         if (!data) {
           sendJson(res, 404, { error: ACK_REASONS.ROOM_MISSING })
           return

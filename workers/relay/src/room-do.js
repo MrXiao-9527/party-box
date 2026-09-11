@@ -128,7 +128,7 @@ export class RoomDurableObject {
 
       if (request.method === 'POST' && action === 'claim-host') {
         const body = await request.json()
-        const data = this.store.claimHostSeat(code, body.seatId, body.name)
+        const data = this.store.claimHostSeat(code, body.seatId, body.name, body)
         if (!data) {
           return Response.json({ error: ACK_REASONS.ROOM_MISSING }, { status: 400 })
         }
@@ -150,7 +150,7 @@ export class RoomDurableObject {
 
       if (request.method === 'POST' && action === 'phase') {
         const body = await request.json()
-        const data = this.store.setPhase(code, body.phase)
+        const data = this.store.setPhase(code, body.phase, body)
         if (!data) {
           return Response.json({ error: ACK_REASONS.ROOM_MISSING }, { status: 404 })
         }

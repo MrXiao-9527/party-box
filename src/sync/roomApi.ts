@@ -10,6 +10,7 @@ import {
   fillSeatsToMax as localFillSeatsToMax,
   joinRoom as localJoinRoom,
   loadRoom,
+  loadCreateSettings,
   pickNewHost as localPickNewHost,
   restoreSeat as localRestoreSeat,
   resumeAsHost as localResumeAsHost,
@@ -145,7 +146,12 @@ export async function claimHostSeat(
   name: string,
 ): Promise<PersistedRoom | null> {
   if (!isRelayEnabled()) return localClaimHostSeat(roomCode, seatId, name)
-  const data = await relayClaimHostSeat(roomCode, seatId, name)
+  const data = await relayClaimHostSeat(
+    roomCode,
+    seatId,
+    name,
+    loadCreateSettings(roomCode),
+  )
   if (data) saveSession({ seatId, name, roomCode: data.room.roomCode })
   return data
 }
@@ -163,7 +169,7 @@ export async function setPhase(
   phase: Phase,
 ): Promise<PersistedRoom | null> {
   if (!isRelayEnabled()) return localSetPhase(roomCode, phase)
-  return relaySetPhase(roomCode, phase)
+  return relaySetPhase(roomCode, phase, loadCreateSettings(roomCode))
 }
 
 export async function setMemberConnected(

@@ -15,7 +15,7 @@ export default {
 
     if (request.method === 'GET' && url.pathname === '/health') {
       return cors(
-        Response.json({ ok: true, backend: 'cloudflare-do' }),
+        Response.json({ ok: true, backend: 'cloudflare-do', roomSettings: true }),
         request,
       )
     }
