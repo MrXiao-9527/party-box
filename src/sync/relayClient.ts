@@ -39,14 +39,19 @@ function wsBase(): string {
   return `ws://${base}`
 }
 
+const FETCH_MS = 12_000
+
 async function api<T>(
   path: string,
   init?: RequestInit,
 ): Promise<{ ok: true; body: T } | { ok: false; status: number; body: unknown }> {
   let res: Response
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), FETCH_MS)
   try {
     res = await fetch(`${httpBase()}${path}`, {
       ...init,
+      signal: ctrl.signal,
       headers: {
         'Content-Type': 'application/json',
         ...(init?.headers ?? {}),
@@ -54,6 +59,8 @@ async function api<T>(
     })
   } catch {
     throw new RelayNetworkError()
+  } finally {
+    clearTimeout(timer)
   }
   let body: unknown = null
   try {

@@ -194,6 +194,10 @@ input {
   font-size: 0.85rem;
 }
 
+.cta-row + .error {
+  margin-top: 0.75rem;
+}
+
 .tool-wall {
   padding-top: 0.5rem;
   padding-bottom: 2rem;
@@ -793,7 +797,7 @@ button.seat {
 
 .toast-stack {
   position: fixed;
-  top: calc(0.75rem + env(safe-area-inset-top));
+  top: calc(0.75rem + env(safe-area-inset-top, 0px));
   left: 50%;
   transform: translateX(-50%);
   width: min(400px, calc(100% - 1.5rem));
@@ -801,6 +805,13 @@ button.seat {
   flex-direction: column;
   gap: 0.4rem;
   z-index: 60;
+}
+
+@media (pointer: coarse) {
+  .toast-stack {
+    /* Clear WeChat / in-app title bars that sit over safe-area-inset-top: 0 */
+    top: calc(3.75rem + env(safe-area-inset-top, 0px));
+  }
 }
 
 /* Fail toast: secondary text; success ack has no special color */

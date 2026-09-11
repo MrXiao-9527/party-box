@@ -43,6 +43,8 @@ export function HomePage() {
   const navigate = useNavigate()
   const [joinCode, setJoinCode] = useState('')
   const [showJoin, setShowJoin] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const [openError, setOpenError] = useState('')
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([])
 
   const toast = (text: string) => {
@@ -63,13 +65,18 @@ export function HomePage() {
   const openTable = () => {
     if (openingRef.current) return
     openingRef.current = true
+    setOpening(true)
+    setOpenError('')
     void (async () => {
       try {
         const { session } = await createEmptyHostRoom()
         navigate(`/r/${session.roomCode}`)
       } catch {
         openingRef.current = false
-        toast(ACK_REASONS.RELAY_UNREACHABLE)
+        setOpening(false)
+        const msg = ACK_REASONS.RELAY_UNREACHABLE
+        setOpenError(msg)
+        toast(msg)
       }
     })()
   }
@@ -118,10 +125,11 @@ export function HomePage() {
           <button
             type="button"
             className="btn primary"
+            disabled={opening}
             onClick={openTable}
             onPointerUp={onOpenTablePointerUp}
           >
-            开一桌
+            {opening ? '开桌中…' : '开一桌'}
           </button>
           <button
             type="button"
@@ -131,6 +139,7 @@ export function HomePage() {
             加入
           </button>
         </div>
+        {openError && <p className="error">{openError}</p>}
         {showJoin && (
           <div className="join-panel">
             <input
