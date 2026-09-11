@@ -368,6 +368,25 @@ input {
   justify-content: space-between;
 }
 
+/* Chip table: pin meta + pot above scrolling seats. */
+.table-top--pin {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 0.5rem;
+  row-gap: 0.2rem;
+  background: var(--bg);
+  padding-top: 0.15rem;
+  padding-bottom: 0.5rem;
+}
+
+.table-top--pin .pot-top {
+  grid-column: 1 / -1;
+}
+
 .top-meta {
   display: flex;
   align-items: center;
@@ -533,6 +552,11 @@ button.seat {
 }
 
 .pot-top {
+  display: block;
+  font-size: 1.2rem;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--text);
   font-variant-numeric: tabular-nums;
 }
 
