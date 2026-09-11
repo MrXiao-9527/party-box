@@ -1,3 +1,9 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    {
+      "source": "/__relay/:path*",
+      "destination": "https://party-box-relay.1206355319.workers.dev/:path*"
+    },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

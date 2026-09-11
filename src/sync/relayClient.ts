@@ -15,7 +15,18 @@ export class RelayNetworkError extends Error {
   }
 }
 
+function hostedOnStaticCdn(): boolean {
+  if (typeof window === 'undefined') return false
+  const host = window.location.hostname
+  return host.endsWith('.pages.dev') || host.endsWith('.vercel.app')
+}
+
 export function getRelayBaseUrl(): string | null {
+  // Production static hosts: same-origin /__relay (see public/_redirects).
+  // Avoids WeChat / mobile-carrier blocks and CORS preflight to workers.dev.
+  if (hostedOnStaticCdn()) {
+    return `${window.location.origin}/__relay`
+  }
   const raw = (import.meta.env.VITE_RELAY_URL as string | undefined)?.trim()
   if (!raw) return null
   return raw.replace(/\/$/, '')
@@ -53,7 +64,7 @@ async function api<T>(
       ...init,
       signal: ctrl.signal,
       headers: {
-        'Content-Type': 'application/json',
+        ...(init?.body != null ? { 'Content-Type': 'application/json' } : {}),
         ...(init?.headers ?? {}),
       },
     })
