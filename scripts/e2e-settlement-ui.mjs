@@ -56,6 +56,38 @@ async function toastHas(text) {
   )
 }
 
+async function bannerHas(text) {
+  return page.waitForFunction(
+    (t) =>
+      [...document.querySelectorAll('.settlement-banner')].some(
+        (el) => (el.textContent || '').trim() === t,
+      ),
+    {},
+    text,
+  )
+}
+
+async function assertBlocked(copy) {
+  await bannerHas(copy)
+  await toastHas(copy)
+  const section = await page.$('.settlement-transfers')
+  if (section) throw new Error('transfer section must not render when blocked')
+  const list = await page.$('.settlement-transfer-list')
+  if (list) throw new Error('transfer list must hide when blocked')
+  const hasCopy = await page.evaluate(() =>
+    [...document.querySelectorAll('button')].some((b) => {
+      const t = (b.textContent || '').trim()
+      return t === '复制清单' || t === '复制转账列表'
+    }),
+  )
+  if (hasCopy) throw new Error('copy button must hide when blocked')
+  await new Promise((r) => setTimeout(r, 3000))
+  const banner = await page.$eval('.settlement-banner', (el) =>
+    (el.textContent || '').trim(),
+  )
+  if (banner !== copy) throw new Error(`banner must persist: ${banner}`)
+}
+
 async function shot(name) {
   const path = `${ART}/${name}.png`
   await page.screenshot({ path, fullPage: true })
@@ -98,9 +130,7 @@ try {
   await openMenu()
   await clickText('结束桌')
   await page.waitForSelector('.page.settlement')
-  await toastHas('底池还有筹码，请先分完再结算')
-  const hasListPot = await page.$('.settlement-transfer-list')
-  if (hasListPot) throw new Error('transfer list must hide when pot > 0')
+  await assertBlocked('底池还有筹码，请先分完再结算')
   await shot('settlement-pot-block')
 
   await clickText('返回桌面')
@@ -134,9 +164,7 @@ try {
   await openMenu()
   await clickText('结束桌')
   await page.waitForSelector('.page.settlement')
-  await toastHas('买入与结算对不上，多半漏了补码，请先核对')
-  const hasListMis = await page.$('.settlement-transfer-list')
-  if (hasListMis) throw new Error('transfer list must hide on mismatch')
+  await assertBlocked('买入与结算对不上，多半漏了补码，请先核对')
   await shot('settlement-mismatch-block')
 
   await clickText('返回桌面')
@@ -153,6 +181,37 @@ try {
     return el && Number(el.textContent) === 100
   })
   await page.waitForFunction(() => !document.querySelector('.confirm-overlay'))
+
+  await openMenu()
+  await clickText('结束桌')
+  await page.waitForSelector('.page.settlement')
+  const flatText = await page.$eval(
+    '.settlement-transfers',
+    (el) => el.textContent || '',
+  )
+  if (!flatText.includes('本局打平，无需转账')) {
+    throw new Error(`flat copy missing: ${flatText}`)
+  }
+  if (!flatText.includes('建议转账（最少笔数）')) {
+    throw new Error(`flat title missing: ${flatText}`)
+  }
+  if (await page.$('.settlement-transfer-list')) {
+    throw new Error('flat must not render transfer list')
+  }
+  const flatCopy = await page.evaluate(() =>
+    [...document.querySelectorAll('button')].some((b) => {
+      const t = (b.textContent || '').trim()
+      return t === '复制清单' || t === '复制转账列表'
+    }),
+  )
+  if (flatCopy) throw new Error('flat must not show copy button')
+  if (await page.$('.settlement-banner')) {
+    throw new Error('flat must not show block banner')
+  }
+  await shot('settlement-flat')
+
+  await clickText('返回桌面')
+  await page.waitForSelector('.seat-self')
 
   await page.evaluate(() => {
     document.querySelector('.seats-rail .seat-other')?.click()
@@ -185,9 +244,16 @@ try {
   if (!totals.includes('净额合计') || !totals.includes('0')) {
     throw new Error(`bad footer net: ${totals}`)
   }
+  const title = await page.$eval(
+    '.settlement-transfers-title',
+    (el) => (el.textContent || '').trim(),
+  )
+  if (title !== '建议转账（最少笔数）') {
+    throw new Error(`bad transfers title: ${title}`)
+  }
   await page.waitForFunction(() =>
     [...document.querySelectorAll('button')].some(
-      (b) => (b.textContent || '').trim() === '复制转账列表',
+      (b) => (b.textContent || '').trim() === '复制清单',
     ),
   )
   await shot('settlement-ok')

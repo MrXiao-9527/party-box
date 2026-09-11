@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { RoomState, TableSnapshot } from '../types'
 import {
+  SETTLEMENT_COPY,
   buildSettlement,
   formatTransferLine,
   formatTransferList,
@@ -129,11 +130,20 @@ export function Settlement({
         </article>
       </div>
 
-      {summary.block === null && (
-        <section className="settlement-transfers" aria-label="转账建议">
-          <p className="settlement-transfers-title">转账建议</p>
+      {summary.block !== null ? (
+        <p className="settlement-banner" role="alert">
+          {settlementToast(summary.block)}
+        </p>
+      ) : (
+        <section
+          className="settlement-transfers"
+          aria-label={SETTLEMENT_COPY.TRANSFERS_TITLE}
+        >
+          <p className="settlement-transfers-title">
+            {SETTLEMENT_COPY.TRANSFERS_TITLE}
+          </p>
           {summary.transfers.length === 0 ? (
-            <p className="hint">无需转账</p>
+            <p className="hint">{SETTLEMENT_COPY.FLAT}</p>
           ) : (
             <ul className="settlement-transfer-list">
               {summary.transfers.map((t, i) => (
@@ -149,7 +159,7 @@ export function Settlement({
               className="btn primary wide"
               onClick={() => void copyList()}
             >
-              复制转账列表
+              {SETTLEMENT_COPY.COPY_LIST}
             </button>
           )}
         </section>
