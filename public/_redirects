@@ -1,0 +1,3 @@
+# Same-origin HTTP proxy. WeChat / CN mobile often load pages.dev but
+# fail or hang CORS+fetch to *.workers.dev — 开一桌 then looks dead.
+/__relay/*  https://party-box-relay.1206355319.workers.dev/:splat  200

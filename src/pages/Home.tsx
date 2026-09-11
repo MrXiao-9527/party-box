@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { A2HSHint } from '../components/A2HSHint'
 import { ToastStack } from '../components/Toast'
@@ -43,6 +43,9 @@ export function HomePage() {
   const navigate = useNavigate()
   const [joinCode, setJoinCode] = useState('')
   const [showJoin, setShowJoin] = useState(false)
+  const [opening, setOpening] = useState(false)
+  const [joining, setJoining] = useState(false)
+  const [openError, setOpenError] = useState('')
   const [toasts, setToasts] = useState<{ id: string; text: string }[]>([])
 
   const toast = (text: string) => {
@@ -59,31 +62,72 @@ export function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const openingRef = useRef(false)
+  const lastPressAt = useRef(0)
   const openTable = () => {
+    const now = performance.now()
+    if (now - lastPressAt.current < 500) return
+    if (openingRef.current) return
+    lastPressAt.current = now
+    openingRef.current = true
+    setOpening(true)
+    setOpenError('')
     void (async () => {
       try {
         const { session } = await createEmptyHostRoom()
         navigate(`/r/${session.roomCode}`)
       } catch {
-        toast(ACK_REASONS.RELAY_UNREACHABLE)
+        openingRef.current = false
+        setOpening(false)
+        const msg = ACK_REASONS.RELAY_UNREACHABLE
+        setOpenError(msg)
+        toast(msg)
       }
     })()
   }
 
+  const onOpenTablePointerUp = (e: PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') openTable()
+  }
+
+  const joiningRef = useRef(false)
   const joinTable = () => {
     const parsed = parseRoomCode(joinCode)
     if (!parsed.ok) {
+      setOpenError(parsed.reason)
       toast(parsed.reason)
       return
     }
+    const now = performance.now()
+    if (now - lastPressAt.current < 500) return
+    if (joiningRef.current) return
+    lastPressAt.current = now
+    joiningRef.current = true
+    setJoining(true)
+    setOpenError('')
     void (async () => {
-      const synced = await syncRoomFromRelay(parsed.code)
-      if (synced.status !== 'ok') {
-        toast(syncStatusToast(synced.status)!)
-        return
+      try {
+        const synced = await syncRoomFromRelay(parsed.code)
+        if (synced.status !== 'ok') {
+          const msg = syncStatusToast(synced.status)!
+          setOpenError(msg)
+          toast(msg)
+          return
+        }
+        navigate(`/r/${parsed.code}`)
+      } catch {
+        const msg = ACK_REASONS.RELAY_UNREACHABLE
+        setOpenError(msg)
+        toast(msg)
+      } finally {
+        joiningRef.current = false
+        setJoining(false)
       }
-      navigate(`/r/${parsed.code}`)
     })()
+  }
+
+  const onJoinPointerUp = (e: PointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') joinTable()
   }
 
   const onTool = (id: (typeof TOOLS)[number]['id'], ready: boolean) => {
@@ -107,8 +151,14 @@ export function HomePage() {
         <h1 className="brand">聚会盒子</h1>
         <p className="tagline">开一桌，筹码、计时、分账随身带</p>
         <div className="cta-row">
-          <button type="button" className="btn primary" onClick={openTable}>
-            开一桌
+          <button
+            type="button"
+            className="btn primary"
+            disabled={opening}
+            onClick={openTable}
+            onPointerUp={onOpenTablePointerUp}
+          >
+            {opening ? '开桌中…' : '开一桌'}
           </button>
           <button
             type="button"
@@ -118,6 +168,7 @@ export function HomePage() {
             加入
           </button>
         </div>
+        {openError && <p className="error">{openError}</p>}
         {showJoin && (
           <div className="join-panel">
             <input
@@ -132,8 +183,14 @@ export function HomePage() {
               onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
               onKeyDown={(e) => e.key === 'Enter' && joinTable()}
             />
-            <button type="button" className="btn secondary" onClick={joinTable}>
-              进入
+            <button
+              type="button"
+              className="btn secondary"
+              disabled={joining}
+              onClick={joinTable}
+              onPointerUp={onJoinPointerUp}
+            >
+              {joining ? '加入中…' : '进入'}
             </button>
           </div>
         )}
