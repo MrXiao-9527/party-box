@@ -96,7 +96,11 @@ function denomKey(
 }
 
 export function useRoom(roomCode: string | undefined, transport: ChipTransport = defaultTransport) {
-  const [session, setSession] = useState<Session | null>(() => loadSession())
+  const [session, setSession] = useState<Session | null>(() => {
+    const s = loadSession()
+    if (!roomCode || !s) return s
+    return s.roomCode.toUpperCase() === roomCode.toUpperCase() ? s : null
+  })
   const [room, setRoom] = useState<RoomState | null>(null)
   const [table, setTable] = useState<TableSnapshot | null>(null)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
@@ -179,7 +183,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
 
   /**
    * Room + table move together under canApplySyncedRoom:
-   * hard-block playing→lobby; equal-age ok only for lobby→playing; else newer.
+   * hard-block playing→lobby; equal-age ok for lobby→playing and same-ms seat add.
    */
   const applySyncedRoom = useCallback(
     (data: PersistedRoom, opts?: { force?: boolean }) => {
@@ -188,10 +192,12 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
           {
             snapshotAt: snapshotRef.current?.snapshotAt,
             phase: roomRef.current?.phase,
+            seatIds: roomRef.current?.members.map((m) => m.seatId),
           },
           {
             snapshotAt: data.table.snapshotAt,
             phase: data.room.phase,
+            seatIds: data.room.members.map((m) => m.seatId),
           },
           opts,
         )
@@ -836,6 +842,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
 
   useEffect(() => {
     if (!roomCode || !session?.name) return
+    if (session.roomCode.toUpperCase() !== roomCode.toUpperCase()) return
     const onPageHide = () => {
       void setMemberConnected(roomCode, session.seatId, false)
     }
@@ -855,10 +862,22 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     setSession(null)
   }, [])
 
-  const seats: Seat[] =
-    table && session ? seatsFromSnapshot(table, session.seatId) : []
+  const activeSession =
+    session &&
+    (!roomCode || session.roomCode.toUpperCase() === roomCode.toUpperCase())
+      ? session
+      : null
 
-  const isHost = !!(session && room && session.seatId === room.hostSeatId)
+  const seats: Seat[] =
+    table && activeSession
+      ? seatsFromSnapshot(table, activeSession.seatId)
+      : []
+
+  const isHost = !!(
+    activeSession &&
+    room &&
+    activeSession.seatId === room.hostSeatId
+  )
 
   const setOffline = useCallback(
     (offline: boolean) => {
@@ -872,7 +891,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   )
 
   return {
-    session,
+    session: activeSession,
     room,
     table,
     seats,

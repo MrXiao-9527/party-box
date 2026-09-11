@@ -53,7 +53,7 @@ async function api<T>(
       ...init,
       signal: ctrl.signal,
       headers: {
-        'Content-Type': 'application/json',
+        ...(init?.body != null ? { 'Content-Type': 'application/json' } : {}),
         ...(init?.headers ?? {}),
       },
     })

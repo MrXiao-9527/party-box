@@ -31,18 +31,33 @@ export function canApplyHostSnapshot(
   return incomingSnapshotAt > currentSnapshotAt
 }
 
+function incomingAddsSeat(
+  currentIds?: string[] | null,
+  incomingIds?: string[] | null,
+): boolean {
+  if (!incomingIds?.length) return false
+  const have = new Set(currentIds ?? [])
+  return incomingIds.some((id) => !!id && !have.has(id))
+}
+
 /**
  * Room+table apply gate for poll/WS.
  * - Hard-block playing → lobby (even if snapshotAt is newer/equal/older)
  * - Allow equal-age when phase advances lobby → playing
+ * - Allow equal-age when incoming adds a seat (same-ms join); never drop seats
  * - Otherwise require strictly newer snapshotAt
  */
 export function canApplySyncedRoom(
   current: {
     snapshotAt?: number | null
     phase?: Phase | null
+    seatIds?: string[] | null
   },
-  incoming: { snapshotAt: number; phase: Phase },
+  incoming: {
+    snapshotAt: number
+    phase: Phase
+    seatIds?: string[] | null
+  },
   opts?: { force?: boolean },
 ): boolean {
   if (opts?.force) return true
@@ -51,7 +66,18 @@ export function canApplySyncedRoom(
   }
   const phaseAdvance =
     current.phase === 'lobby' && incoming.phase === 'playing'
-  return canApplyHostSnapshot(current.snapshotAt, incoming.snapshotAt, {
-    allowEqual: phaseAdvance,
-  })
+  if (
+    canApplyHostSnapshot(current.snapshotAt, incoming.snapshotAt, {
+      allowEqual: phaseAdvance,
+    })
+  ) {
+    return true
+  }
+  // Same-ms `/r/CODE` join: host snapshotAt can equal the join mutation.
+  // Apply only when a new seatId appears — never a same-age shrink (stale poll).
+  return (
+    incoming.snapshotAt === current.snapshotAt &&
+    incoming.phase === current.phase &&
+    incomingAddsSeat(current.seatIds, incoming.seatIds)
+  )
 }

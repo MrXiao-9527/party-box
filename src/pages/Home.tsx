@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { A2HSHint } from '../components/A2HSHint'
 import { ToastStack } from '../components/Toast'
 import { createEmptyHostRoom, syncRoomFromRelay, syncStatusToast } from '../sync/roomApi'
+import { dropForeignSession } from '../store/localRoom'
 import { takeFlashToast } from '../sync/flashToast'
 import { ACK_REASONS, parseRoomCode, parseRoomCreate } from '../types'
 
@@ -118,6 +119,7 @@ export function HomePage() {
         toast(syncStatusToast(synced.status)!)
         return
       }
+      dropForeignSession(parsed.code)
       navigate(`/r/${parsed.code}`)
     })()
   }

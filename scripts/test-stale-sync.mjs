@@ -16,17 +16,26 @@ function assert(cond, msg) {
 function applySynced(current, incoming, opts) {
   if (
     !canApplySyncedRoom(
-      { snapshotAt: current.at, phase: current.phase },
-      { snapshotAt: incoming.table.snapshotAt, phase: incoming.room.phase },
+      {
+        snapshotAt: current.at,
+        phase: current.phase,
+        seatIds: current.seatIds,
+      },
+      {
+        snapshotAt: incoming.table.snapshotAt,
+        phase: incoming.room.phase,
+        seatIds: incoming.seatIds,
+      },
       opts,
     )
   ) {
-    return { applied: false, phase: current.phase }
+    return { applied: false, phase: current.phase, seatIds: current.seatIds }
   }
   return {
     applied: true,
     phase: incoming.room.phase,
     at: incoming.table.snapshotAt,
+    seatIds: incoming.seatIds ?? current.seatIds,
   }
 }
 
@@ -124,6 +133,46 @@ function applySynced(current, incoming, opts) {
     { room: { phase: 'paused' }, table: { snapshotAt: 201 } },
   )
   assert(ok.applied && ok.phase === 'paused', 'newer playing→paused ok')
+}
+
+// 10) Same-ms join: host must apply the new seat (deep-link dual-end)
+{
+  const r = applySynced(
+    { at: 200, phase: 'lobby', seatIds: ['seat_h'] },
+    {
+      room: { phase: 'lobby' },
+      table: { snapshotAt: 200 },
+      seatIds: ['seat_h', 'seat_g'],
+    },
+  )
+  assert(r.applied, 'equal-age join with new seat applies')
+  assert(r.seatIds?.includes('seat_g'), 'host sees guest seat')
+}
+
+// 11) Same-ms stale poll must NOT shrink members
+{
+  const r = applySynced(
+    { at: 200, phase: 'lobby', seatIds: ['seat_h', 'seat_g'] },
+    {
+      room: { phase: 'lobby' },
+      table: { snapshotAt: 200 },
+      seatIds: ['seat_h'],
+    },
+  )
+  assert(!r.applied, 'equal-age shrink rejected')
+}
+
+// 12) Same-ms join while playing also applies (playing enters table)
+{
+  const r = applySynced(
+    { at: 300, phase: 'playing', seatIds: ['seat_h'] },
+    {
+      room: { phase: 'playing' },
+      table: { snapshotAt: 300 },
+      seatIds: ['seat_h', 'seat_g'],
+    },
+  )
+  assert(r.applied, 'equal-age playing join applies')
 }
 
 console.log(
