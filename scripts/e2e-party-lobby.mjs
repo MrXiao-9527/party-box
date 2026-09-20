@@ -255,6 +255,7 @@ try {
 
   const full = await newDevice(browser)
   await full.page.goto(`${BASE}/r/${code2}`, { waitUntil: 'domcontentloaded' })
+  await nickEnter(full.page, '乙')
   await full.page.waitForFunction(
     (copy) =>
       [...document.querySelectorAll('.toast, .error, h1')].some((el) =>
