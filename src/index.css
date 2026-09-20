@@ -101,6 +101,11 @@ input {
   flex-wrap: wrap;
 }
 
+.chip-entry {
+  margin-top: 0.85rem;
+  align-self: flex-start;
+}
+
 .btn {
   border: none;
   border-radius: var(--radius);

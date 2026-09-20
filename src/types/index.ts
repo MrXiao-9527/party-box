@@ -2,6 +2,20 @@
 
 export type Phase = 'lobby' | 'playing' | 'paused'
 
+/** Room product. Omitted / unknown → chip (legacy rooms). */
+export type RoomMode = 'chip' | 'partyGame'
+
+/** Slice A public stub only. Later slices may add dealing / reveal phases. */
+export type PartyPhase = 'lobby'
+
+export type PartyGameId = 'undercover'
+
+/** Public party fields — no private words. */
+export interface PartyStub {
+  gameId: string
+  phase: PartyPhase
+}
+
 export type ChipOpType =
   | '+denom'
   | '-denom'
@@ -90,6 +104,10 @@ export interface RoomState {
   /** Display-only blinds; omit when unset. Never auto-deducted. */
   smallBlind?: number
   bigBlind?: number
+  /** Omitted → chip. */
+  mode?: RoomMode
+  /** Present when mode is partyGame. Slice A: phase always lobby. */
+  party?: PartyStub
 }
 
 /** POST /rooms + create-room form. */
@@ -99,6 +117,8 @@ export type RoomCreateInput = {
   maxSeats?: number | string
   smallBlind?: number | string
   bigBlind?: number | string
+  mode?: RoomMode | string
+  gameId?: string
 }
 
 export interface ChipOp {
@@ -207,6 +227,27 @@ export function tableFullReason(maxSeats: unknown = MAX_SEATS): string {
   return `本桌已满（最多${normalizeMaxSeats(maxSeats)}人）`
 }
 
+export function parseRoomMode(raw: unknown): RoomMode {
+  return raw === 'partyGame' ? 'partyGame' : 'chip'
+}
+
+export function isPartyGame(
+  room: { mode?: unknown } | null | undefined,
+): boolean {
+  return !!room && room.mode === 'partyGame'
+}
+
+/** Slice A: public stub only; unknown/missing → undercover + lobby. */
+export function partyStubOf(raw: unknown): PartyStub {
+  const src =
+    raw && typeof raw === 'object' ? (raw as { gameId?: unknown }) : null
+  const gameId =
+    typeof src?.gameId === 'string' && src.gameId.trim()
+      ? src.gameId.trim()
+      : 'undercover'
+  return { gameId, phase: 'lobby' }
+}
+
 /** Human Chinese fail copy only — no tech error codes. */
 export const ACK_REASONS = {
   SEAT_LOCKED: '席位已锁定',
@@ -255,37 +296,30 @@ function optionalPositiveInt(
   return { ok: true, value: n }
 }
 
+export type RoomCreateParsed = {
+  ok: true
+  buyInN: number
+  maxSeats: number
+  smallBlind?: number
+  bigBlind?: number
+  seatId?: string
+  mode: RoomMode
+  party?: PartyStub
+}
+
 /**
  * Create-room fields.
- * `strictBuyIn`: empty buy-in is an error (UI form). Relay may omit → buyInN 0.
+ * `strictBuyIn`: empty buy-in is an error (chip UI form). Party + relay may omit → 0.
  * Seats omitted → 8. Seats 1 / 9 / non-int → SEATS_RANGE.
+ * `mode=partyGame` skips buy-in/blinds (chip fields ignored).
  */
 export function parseRoomCreate(
   input: RoomCreateInput | null | undefined,
   opts?: { strictBuyIn?: boolean },
-):
-  | {
-      ok: true
-      buyInN: number
-      maxSeats: number
-      smallBlind?: number
-      bigBlind?: number
-      seatId?: string
-    }
-  | { ok: false; error: string } {
+): RoomCreateParsed | { ok: false; error: string } {
   const src = input && typeof input === 'object' ? input : {}
-  const buyRaw = src.buyInN
-  const buyMissing = buyRaw === undefined || buyRaw === null || buyRaw === ''
-  let buyInN = 0
-  if (!buyMissing) {
-    const n = typeof buyRaw === 'number' ? buyRaw : Number(buyRaw)
-    if (!Number.isInteger(n) || n <= 0) {
-      return { ok: false, error: ACK_REASONS.POSITIVE_INT }
-    }
-    buyInN = n
-  } else if (opts?.strictBuyIn) {
-    return { ok: false, error: ACK_REASONS.POSITIVE_INT }
-  }
+  const mode = parseRoomMode(src.mode)
+  const party = mode === 'partyGame' ? partyStubOf(src) : undefined
 
   const seatsRaw = src.maxSeats
   const seatsMissing =
@@ -297,6 +331,32 @@ export function parseRoomCreate(
       return { ok: false, error: ACK_REASONS.SEATS_RANGE }
     }
     maxSeats = n
+  }
+
+  if (mode === 'partyGame') {
+    const seatId =
+      typeof src.seatId === 'string' && src.seatId ? src.seatId : undefined
+    return {
+      ok: true,
+      buyInN: 0,
+      maxSeats,
+      seatId,
+      mode,
+      party,
+    }
+  }
+
+  const buyRaw = src.buyInN
+  const buyMissing = buyRaw === undefined || buyRaw === null || buyRaw === ''
+  let buyInN = 0
+  if (!buyMissing) {
+    const n = typeof buyRaw === 'number' ? buyRaw : Number(buyRaw)
+    if (!Number.isInteger(n) || n <= 0) {
+      return { ok: false, error: ACK_REASONS.POSITIVE_INT }
+    }
+    buyInN = n
+  } else if (opts?.strictBuyIn) {
+    return { ok: false, error: ACK_REASONS.POSITIVE_INT }
   }
 
   const small = optionalPositiveInt(src.smallBlind)
@@ -314,29 +374,17 @@ export function parseRoomCreate(
     smallBlind: small.value,
     bigBlind: big.value,
     seatId,
+    mode,
   }
 }
 
-/** Body carries a real create snapshot, not omitted defaults (buyIn 0 / seats 8). */
+/** Body carries a real create snapshot, not omitted defaults (buyIn 0 / seats 8 / chip). */
 export function hasCreateSnapshot(
-  parsed:
-    | {
-        ok: true
-        buyInN: number
-        maxSeats: number
-        smallBlind?: number
-        bigBlind?: number
-      }
-    | { ok: false; error: string },
-): parsed is {
-  ok: true
-  buyInN: number
-  maxSeats: number
-  smallBlind?: number
-  bigBlind?: number
-} {
+  parsed: RoomCreateParsed | { ok: false; error: string },
+): parsed is RoomCreateParsed {
   if (!parsed.ok) return false
   return (
+    parsed.mode === 'partyGame' ||
     parsed.buyInN > 0 ||
     parsed.maxSeats !== MAX_SEATS ||
     parsed.smallBlind != null ||
@@ -346,14 +394,28 @@ export function hasCreateSnapshot(
 
 /**
  * Overlay create-room snapshot onto room when `input` includes it.
- * Repairs rooms whose POST /rooms dropped buyInN / maxSeats / blinds.
+ * Repairs rooms whose POST /rooms dropped buyInN / maxSeats / blinds / mode.
  */
 export function stampCreateSettings<
-  T extends Pick<RoomState, 'buyInN' | 'maxSeats' | 'smallBlind' | 'bigBlind'>,
+  T extends Pick<
+    RoomState,
+    'buyInN' | 'maxSeats' | 'smallBlind' | 'bigBlind' | 'mode' | 'party'
+  >,
 >(room: T, input: RoomCreateInput | null | undefined): T {
   if (!input || typeof input !== 'object') return room
   const parsed = parseRoomCreate(input)
   if (!hasCreateSnapshot(parsed)) return room
+  if (parsed.mode === 'partyGame') {
+    return {
+      ...room,
+      mode: 'partyGame',
+      party: parsed.party,
+      maxSeats: parsed.maxSeats,
+      buyInN: 0,
+      smallBlind: undefined,
+      bigBlind: undefined,
+    }
+  }
   return {
     ...room,
     buyInN: parsed.buyInN,

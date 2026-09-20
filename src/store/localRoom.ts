@@ -3,9 +3,12 @@ import {
   DEFAULT_DENOMS,
   MAX_SEATS,
   findLastUndoable,
+  isPartyGame,
   ledgerEntrySummary,
   normalizeMaxSeats,
   parseRoomCreate,
+  parseRoomMode,
+  partyStubOf,
   stampCreateSettings,
   hasCreateSnapshot,
   tableFullReason,
@@ -119,6 +122,8 @@ export function saveCreateSettings(
         maxSeats: parsed.maxSeats,
         smallBlind: parsed.smallBlind,
         bigBlind: parsed.bigBlind,
+        mode: parsed.mode,
+        gameId: parsed.party?.gameId,
       }),
     )
   } catch {
@@ -156,12 +161,23 @@ function normalizeRoom(data: PersistedRoom): PersistedRoom {
     locked,
   )
   const maxSeats = stamped.maxSeats
+  const mode = parseRoomMode(stamped.mode)
+  const room: RoomState = {
+    ...stamped,
+    mode,
+    members: stamped.members.slice(0, maxSeats),
+  }
+  if (mode === 'partyGame') {
+    room.party = partyStubOf(stamped.party)
+    room.buyInN = 0
+    delete room.smallBlind
+    delete room.bigBlind
+  } else {
+    delete room.party
+  }
   return {
     ...data,
-    room: {
-      ...stamped,
-      members: stamped.members.slice(0, maxSeats),
-    },
+    room,
     table: {
       ...data.table,
       seats: data.table.seats.slice(0, maxSeats).map((s) => ({
@@ -230,15 +246,18 @@ export function createEmptyHostRoom(
   const roomCode = generateRoomCode()
   const seatId = parsed.seatId || uid('seat')
   const now = Date.now()
+  const mode = parsed.mode
   const data: PersistedRoom = {
     room: {
       roomCode,
       hostSeatId: seatId,
       phase: 'lobby',
+      mode,
+      ...(mode === 'partyGame' ? { party: parsed.party } : {}),
       maxSeats: parsed.maxSeats,
-      buyInN: parsed.buyInN,
-      smallBlind: parsed.smallBlind,
-      bigBlind: parsed.bigBlind,
+      buyInN: mode === 'partyGame' ? 0 : parsed.buyInN,
+      smallBlind: mode === 'partyGame' ? undefined : parsed.smallBlind,
+      bigBlind: mode === 'partyGame' ? undefined : parsed.bigBlind,
       members: [],
     },
     table: {
@@ -555,6 +574,18 @@ export function applyChipOp(op: ChipOp): {
         opId: op.opId,
         ok: false,
         reason: ACK_REASONS.TABLE_PAUSED,
+        snapshotAt: existing.table.snapshotAt,
+      },
+      data: existing,
+    }
+  }
+
+  if (isPartyGame(existing.room)) {
+    return {
+      ack: {
+        opId: op.opId,
+        ok: false,
+        reason: ACK_REASONS.INVALID,
         snapshotAt: existing.table.snapshotAt,
       },
       data: existing,

@@ -142,6 +142,7 @@ const noStamp = store.createEmptyHostRoom({ seatId: 'seat_nostamp' })
 store.setPhase(noStamp.data.room.roomCode, 'playing', { phase: 'playing' })
 const kept = store.get(noStamp.data.room.roomCode)
 assert(kept.room.buyInN === 0 && kept.room.maxSeats === 8, 'empty phase body does not invent snapshot')
+assert(kept.room.mode === 'chip', 'legacy create is chip')
 
 {
   const created = store.createEmptyHostRoom({ buyInN: 10, maxSeats: 8 })
@@ -155,6 +156,66 @@ assert(kept.room.buyInN === 0 && kept.room.maxSeats === 8, 'empty phase body doe
   const joined = store.joinRoom(code, '甲')
   assert(!('error' in joined), 'mono join')
   assert(joined.data.table.snapshotAt > atHost, 'join strictly newer than claim')
+}
+
+{
+  const parsed = parseRoomCreate({ mode: 'partyGame' })
+  assert(parsed.ok && parsed.mode === 'partyGame', 'party parse')
+  assert(parsed.buyInN === 0, 'party ignores buy-in')
+  assert(parsed.party.gameId === 'undercover', 'default gameId')
+  assert(parsed.party.phase === 'lobby', 'party stub lobby')
+  const ignoredBuy = parseRoomCreate({ mode: 'partyGame', buyInN: -1, maxSeats: 6 })
+  assert(ignoredBuy.ok && ignoredBuy.maxSeats === 6, 'party skips chip buy-in validation')
+  const chipDefault = parseRoomCreate({})
+  assert(chipDefault.ok && chipDefault.mode === 'chip', 'omitted mode is chip')
+  const seats1 = parseRoomCreate({ mode: 'partyGame', maxSeats: 1 })
+  assert(seats1.error === ACK_REASONS.SEATS_RANGE, 'party seats 1')
+}
+
+{
+  const stamped = stampCreateSettings(
+    { buyInN: 50, maxSeats: 8, mode: 'chip' },
+    { mode: 'partyGame', maxSeats: 4, gameId: 'undercover' },
+  )
+  assert(stamped.mode === 'partyGame' && stamped.maxSeats === 4, 'stamp party mode')
+  assert(stamped.buyInN === 0, 'stamp party clears buy-in')
+  assert(stamped.party.phase === 'lobby', 'stamp party phase')
+}
+
+{
+  const party = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 2,
+    gameId: 'undercover',
+  })
+  assert(!('error' in party), 'party create ok')
+  assert(party.data.room.mode === 'partyGame', 'persist mode')
+  assert(party.data.room.phase === 'lobby', 'room phase lobby')
+  assert(party.data.room.party.gameId === 'undercover', 'persist gameId')
+  assert(party.data.room.party.phase === 'lobby', 'persist party phase')
+  assert(party.data.room.buyInN === 0, 'party buyInN 0')
+  assert(party.data.room.smallBlind == null, 'party no smallBlind')
+  assert(party.data.room.maxSeats === 2, 'party maxSeats')
+
+  const pcode = party.data.room.roomCode
+  const host = store.claimHostSeat(pcode, party.session.seatId, '桌主')
+  assert(host && host.room.mode === 'partyGame', 'claim keeps party mode')
+  const j1 = store.joinRoom(pcode, '甲')
+  assert(!('error' in j1), 'party second seat')
+  assert(j1.data.room.members.length === 2, 'two seats')
+  const j2 = store.joinRoom(pcode, '乙')
+  assert(j2.error === '本桌已满（最多2人）', 'party full copy')
+
+  const op = store.applyChipOp({
+    opId: 'op_party',
+    roomCode: pcode,
+    fromSeatId: party.session.seatId,
+    targetSeatId: party.session.seatId,
+    type: '+denom',
+    denom: 1,
+  })
+  assert(op.ack.ok === false, 'chip op rejected')
+  assert(op.ack.reason === ACK_REASONS.INVALID, 'party chip isolation')
 }
 
 console.log('OK test-room-create')

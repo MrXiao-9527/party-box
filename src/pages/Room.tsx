@@ -5,6 +5,7 @@ import { DevPanel } from '../components/DevPanel'
 import { useRoom } from '../sync/useRoom'
 import { NicknameGate } from './Nickname'
 import { Lobby } from './Lobby'
+import { PartyLobby } from './PartyLobby'
 import { ChipTable } from './ChipTable'
 import { PausedTable } from './PausedTable'
 import { Settlement } from './Settlement'
@@ -26,7 +27,7 @@ import {
   wasInRoomLocally,
 } from '../sync/roomApi'
 import { setFlashToast } from '../sync/flashToast'
-import { ACK_REASONS, MAX_SEATS, normalizeMaxSeats, parseRoomCode, tableFullReason } from '../types'
+import { ACK_REASONS, MAX_SEATS, isPartyGame, normalizeMaxSeats, parseRoomCode, tableFullReason } from '../types'
 import {
   decideRestore,
   hasHadSeat,
@@ -649,6 +650,7 @@ export function RoomPage() {
   }
 
   const phase = roomApi.room.phase
+  const party = isPartyGame(roomApi.room)
 
   return (
     <>
@@ -662,7 +664,9 @@ export function RoomPage() {
         </div>
       )}
       {debug}
-      {phase === 'lobby' ? (
+      {party ? (
+        <PartyLobby room={roomApi.room} session={roomApi.session} />
+      ) : phase === 'lobby' ? (
         <Lobby
           room={roomApi.room}
           session={roomApi.session}

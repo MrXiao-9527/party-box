@@ -3,7 +3,7 @@
  * Holds RoomState, applies host-authoritative ChipOps, fans out via WebSocket.
  */
 
-import { createRoomStore, ACK_REASONS, parseRoomCreate } from './roomLogic.js'
+import { createRoomStore, ACK_REASONS, parseRoomCreate, emptyPersistedRoom } from './roomLogic.js'
 
 export class RoomDurableObject {
   constructor(state, env) {
@@ -75,27 +75,10 @@ export class RoomDurableObject {
         if (parsed.error) {
           return Response.json({ error: parsed.error }, { status: 400 })
         }
-        const now = Date.now()
         const sid = parsed.seatId || `seat_${Math.random().toString(36).slice(2, 10)}`
-        const data = this.store.set({
-          room: {
-            roomCode,
-            hostSeatId: sid,
-            phase: 'lobby',
-            maxSeats: parsed.maxSeats,
-            buyInN: parsed.buyInN,
-            smallBlind: parsed.smallBlind,
-            bigBlind: parsed.bigBlind,
-            members: [],
-          },
-          table: {
-            snapshotAt: now,
-            denoms: [1, 5, 10, 25, 100],
-            seats: [],
-            pot: 0,
-            ledger: [],
-          },
-        })
+        const data = this.store.set(
+          emptyPersistedRoom(roomCode, { ...parsed, seatId: sid }),
+        )
         await this.persist(data)
         this.broadcast(data)
         return Response.json(
