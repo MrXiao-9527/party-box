@@ -1,3 +1,4 @@
+import { dealRound, type SeatPrivate } from '../games/undercover/deal'
 import {
   ACK_REASONS,
   DEFAULT_DENOMS,
@@ -9,6 +10,7 @@ import {
   parseRoomCreate,
   parseRoomMode,
   partyStubOf,
+  publicPersistedRoom,
   stampCreateSettings,
   hasCreateSnapshot,
   tableFullReason,
@@ -23,11 +25,18 @@ import {
 const ROOM_PREFIX = 'party-box:room:'
 const SESSION_KEY = 'party-box:session'
 const CREATE_PREFIX = 'party-box:create:'
+const SECRET_PREFIX = 'party-box:party-secrets:'
 
 export interface Session {
   seatId: string
   name: string
   roomCode: string
+  seatToken?: string
+}
+
+interface PartySecrets {
+  partyPrivates: Record<string, SeatPrivate>
+  seatTokens: Record<string, string>
 }
 
 export interface PersistedRoom {
@@ -99,6 +108,19 @@ function undoPlusBuyIn(seat: { buyIn?: number }, delta: number): void {
 /** Strictly newer than the current table — join/member mutations must beat the host gate. */
 function nextSnapshotAt(existing: PersistedRoom): number {
   return Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
+}
+
+function appendLocalPartySeat(
+  raw: RoomState['party'],
+  seatId: string,
+  hasWord: boolean,
+): RoomState['party'] {
+  const party = partyStubOf(raw)
+  if (party.phase !== 'playing') return raw
+  const seats = [...(party.seats ?? [])]
+  if (seats.some((s) => s.seatId === seatId)) return party
+  seats.push({ seatId, hasWord })
+  return { ...party, seats }
 }
 
 function optionalBlind(raw: unknown): number | undefined {
@@ -203,17 +225,52 @@ export function loadRoom(roomCode: string): PersistedRoom | null {
 
 /** Persist and return normalized room (always includes numeric `table.pot`). */
 export function saveRoom(data: PersistedRoom): PersistedRoom {
-  const normalized = normalizeRoom(data)
+  const stripped = publicPersistedRoom(normalizeRoom(data)) ?? normalizeRoom(data)
   localStorage.setItem(
-    ROOM_PREFIX + normalized.room.roomCode.toUpperCase(),
-    JSON.stringify(normalized),
+    ROOM_PREFIX + stripped.room.roomCode.toUpperCase(),
+    JSON.stringify(stripped),
   )
-  return normalized
+  return stripped
+}
+
+function secretKey(roomCode: string): string {
+  return SECRET_PREFIX + roomCode.toUpperCase()
+}
+
+function loadSecrets(roomCode: string): PartySecrets {
+  try {
+    const raw = localStorage.getItem(secretKey(roomCode))
+    if (!raw) return { partyPrivates: {}, seatTokens: {} }
+    const parsed = JSON.parse(raw) as PartySecrets
+    return {
+      partyPrivates: parsed.partyPrivates && typeof parsed.partyPrivates === 'object'
+        ? parsed.partyPrivates
+        : {},
+      seatTokens: parsed.seatTokens && typeof parsed.seatTokens === 'object'
+        ? parsed.seatTokens
+        : {},
+    }
+  } catch {
+    return { partyPrivates: {}, seatTokens: {} }
+  }
+}
+
+function saveSecrets(roomCode: string, secrets: PartySecrets): void {
+  localStorage.setItem(secretKey(roomCode.toUpperCase()), JSON.stringify(secrets))
+}
+
+function clearSecrets(roomCode: string): void {
+  try {
+    localStorage.removeItem(secretKey(roomCode))
+  } catch {
+    /* ignore */
+  }
 }
 
 export function deleteRoom(roomCode: string): void {
   localStorage.removeItem(ROOM_PREFIX + roomCode.toUpperCase())
   clearCreateSettings(roomCode)
+  clearSecrets(roomCode)
 }
 
 /**
@@ -271,7 +328,12 @@ export function createEmptyHostRoom(
   }
   saveCreateSettings(roomCode, input)
   saveRoom(data)
-  const session: Session = { seatId, name: '', roomCode }
+  const seatToken = uid('tok')
+  saveSecrets(roomCode, {
+    partyPrivates: {},
+    seatTokens: { [seatId]: seatToken },
+  })
+  const session: Session = { seatId, name: '', roomCode, seatToken }
   saveSession(session)
   return { session, data }
 }
@@ -305,7 +367,12 @@ export function claimHostSeat(
       },
     }
     saveRoom(data)
-    saveSession({ seatId, name, roomCode: existing.room.roomCode })
+    saveSession({
+      seatId,
+      name,
+      roomCode: existing.room.roomCode,
+      seatToken: loadSession()?.seatToken ?? loadSecrets(roomCode).seatTokens[seatId],
+    })
     return data
   }
 
@@ -335,7 +402,18 @@ export function claimHostSeat(
     },
   }
   saveRoom(data)
-  saveSession({ seatId, name, roomCode: existing.room.roomCode })
+  const secrets = loadSecrets(roomCode)
+  const seatToken = secrets.seatTokens[seatId] || uid('tok')
+  saveSecrets(roomCode, {
+    ...secrets,
+    seatTokens: { ...secrets.seatTokens, [seatId]: seatToken },
+  })
+  saveSession({
+    seatId,
+    name,
+    roomCode: existing.room.roomCode,
+    seatToken,
+  })
   return data
 }
 
@@ -365,7 +443,12 @@ export function createRoomAsHost(name: string): {
     },
   }
   saveRoom(data)
-  const session: Session = { seatId, name, roomCode }
+  const seatToken = uid('tok')
+  saveSecrets(roomCode, {
+    partyPrivates: {},
+    seatTokens: { [seatId]: seatToken },
+  })
+  const session: Session = { seatId, name, roomCode, seatToken }
   saveSession(session)
   return { session, data }
 }
@@ -391,9 +474,12 @@ export function joinRoom(
   }
 
   const seatId = uid('seat')
+  const seatToken = uid('tok')
+  const party = appendLocalPartySeat(existing.room.party, seatId, false)
   const data: PersistedRoom = {
     room: {
       ...existing.room,
+      ...(party ? { party } : {}),
       members: [
         ...existing.room.members,
         { seatId, name, isHost: false, connected: true },
@@ -411,7 +497,12 @@ export function joinRoom(
     },
   }
   saveRoom(data)
-  const nextSession: Session = { seatId, name, roomCode: code }
+  const secrets = loadSecrets(code)
+  saveSecrets(code, {
+    ...secrets,
+    seatTokens: { ...secrets.seatTokens, [seatId]: seatToken },
+  })
+  const nextSession: Session = { seatId, name, roomCode: code, seatToken }
   saveSession(nextSession)
   return { session: nextSession, data }
 }
@@ -439,8 +530,14 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
     })
   }
 
+  let party = existing.room.party
+  if (partyStubOf(party).phase === 'playing') {
+    for (const s of seats) {
+      party = appendLocalPartySeat(party, s.seatId, false) ?? party
+    }
+  }
   const data: PersistedRoom = {
-    room: { ...existing.room, members },
+    room: { ...existing.room, members, ...(party ? { party } : {}) },
     table: { ...existing.table, seats, snapshotAt: nextSnapshotAt(existing) },
   }
   saveRoom(data)
@@ -1009,4 +1106,61 @@ export function applyChipOp(op: ChipOp): {
 
 export function newOpId(): string {
   return uid('op')
+}
+
+export function startUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+):
+  | { data: PersistedRoom; private: SeatPrivate | null }
+  | { error: string } {
+  const existing = loadRoom(roomCode)
+  if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+  if (!isPartyGame(existing.room)) return { error: ACK_REASONS.INVALID }
+  if (fromSeatId !== existing.room.hostSeatId) return { error: ACK_REASONS.NOT_HOST }
+  const secrets = loadSecrets(roomCode)
+  if (!seatToken || secrets.seatTokens[fromSeatId] !== seatToken) {
+    return { error: ACK_REASONS.INVALID }
+  }
+  const party = partyStubOf(existing.room.party)
+  if (party.phase === 'playing') return { error: ACK_REASONS.ALREADY_STARTED }
+  const connected = existing.room.members.filter((m) => m.connected)
+  if (connected.length < 3) return { error: ACK_REASONS.NEED_THREE_ONLINE }
+  const seatIds = existing.room.members.map((m) => m.seatId)
+  if (seatIds.length < 3) return { error: ACK_REASONS.NEED_THREE_ONLINE }
+  const dealt = dealRound(seatIds)
+  const partyPrivates: Record<string, SeatPrivate> = {}
+  for (const p of dealt.privates) partyPrivates[p.seatId] = p
+  const data: PersistedRoom = {
+    room: {
+      ...existing.room,
+      party: {
+        gameId: party.gameId || 'undercover',
+        phase: 'playing',
+        pairId: dealt.pairId,
+        undercoverCount: dealt.undercoverCount,
+        seats: seatIds.map((seatId) => ({ seatId, hasWord: true })),
+      },
+    },
+    table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+  }
+  saveRoom(data)
+  saveSecrets(roomCode, { ...secrets, partyPrivates })
+  return { data, private: partyPrivates[fromSeatId] ?? null }
+}
+
+export function getSeatPrivate(
+  roomCode: string,
+  seatId: string,
+  seatToken?: string,
+): { private: SeatPrivate | null; hasWord: boolean } | { error: string } {
+  const existing = loadRoom(roomCode)
+  if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+  const secrets = loadSecrets(roomCode)
+  if (!seatId || !seatToken || secrets.seatTokens[seatId] !== seatToken) {
+    return { private: null, hasWord: false }
+  }
+  const priv = secrets.partyPrivates[seatId] ?? null
+  return { private: priv, hasWord: !!priv }
 }

@@ -22,6 +22,8 @@
     "test:settlement": "node --experimental-strip-types scripts/test-settlement.mjs",
     "test:room-create": "node --experimental-strip-types scripts/test-room-create.mjs",
     "test:e2e-party-lobby": "node scripts/e2e-party-lobby.mjs",
+    "test:undercover": "node scripts/test-undercover.mjs",
+    "test:e2e-party-undercover": "node scripts/e2e-party-undercover.mjs",
     "test:pick-host": "node scripts/test-pick-host.mjs",
     "test:e2e-pick-host": "node scripts/e2e-pick-host.mjs",
     "test:e2e-create-snapshot": "node scripts/e2e-create-snapshot.mjs",

@@ -56,6 +56,7 @@ function identityFromSession(session: Session, isHost: boolean): SeatIdentity {
     seatId: session.seatId,
     name: session.name,
     role: isHost ? 'host' : 'player',
+    seatToken: session.seatToken,
   }
 }
 
@@ -191,12 +192,14 @@ export function RoomPage() {
         seatId: id.seatId,
         name: member?.name ?? id.name,
         roomCode,
+        seatToken: id.seatToken ?? loadSession()?.seatToken,
       }
       const nextIdentity: SeatIdentity = {
         roomCode,
         seatId: session.seatId,
         name: session.name,
         role: roleForSeat(data.room.hostSeatId, session.seatId),
+        seatToken: session.seatToken,
       }
       saveSession(session)
       saveIdentity(nextIdentity)
@@ -456,12 +459,14 @@ export function RoomPage() {
         seatId: id.seatId,
         name: member?.name ?? id.name,
         roomCode,
+        seatToken: id.seatToken ?? loadSession()?.seatToken,
       }
       const nextIdentity: SeatIdentity = {
         roomCode,
         seatId: session.seatId,
         name: session.name,
         role: roleForSeat(data.room.hostSeatId, session.seatId),
+        seatToken: session.seatToken,
       }
       saveSession(session)
       saveIdentity(nextIdentity)
@@ -664,8 +669,19 @@ export function RoomPage() {
         </div>
       )}
       {debug}
-      {party ? (
-        <PartyLobby room={roomApi.room} session={roomApi.session} />
+      {party && roomApi.session ? (
+        <PartyLobby
+          room={roomApi.room}
+          session={roomApi.session}
+          isHost={roomApi.isHost}
+          starting={roomApi.starting}
+          seatPrivate={roomApi.seatPrivate}
+          onStart={denyIfReadOnly(roomApi.startUndercover)}
+        />
+      ) : party ? (
+        <div className="page">
+          <p>加载局桌…</p>
+        </div>
       ) : phase === 'lobby' ? (
         <Lobby
           room={roomApi.room}

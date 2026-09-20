@@ -70,10 +70,11 @@ export function NicknameGate({
               seatId: session.seatId,
               name: trimmed,
               roomCode: parsed.code,
+              seatToken: session.seatToken,
             }
             saveIdentity({
               ...next,
-              role: 'host',
+              role: 'host' as const,
             })
             onReady(next, data)
             return
@@ -89,6 +90,7 @@ export function NicknameGate({
           roomCode: result.session.roomCode,
           seatId: result.session.seatId,
           name: result.session.name,
+          seatToken: result.session.seatToken,
           role:
             result.data.room.hostSeatId === result.session.seatId
               ? 'host'

@@ -241,7 +241,7 @@ export function HomePage() {
                 disabled={busy}
               />
             </label>
-            <p className="hint">2–8 人 · 谁是卧底大厅（不发词）</p>
+            <p className="hint">2–8 人 · 谁是卧底（满 3 人在线可发词）</p>
             <button
               type="submit"
               className="btn primary wide"

@@ -3,7 +3,13 @@
  * Holds RoomState, applies host-authoritative ChipOps, fans out via WebSocket.
  */
 
-import { createRoomStore, ACK_REASONS, parseRoomCreate, emptyPersistedRoom } from './roomLogic.js'
+import {
+  createRoomStore,
+  ACK_REASONS,
+  parseRoomCreate,
+  emptyPersistedRoom,
+  publicPersisted,
+} from './roomLogic.js'
 
 export class RoomDurableObject {
   constructor(state, env) {
@@ -32,11 +38,34 @@ export class RoomDurableObject {
     }
   }
 
+  sendPrivate(ws, data) {
+    let att = {}
+    try {
+      att = ws.deserializeAttachment() || {}
+    } catch {
+      att = {}
+    }
+    if (!att.seatId || !data?.seatTokens || data.seatTokens[att.seatId] !== att.seatToken) {
+      return
+    }
+    try {
+      ws.send(
+        JSON.stringify({
+          type: 'seatPrivate',
+          private: data.partyPrivates?.[att.seatId] ?? null,
+        }),
+      )
+    } catch {
+      /* ignore */
+    }
+  }
+
   broadcast(data) {
-    const msg = JSON.stringify({ type: 'room', data })
+    const msg = JSON.stringify({ type: 'room', data: publicPersisted(data) })
     for (const ws of this.state.getWebSockets()) {
       try {
         ws.send(msg)
+        this.sendPrivate(ws, data)
       } catch {
         /* ignore */
       }
@@ -60,7 +89,13 @@ export class RoomDurableObject {
       this.state.acceptWebSocket(server)
       const code = (url.searchParams.get('room') || '').toUpperCase()
       const room = code ? this.store.get(code) : null
-      server.send(JSON.stringify({ type: 'room', data: room }))
+      const seatId = url.searchParams.get('seatId') || ''
+      const seatToken = url.searchParams.get('seatToken') || ''
+      if (seatId && seatToken && room?.seatTokens?.[seatId] === seatToken) {
+        server.serializeAttachment({ seatId, seatToken })
+      }
+      server.send(JSON.stringify({ type: 'room', data: publicPersisted(room) }))
+      this.sendPrivate(server, room)
       return new Response(null, { status: 101, webSocket: client })
     }
 
@@ -76,13 +111,19 @@ export class RoomDurableObject {
           return Response.json({ error: parsed.error }, { status: 400 })
         }
         const sid = parsed.seatId || `seat_${Math.random().toString(36).slice(2, 10)}`
-        const data = this.store.set(
-          emptyPersistedRoom(roomCode, { ...parsed, seatId: sid }),
-        )
+        const seatToken = `tok_${Math.random().toString(36).slice(2, 10)}`
+        const data = this.store.set({
+          ...emptyPersistedRoom(roomCode, { ...parsed, seatId: sid }),
+          seatTokens: { [sid]: seatToken },
+          partyPrivates: {},
+        })
         await this.persist(data)
         this.broadcast(data)
         return Response.json(
-          { session: { seatId: sid, name: '', roomCode }, data },
+          {
+            session: { seatId: sid, name: '', roomCode, seatToken },
+            data: publicPersisted(data),
+          },
           { status: 201 },
         )
       }
@@ -99,7 +140,7 @@ export class RoomDurableObject {
         if (!data) {
           return Response.json({ error: ACK_REASONS.ROOM_MISSING }, { status: 404 })
         }
-        return Response.json({ data })
+        return Response.json({ data: publicPersisted(data) })
       }
 
       if (request.method === 'DELETE' && !action) {
@@ -117,7 +158,7 @@ export class RoomDurableObject {
         }
         await this.persist(data)
         this.broadcast(data)
-        return Response.json({ data })
+        return Response.json({ data: publicPersisted(data) })
       }
 
       if (request.method === 'POST' && action === 'join') {
@@ -128,7 +169,10 @@ export class RoomDurableObject {
         }
         await this.persist(result.data)
         this.broadcast(result.data)
-        return Response.json(result)
+        return Response.json({
+          session: result.session,
+          data: publicPersisted(result.data),
+        })
       }
 
       if (request.method === 'POST' && action === 'phase') {
@@ -139,7 +183,7 @@ export class RoomDurableObject {
         }
         await this.persist(data)
         this.broadcast(data)
-        return Response.json({ data })
+        return Response.json({ data: publicPersisted(data) })
       }
 
       if (request.method === 'POST' && action === 'member-connected') {
@@ -150,7 +194,7 @@ export class RoomDurableObject {
         }
         await this.persist(data)
         this.broadcast(data)
-        return Response.json({ data })
+        return Response.json({ data: publicPersisted(data) })
       }
 
       if (request.method === 'POST' && action === 'resume') {
@@ -161,7 +205,7 @@ export class RoomDurableObject {
         }
         await this.persist(data)
         this.broadcast(data)
-        return Response.json({ data })
+        return Response.json({ data: publicPersisted(data) })
       }
 
       if (request.method === 'POST' && action === 'pick-host') {
@@ -176,7 +220,7 @@ export class RoomDurableObject {
         }
         await this.persist(result)
         this.broadcast(result)
-        return Response.json({ data: result })
+        return Response.json({ data: publicPersisted(result) })
       }
 
       if (request.method === 'POST' && action === 'fill-seats') {
@@ -186,7 +230,7 @@ export class RoomDurableObject {
         }
         await this.persist(result)
         this.broadcast(result)
-        return Response.json({ data: result })
+        return Response.json({ data: publicPersisted(result) })
       }
 
       if (request.method === 'POST' && action === 'restore') {
@@ -197,7 +241,31 @@ export class RoomDurableObject {
         }
         await this.persist(data)
         this.broadcast(data)
-        return Response.json({ data })
+        return Response.json({ data: publicPersisted(data) })
+      }
+
+      if (request.method === 'POST' && action === 'start-undercover') {
+        const body = await request.json()
+        const result = this.store.startUndercover(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({
+          data: publicPersisted(result.data),
+          private: result.private,
+        })
+      }
+
+      if (request.method === 'POST' && action === 'seat-private') {
+        const body = await request.json()
+        const result = this.store.getSeatPrivate(code, body.seatId, body.seatToken)
+        if ('error' in result) {
+          const status = result.error === ACK_REASONS.ROOM_MISSING ? 404 : 400
+          return Response.json(result, { status })
+        }
+        return Response.json(result)
       }
 
       if (request.method === 'POST' && action === 'ops') {
@@ -207,7 +275,10 @@ export class RoomDurableObject {
           await this.persist(result.data)
           this.broadcast(result.data)
         }
-        return Response.json(result)
+        return Response.json({
+          ack: result.ack,
+          data: publicPersisted(result.data),
+        })
       }
 
       return Response.json({ error: 'not found' }, { status: 404 })

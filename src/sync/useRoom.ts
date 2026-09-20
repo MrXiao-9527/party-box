@@ -7,6 +7,7 @@ import {
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
+import type { SeatPrivate } from '../games/undercover/deal'
 import type {
   ChipOp,
   ChipOpType,
@@ -14,11 +15,18 @@ import type {
   Seat,
   TableSnapshot,
 } from '../types'
-import { ACK_REASONS, findLastUndoable, ledgerEntrySummary } from '../types'
+import {
+  ACK_REASONS,
+  findLastUndoable,
+  ledgerEntrySummary,
+  partyHasWord,
+  partyStubOf,
+} from '../types'
 import { defaultTransport, type ChipTransport } from './transport'
 import { loadIdentity, roleForSeat, saveIdentity } from './seatRestore'
 import {
   clearLocalRoomArtifacts,
+  fetchSeatPrivate,
   fillSeatsToMax,
   pickNewHost,
   RelayNetworkError,
@@ -26,6 +34,7 @@ import {
   roomGoneToast,
   setMemberConnected,
   setPhase,
+  startUndercover as startUndercoverApi,
   syncRoomFromRelay,
   wasInRoomLocally,
 } from './roomApi'
@@ -109,6 +118,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     () => transport.getConnectionState(),
   )
   const [starting, setStarting] = useState(false)
+  const [seatPrivate, setSeatPrivate] = useState<SeatPrivate | null>(null)
   const startingRef = useRef(false)
   const snapshotRef = useRef<TableSnapshot | null>(null)
   const roomRef = useRef<RoomState | null>(null)
@@ -148,6 +158,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       setTable(null)
       snapshotRef.current = null
       setSession(null)
+      setSeatPrivate(null)
       if (!goneToastSentRef.current) {
         goneToastSentRef.current = true
         setFlashToast(toast)
@@ -264,7 +275,11 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     })
 
     const unsubWs = isRelayEnabled()
-      ? subscribeRelayRoom(roomCode)
+      ? subscribeRelayRoom(roomCode, undefined, {
+          seatId: session?.seatId,
+          seatToken: session?.seatToken,
+          onPrivate: (priv) => setSeatPrivate(priv),
+        })
       : () => {}
 
     // Relay: poll shared host snapshot (not only localStorage) so pot survives WS blips.
@@ -288,7 +303,14 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       unsubRelayEvent()
       unsubWs()
     }
-  }, [roomCode, refresh, applySyncedRoom, handleRelayRoomGone])
+  }, [
+    roomCode,
+    refresh,
+    applySyncedRoom,
+    handleRelayRoomGone,
+    session?.seatId,
+    session?.seatToken,
+  ])
 
   const applyLocalOptimistic = useCallback(
     (op: ChipOp, base: TableSnapshot): TableSnapshot => {
@@ -713,6 +735,61 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     ],
   )
 
+  useEffect(() => {
+    if (!roomCode || !session?.seatId) return
+    const party = partyStubOf(room?.party)
+    if (party.phase !== 'playing') {
+      if (seatPrivate) setSeatPrivate(null)
+      return
+    }
+    const mine = partyHasWord(party, session.seatId)
+    if (!mine) {
+      if (seatPrivate) setSeatPrivate(null)
+      return
+    }
+    if (seatPrivate && seatPrivate.seatId === session.seatId) return
+    void fetchSeatPrivate(roomCode, session.seatId, session.seatToken).then(
+      (result) => {
+        if ('error' in result) return
+        setSeatPrivate(result.private)
+      },
+    )
+  }, [roomCode, room?.party, session?.seatId, session?.seatToken, seatPrivate])
+
+  const startUndercover = useCallback(() => {
+    if (!roomCode || !session) {
+      pushToast('开始失败，请重试')
+      return
+    }
+    if (startingRef.current) return
+    startingRef.current = true
+    setStarting(true)
+    void (async () => {
+      try {
+        const result = await startUndercoverApi(
+          roomCode,
+          session.seatId,
+          session.seatToken,
+        )
+        if ('error' in result) {
+          pushToast(result.error)
+          return
+        }
+        applySyncedRoom(result.data, { force: true })
+        setSeatPrivate(result.private)
+      } catch (e) {
+        pushToast(
+          e instanceof RelayNetworkError
+            ? ACK_REASONS.RELAY_UNREACHABLE
+            : '开始失败，请重试',
+        )
+      } finally {
+        startingRef.current = false
+        setStarting(false)
+      }
+    })()
+  }, [roomCode, session, applySyncedRoom, pushToast])
+
   const startPlaying = useCallback(() => {
     if (!roomCode || !session) {
       pushToast('开桌失败，请重开一桌或检查网络')
@@ -909,6 +986,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     seats,
     isHost,
     starting,
+    seatPrivate,
     connectionState,
     pendingOps,
     toasts,
@@ -917,6 +995,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     refresh,
     submitOp,
     startPlaying,
+    startUndercover,
     signalHostDisconnect,
     resumeTable,
     claimHost,
