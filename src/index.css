@@ -436,6 +436,55 @@ input {
   color: var(--text-secondary);
 }
 
+.private-screen {
+  margin-top: 1.25rem;
+}
+
+.private-word-card {
+  padding: 1.15rem 1.1rem 1.25rem;
+  border-radius: var(--radius);
+  background: var(--card);
+  box-shadow: inset 0 0 0 2px var(--seat-own);
+  text-align: center;
+}
+
+.private-label {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+}
+
+.private-word {
+  margin: 0.45rem 0 0;
+  font-family: var(--font-display);
+  font-size: 2rem;
+  font-weight: 400;
+}
+
+.midjoin-hint {
+  margin: 0;
+  padding: 0.95rem 1rem;
+  border-radius: var(--radius);
+  background: var(--card);
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.word-dot,
+.noword-dot {
+  margin-left: auto;
+  font-size: 0.68rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text-secondary);
+}
+
+.word-dot {
+  color: var(--seat-own);
+}
+
 .paused {
   justify-content: center;
   gap: 0.5rem;

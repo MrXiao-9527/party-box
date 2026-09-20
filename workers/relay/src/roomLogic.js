@@ -3,6 +3,8 @@
  * Mirrors src/store/localRoom.ts + src/types (keep in sync).
  */
 
+import { dealRound } from './undercover.js'
+
 export const MIN_SEATS = 2
 export const MAX_SEATS = 8
 export const DEFAULT_DENOMS = [1, 5, 10, 25, 100]
@@ -25,6 +27,8 @@ export const ACK_REASONS = {
   POSITIVE_INT: '请输入正整数',
   NOTHING_TO_UNDO: '没有可撤销的记录',
   TABLE_SETTLING: '结算中，请先返回桌面',
+  NEED_THREE_ONLINE: '至少 3 人在线才能开始',
+  ALREADY_STARTED: '本局已开始',
 }
 
 export function normalizeMaxSeats(raw) {
@@ -41,14 +45,82 @@ export function parseRoomMode(raw) {
   return raw === 'partyGame' ? 'partyGame' : 'chip'
 }
 
-/** Slice A: public stub only; unknown/missing → undercover + lobby. */
+/** Public stub only — strips word/role/pair text. Unknown → undercover + lobby. */
 export function partyStubOf(raw) {
   const src = raw && typeof raw === 'object' ? raw : null
   const gameId =
     typeof src?.gameId === 'string' && src.gameId.trim()
       ? src.gameId.trim()
       : 'undercover'
-  return { gameId, phase: 'lobby' }
+  const phase = src?.phase === 'playing' ? 'playing' : 'lobby'
+  const stub = { gameId, phase }
+  if (phase !== 'playing') return stub
+  if (typeof src.pairId === 'string' && src.pairId.trim()) {
+    stub.pairId = src.pairId.trim()
+  }
+  const n =
+    typeof src.undercoverCount === 'number'
+      ? src.undercoverCount
+      : Number(src.undercoverCount)
+  if (Number.isInteger(n) && n > 0) stub.undercoverCount = n
+  if (Array.isArray(src.seats)) {
+    stub.seats = src.seats
+      .filter((s) => s && typeof s === 'object' && typeof s.seatId === 'string')
+      .map((s) => ({ seatId: s.seatId, hasWord: !!s.hasWord }))
+  }
+  return stub
+}
+
+export function partyHasWord(party, seatId) {
+  if (!party || party.phase !== 'playing') return false
+  return !!party.seats?.find((s) => s.seatId === seatId)?.hasWord
+}
+
+function appendPartySeat(raw, seatId, hasWord) {
+  const party = partyStubOf(raw)
+  if (party.phase !== 'playing') return raw
+  const seats = [...(party.seats || [])]
+  if (seats.some((s) => s.seatId === seatId)) return party
+  seats.push({ seatId, hasWord: !!hasWord })
+  return { ...party, seats }
+}
+
+function sanitizePrivates(raw) {
+  if (!raw || typeof raw !== 'object') return {}
+  const out = {}
+  for (const [seatId, p] of Object.entries(raw)) {
+    if (!p || typeof p !== 'object') continue
+    if (typeof p.word !== 'string' || !p.word) continue
+    out[seatId] = {
+      seatId,
+      word: p.word,
+      role: p.role === 'undercover' ? 'undercover' : 'civilian',
+      pairId: typeof p.pairId === 'string' ? p.pairId : '',
+    }
+  }
+  return out
+}
+
+function sanitizeTokens(raw) {
+  if (!raw || typeof raw !== 'object') return {}
+  const out = {}
+  for (const [seatId, tok] of Object.entries(raw)) {
+    if (typeof tok === 'string' && tok) out[seatId] = tok
+  }
+  return out
+}
+
+/** HTTP / WS / persist-facing snapshot — no words, tokens, or privates. */
+export function publicPersisted(data) {
+  if (!data) return null
+  const mode = parseRoomMode(data.room?.mode)
+  const room = { ...data.room }
+  if (mode === 'partyGame') {
+    room.party = partyStubOf(room.party)
+  } else {
+    delete room.party
+  }
+  return { room, table: data.table }
 }
 
 function optionalPositiveInt(raw) {
@@ -140,7 +212,7 @@ export function stampCreateSettings(room, input) {
     return {
       ...room,
       mode: 'partyGame',
-      party: parsed.party,
+      party: partyStubOf(room.party ?? parsed.party),
       maxSeats: parsed.maxSeats,
       buyInN: 0,
       smallBlind: undefined,
@@ -298,7 +370,6 @@ function normalize(data) {
     delete room.party
   }
   return {
-    ...data,
     room,
     table: {
       ...data.table,
@@ -307,6 +378,8 @@ function normalize(data) {
       ledger: Array.isArray(data.table.ledger) ? data.table.ledger : [],
       settling: !!data.table.settling,
     },
+    partyPrivates: sanitizePrivates(data.partyPrivates),
+    seatTokens: sanitizeTokens(data.seatTokens),
   }
 }
 
@@ -332,9 +405,18 @@ export function createRoomStore() {
   }
 
   function set(data) {
-    const normalized = normalize(data)
-    const key = normalized.room.roomCode.toUpperCase()
-    rooms.set(key, { data: normalized, touchedAt: Date.now() })
+    const key = (data.room?.roomCode || '').toUpperCase()
+    const prev = key ? rooms.get(key)?.data : null
+    const merged = {
+      ...data,
+      partyPrivates: data.partyPrivates ?? prev?.partyPrivates ?? {},
+      seatTokens: data.seatTokens ?? prev?.seatTokens ?? {},
+    }
+    const normalized = normalize(merged)
+    rooms.set(normalized.room.roomCode.toUpperCase(), {
+      data: normalized,
+      touchedAt: Date.now(),
+    })
     return normalized
   }
 
@@ -356,9 +438,14 @@ export function createRoomStore() {
     if (parsed.error) return { error: parsed.error }
     const roomCode = generateRoomCode(rooms)
     const seatId = parsed.seatId || uid('seat')
-    const data = set(emptyPersistedRoom(roomCode, { ...parsed, seatId }))
+    const seatToken = uid('tok')
+    const data = set({
+      ...emptyPersistedRoom(roomCode, { ...parsed, seatId }),
+      seatTokens: { [seatId]: seatToken },
+      partyPrivates: {},
+    })
     return {
-      session: { seatId, name: '', roomCode },
+      session: { seatId, name: '', roomCode, seatToken },
       data,
     }
   }
@@ -425,9 +512,12 @@ export function createRoomStore() {
       return { error: tableFullReason(cap) }
     }
     const seatId = uid('seat')
+    const seatToken = uid('tok')
+    const party = appendPartySeat(existing.room.party, seatId, false)
     const data = set({
       room: {
         ...existing.room,
+        ...(party ? { party } : {}),
         members: [
           ...existing.room.members,
           { seatId, name, isHost: false, connected: true },
@@ -441,8 +531,9 @@ export function createRoomStore() {
           { seatId, name, isHost: false, locked: false, balance: 0, buyIn: 0 },
         ],
       },
+      seatTokens: { ...(existing.seatTokens || {}), [seatId]: seatToken },
     })
-    return { session: { seatId, name, roomCode: code }, data }
+    return { session: { seatId, name, roomCode: code, seatToken }, data }
   }
 
   function fillSeatsToMax(roomCode) {
@@ -465,8 +556,16 @@ export function createRoomStore() {
         buyIn: 0,
       })
     }
+    let party = existing.room.party
+    if (partyStubOf(party).phase === 'playing') {
+      for (const s of seats) {
+        if (!party.seats?.some((p) => p.seatId === s.seatId)) {
+          party = appendPartySeat(party, s.seatId, false)
+        }
+      }
+    }
     return set({
-      room: { ...existing.room, members },
+      room: { ...existing.room, members, ...(party ? { party } : {}) },
       table: { ...existing.table, seats, snapshotAt: nextSnapshotAt(existing) },
     })
   }
@@ -553,6 +652,51 @@ export function createRoomStore() {
       return existing
     }
     return setMemberConnected(roomCode, seatId, true)
+  }
+
+  function startUndercover(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+    if (existing.room.mode !== 'partyGame') return { error: ACK_REASONS.INVALID }
+    if (fromSeatId !== existing.room.hostSeatId) return { error: ACK_REASONS.NOT_HOST }
+    if (!seatToken || existing.seatTokens?.[fromSeatId] !== seatToken) {
+      return { error: ACK_REASONS.INVALID }
+    }
+    const party = partyStubOf(existing.room.party)
+    if (party.phase === 'playing') return { error: ACK_REASONS.ALREADY_STARTED }
+    const connected = existing.room.members.filter((m) => m.connected)
+    if (connected.length < 3) return { error: ACK_REASONS.NEED_THREE_ONLINE }
+    const seatIds = existing.room.members.map((m) => m.seatId)
+    if (seatIds.length < 3) return { error: ACK_REASONS.NEED_THREE_ONLINE }
+    const dealt = dealRound(seatIds)
+    const partyPrivates = {}
+    for (const p of dealt.privates) partyPrivates[p.seatId] = p
+    const data = set({
+      ...existing,
+      room: {
+        ...existing.room,
+        party: {
+          gameId: party.gameId || 'undercover',
+          phase: 'playing',
+          pairId: dealt.pairId,
+          undercoverCount: dealt.undercoverCount,
+          seats: seatIds.map((seatId) => ({ seatId, hasWord: true })),
+        },
+      },
+      table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+      partyPrivates,
+    })
+    return { data, private: partyPrivates[fromSeatId] || null }
+  }
+
+  function getSeatPrivate(roomCode, seatId, seatToken) {
+    const existing = get(roomCode)
+    if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+    if (!seatId || !seatToken || existing.seatTokens?.[seatId] !== seatToken) {
+      return { private: null, hasWord: false }
+    }
+    const priv = existing.partyPrivates?.[seatId] || null
+    return { private: priv, hasWord: !!priv }
   }
 
   function applyChipOp(op) {
@@ -1034,6 +1178,8 @@ export function createRoomStore() {
     resumeAsHost,
     restoreSeat,
     applyChipOp,
+    startUndercover,
+    getSeatPrivate,
     sweep,
     exportAll,
     importAll,

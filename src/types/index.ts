@@ -5,15 +5,34 @@ export type Phase = 'lobby' | 'playing' | 'paused'
 /** Room product. Omitted / unknown → chip (legacy rooms). */
 export type RoomMode = 'chip' | 'partyGame'
 
-/** Slice A public stub only. Later slices may add dealing / reveal phases. */
-export type PartyPhase = 'lobby'
+/** Slice B: lobby | playing. Reveal / next-round is Slice C. */
+export type PartyPhase = 'lobby' | 'playing'
 
 export type PartyGameId = 'undercover'
 
-/** Public party fields — no private words. */
+export type UndercoverRole = 'civilian' | 'undercover'
+
+/** Per-seat word+role. Never placed on the shared room snapshot. */
+export interface SeatPrivate {
+  seatId: string
+  word: string
+  role: UndercoverRole
+  pairId: string
+}
+
+/** Public seat flag only — no role/word. */
+export interface PartyPublicSeat {
+  seatId: string
+  hasWord: boolean
+}
+
+/** Public party fields — pairId only, never word text. */
 export interface PartyStub {
   gameId: string
   phase: PartyPhase
+  pairId?: string
+  undercoverCount?: number
+  seats?: PartyPublicSeat[]
 }
 
 export type ChipOpType =
@@ -106,7 +125,7 @@ export interface RoomState {
   bigBlind?: number
   /** Omitted → chip. */
   mode?: RoomMode
-  /** Present when mode is partyGame. Slice A: phase always lobby. */
+  /** Present when mode is partyGame. */
   party?: PartyStub
 }
 
@@ -237,15 +256,63 @@ export function isPartyGame(
   return !!room && room.mode === 'partyGame'
 }
 
-/** Slice A: public stub only; unknown/missing → undercover + lobby. */
+function asPartyPhase(raw: unknown): PartyPhase {
+  return raw === 'playing' ? 'playing' : 'lobby'
+}
+
+/** Public stub only — strips word/role/pair text. Unknown → undercover + lobby. */
 export function partyStubOf(raw: unknown): PartyStub {
-  const src =
-    raw && typeof raw === 'object' ? (raw as { gameId?: unknown }) : null
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
   const gameId =
     typeof src?.gameId === 'string' && src.gameId.trim()
       ? src.gameId.trim()
       : 'undercover'
-  return { gameId, phase: 'lobby' }
+  const phase = asPartyPhase(src?.phase)
+  const stub: PartyStub = { gameId, phase }
+  if (phase !== 'playing') return stub
+  if (typeof src?.pairId === 'string' && src.pairId.trim()) {
+    stub.pairId = src.pairId.trim()
+  }
+  const n = typeof src?.undercoverCount === 'number' ? src.undercoverCount : Number(src?.undercoverCount)
+  if (Number.isInteger(n) && n > 0) stub.undercoverCount = n
+  if (Array.isArray(src?.seats)) {
+    stub.seats = src.seats
+      .filter((s): s is { seatId?: unknown; hasWord?: unknown } => !!s && typeof s === 'object')
+      .map((s) => ({
+        seatId: typeof s.seatId === 'string' ? s.seatId : '',
+        hasWord: !!s.hasWord,
+      }))
+      .filter((s) => s.seatId)
+  }
+  return stub
+}
+
+export function partyHasWord(
+  party: PartyStub | null | undefined,
+  seatId: string,
+): boolean {
+  if (!party || party.phase !== 'playing') return false
+  return !!party.seats?.find((s) => s.seatId === seatId)?.hasWord
+}
+
+/** Drop secrets if a payload leaked them into the client cache. */
+export function publicPersistedRoom<T extends { room: RoomState; table: unknown }>(
+  data: T | null | undefined,
+): T | null {
+  if (!data) return null
+  const rest = { ...data } as T & {
+    partyPrivates?: unknown
+    seatTokens?: unknown
+  }
+  delete rest.partyPrivates
+  delete rest.seatTokens
+  const room = { ...rest.room }
+  if (parseRoomMode(room.mode) === 'partyGame') {
+    room.party = partyStubOf(room.party)
+  } else {
+    delete room.party
+  }
+  return { ...rest, room }
 }
 
 /** Human Chinese fail copy only — no tech error codes. */
@@ -272,6 +339,8 @@ export const ACK_REASONS = {
   POSITIVE_INT: '请输入正整数',
   NOTHING_TO_UNDO: '没有可撤销的记录',
   TABLE_SETTLING: '结算中，请先返回桌面',
+  NEED_THREE_ONLINE: '至少 3 人在线才能开始',
+  ALREADY_STARTED: '本局已开始',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */
@@ -409,7 +478,7 @@ export function stampCreateSettings<
     return {
       ...room,
       mode: 'partyGame',
-      party: parsed.party,
+      party: partyStubOf(room.party ?? parsed.party),
       maxSeats: parsed.maxSeats,
       buyInN: 0,
       smallBlind: undefined,

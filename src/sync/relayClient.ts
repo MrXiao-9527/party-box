@@ -3,6 +3,7 @@
  * Enabled when VITE_RELAY_URL is set (e.g. http://127.0.0.1:45322).
  */
 
+import type { SeatPrivate } from '../games/undercover/deal'
 import type { ChipAck, ChipOp, Phase, RoomCreateInput, TableSnapshot } from '../types'
 import { ACK_REASONS } from '../types'
 import type { PersistedRoom, Session } from '../store/localRoom'
@@ -74,7 +75,13 @@ async function api<T>(
 
 function cache(data: PersistedRoom | null | undefined): PersistedRoom | null {
   if (!data) return null
-  const normalized = saveRoom(data)
+  const { partyPrivates: _p, seatTokens: _t, ...safe } = data as PersistedRoom & {
+    partyPrivates?: unknown
+    seatTokens?: unknown
+  }
+  void _p
+  void _t
+  const normalized = saveRoom(safe)
   notifyRoomUpdate(normalized.room.roomCode, normalized)
   return normalized
 }
@@ -359,10 +366,66 @@ export async function relayRequestSnapshot(
   return data?.table ?? null
 }
 
+export async function relayStartUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<
+  | { data: PersistedRoom; private: SeatPrivate | null }
+  | { error: string }
+> {
+  const result = await api<{ data: PersistedRoom; private: SeatPrivate | null }>(
+    `/rooms/${encodeURIComponent(roomCode)}/start-undercover`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ fromSeatId, seatToken }),
+    },
+  )
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return { error: errorFromBody(result.body, ACK_REASONS.INVALID) }
+  }
+  return {
+    data: cache(result.body.data) ?? result.body.data,
+    private: result.body.private ?? null,
+  }
+}
+
+export async function relayGetSeatPrivate(
+  roomCode: string,
+  seatId: string,
+  seatToken?: string,
+): Promise<{ private: SeatPrivate | null; hasWord: boolean } | { error: string }> {
+  const result = await api<{ private: SeatPrivate | null; hasWord: boolean }>(
+    `/rooms/${encodeURIComponent(roomCode)}/seat-private`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ seatId, seatToken }),
+    },
+  )
+  if (!result.ok) {
+    if (result.status === 404) {
+      return { error: errorFromBody(result.body, ACK_REASONS.ROOM_MISSING) }
+    }
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return { error: errorFromBody(result.body, ACK_REASONS.INVALID) }
+  }
+  return result.body
+}
+
 /** Live room subscription; writes through to localStorage cache. */
 export function subscribeRelayRoom(
   roomCode: string,
   onUpdate?: (data: PersistedRoom | null) => void,
+  opts?: {
+    seatId?: string
+    seatToken?: string
+    onPrivate?: (priv: SeatPrivate | null) => void
+  },
 ): () => void {
   const code = roomCode.toUpperCase()
   let closed = false
@@ -372,13 +435,21 @@ export function subscribeRelayRoom(
 
   const connect = () => {
     if (closed) return
-    const url = `${wsBase()}/ws?room=${encodeURIComponent(code)}`
+    const params = new URLSearchParams({ room: code })
+    if (opts?.seatId) params.set('seatId', opts.seatId)
+    if (opts?.seatToken) params.set('seatToken', opts.seatToken)
+    const url = `${wsBase()}/ws?${params.toString()}`
     ws = new WebSocket(url)
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(String(ev.data)) as {
           type: string
-          data: PersistedRoom | null
+          data?: PersistedRoom | null
+          private?: SeatPrivate | null
+        }
+        if (msg.type === 'seatPrivate') {
+          opts?.onPrivate?.(msg.private ?? null)
+          return
         }
         if (msg.type !== 'room') return
         if (msg.data) {

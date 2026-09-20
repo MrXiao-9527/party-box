@@ -15,7 +15,7 @@
 
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
-import { createRoomStore, ACK_REASONS } from './roomLogic.mjs'
+import { createRoomStore, ACK_REASONS, publicPersisted } from './roomLogic.mjs'
 import { dataDir, loadSnapshot, saveSnapshot, snapshotPath } from './persist.mjs'
 
 const PORT = Number(process.env.PORT || 45322)
@@ -99,13 +99,26 @@ function readBody(req) {
   })
 }
 
+function sendPrivate(ws, data) {
+  if (!ws.seatId || !data?.seatTokens || data.seatTokens[ws.seatId] !== ws.seatToken) {
+    return
+  }
+  const priv = data.partyPrivates?.[ws.seatId] ?? null
+  if (ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'seatPrivate', private: priv }))
+  }
+}
+
 function broadcast(roomCode, data) {
   const key = roomCode.toUpperCase()
   const set = subscribers.get(key)
   if (!set || set.size === 0) return
-  const msg = JSON.stringify({ type: 'room', data })
+  const msg = JSON.stringify({ type: 'room', data: publicPersisted(data) })
   for (const ws of set) {
-    if (ws.readyState === 1) ws.send(msg)
+    if (ws.readyState === 1) {
+      ws.send(msg)
+      sendPrivate(ws, data)
+    }
   }
 }
 
@@ -146,7 +159,10 @@ async function handle(req, res) {
         return
       }
       afterMutation(result.data)
-      sendJson(res, 201, result)
+      sendJson(res, 201, {
+        session: result.session,
+        data: publicPersisted(result.data),
+      })
       return
     }
 
@@ -162,7 +178,7 @@ async function handle(req, res) {
           return
         }
         schedulePersist()
-        sendJson(res, 200, { data })
+        sendJson(res, 200, { data: publicPersisted(data) })
         return
       }
 
@@ -182,7 +198,7 @@ async function handle(req, res) {
           return
         }
         afterMutation(data)
-        sendJson(res, 200, { data })
+        sendJson(res, 200, { data: publicPersisted(data) })
         return
       }
 
@@ -194,7 +210,10 @@ async function handle(req, res) {
           return
         }
         afterMutation(result.data)
-        sendJson(res, 200, result)
+        sendJson(res, 200, {
+          session: result.session,
+          data: publicPersisted(result.data),
+        })
         return
       }
 
@@ -206,7 +225,7 @@ async function handle(req, res) {
           return
         }
         afterMutation(data)
-        sendJson(res, 200, { data })
+        sendJson(res, 200, { data: publicPersisted(data) })
         return
       }
 
@@ -218,7 +237,7 @@ async function handle(req, res) {
           return
         }
         afterMutation(data)
-        sendJson(res, 200, { data })
+        sendJson(res, 200, { data: publicPersisted(data) })
         return
       }
 
@@ -230,7 +249,7 @@ async function handle(req, res) {
           return
         }
         afterMutation(data)
-        sendJson(res, 200, { data })
+        sendJson(res, 200, { data: publicPersisted(data) })
         return
       }
 
@@ -246,7 +265,7 @@ async function handle(req, res) {
           return
         }
         afterMutation(result)
-        sendJson(res, 200, { data: result })
+        sendJson(res, 200, { data: publicPersisted(result) })
         return
       }
 
@@ -257,7 +276,7 @@ async function handle(req, res) {
           return
         }
         afterMutation(result)
-        sendJson(res, 200, { data: result })
+        sendJson(res, 200, { data: publicPersisted(result) })
         return
       }
 
@@ -269,7 +288,33 @@ async function handle(req, res) {
           return
         }
         afterMutation(data)
-        sendJson(res, 200, { data })
+        sendJson(res, 200, { data: publicPersisted(data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'start-undercover') {
+        const body = await readBody(req)
+        const result = store.startUndercover(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, {
+          data: publicPersisted(result.data),
+          private: result.private,
+        })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'seat-private') {
+        const body = await readBody(req)
+        const result = store.getSeatPrivate(code, body.seatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, result.error === ACK_REASONS.ROOM_MISSING ? 404 : 400, result)
+          return
+        }
+        sendJson(res, 200, result)
         return
       }
 
@@ -277,7 +322,10 @@ async function handle(req, res) {
         const body = await readBody(req)
         const result = store.applyChipOp({ ...body, roomCode: code })
         if (result.data) afterMutation(result.data)
-        sendJson(res, 200, result)
+        sendJson(res, 200, {
+          ack: result.ack,
+          data: publicPersisted(result.data),
+        })
         return
       }
     }
@@ -311,7 +359,14 @@ wss.on('connection', (ws, req) => {
   set.add(ws)
 
   const data = store.get(roomCode)
-  ws.send(JSON.stringify({ type: 'room', data }))
+  const seatId = url.searchParams.get('seatId') || ''
+  const seatToken = url.searchParams.get('seatToken') || ''
+  if (seatId && seatToken && data?.seatTokens?.[seatId] === seatToken) {
+    ws.seatId = seatId
+    ws.seatToken = seatToken
+  }
+  ws.send(JSON.stringify({ type: 'room', data: publicPersisted(data) }))
+  sendPrivate(ws, data)
 
   ws.on('close', () => {
     set.delete(ws)

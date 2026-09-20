@@ -11,15 +11,19 @@ import {
   joinRoom as localJoinRoom,
   loadRoom,
   loadCreateSettings,
+  loadSession,
   pickNewHost as localPickNewHost,
   restoreSeat as localRestoreSeat,
   resumeAsHost as localResumeAsHost,
   saveSession,
   setMemberConnected as localSetMemberConnected,
   setPhase as localSetPhase,
+  startUndercover as localStartUndercover,
+  getSeatPrivate as localGetSeatPrivate,
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
+import type { SeatPrivate } from '../games/undercover/deal'
 import type { Phase, RoomCreateInput } from '../types'
 import { ACK_REASONS } from '../types'
 import {
@@ -42,6 +46,8 @@ import {
   relayResumeAsHost,
   relaySetMemberConnected,
   relaySetPhase,
+  relayStartUndercover,
+  relayGetSeatPrivate,
 } from './relayClient'
 
 export { isRelayEnabled, loadRoom, RelayNetworkError }
@@ -151,7 +157,15 @@ export async function claimHostSeat(
     name,
     loadCreateSettings(roomCode),
   )
-  if (data) saveSession({ seatId, name, roomCode: data.room.roomCode })
+  if (data) {
+    const prev = loadSession()
+    saveSession({
+      seatId,
+      name,
+      roomCode: data.room.roomCode,
+      seatToken: prev?.seatToken,
+    })
+  }
   return data
 }
 
@@ -214,6 +228,27 @@ export async function restoreSeat(
 ): Promise<PersistedRoom | null> {
   if (!isRelayEnabled()) return localRestoreSeat(roomCode, seatId)
   return relayRestoreSeat(roomCode, seatId)
+}
+
+export async function startUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<
+  | { data: PersistedRoom; private: SeatPrivate | null }
+  | { error: string }
+> {
+  if (!isRelayEnabled()) return localStartUndercover(roomCode, fromSeatId, seatToken)
+  return relayStartUndercover(roomCode, fromSeatId, seatToken)
+}
+
+export async function fetchSeatPrivate(
+  roomCode: string,
+  seatId: string,
+  seatToken?: string,
+): Promise<{ private: SeatPrivate | null; hasWord: boolean } | { error: string }> {
+  if (!isRelayEnabled()) return localGetSeatPrivate(roomCode, seatId, seatToken)
+  return relayGetSeatPrivate(roomCode, seatId, seatToken)
 }
 
 export async function deleteRoom(roomCode: string): Promise<void> {

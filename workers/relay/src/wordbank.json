@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "gameId": "undercover",
+  "note": "Copy of src/games/undercover/wordbank.json — keep in sync. Self-authored; do not scrape.",
+  "categories": [
+    {
+      "id": "food",
+      "name": "饮食",
+      "pairs": [
+        { "id": "p01", "civilian": "牛奶", "undercover": "豆浆" },
+        { "id": "p02", "civilian": "包子", "undercover": "馒头" },
+        { "id": "p03", "civilian": "可乐", "undercover": "雪碧" },
+        { "id": "p04", "civilian": "火锅", "undercover": "烧烤" },
+        { "id": "p05", "civilian": "酸奶", "undercover": "奶酪" },
+        { "id": "p06", "civilian": "饺子", "undercover": "馄饨" }
+      ]
+    },
+    {
+      "id": "life",
+      "name": "生活",
+      "pairs": [
+        { "id": "p07", "civilian": "拖鞋", "undercover": "凉鞋" },
+        { "id": "p08", "civilian": "雨伞", "undercover": "雨衣" },
+        { "id": "p09", "civilian": "被子", "undercover": "毯子" },
+        { "id": "p10", "civilian": "牙膏", "undercover": "牙刷" },
+        { "id": "p11", "civilian": "洗发水", "undercover": "沐浴露" },
+        { "id": "p12", "civilian": "毛巾", "undercover": "手帕" }
+      ]
+    },
+    {
+      "id": "place",
+      "name": "地点",
+      "pairs": [
+        { "id": "p13", "civilian": "公园", "undercover": "广场" },
+        { "id": "p14", "civilian": "地铁", "undercover": "公交" },
+        { "id": "p15", "civilian": "图书馆", "undercover": "书店" },
+        { "id": "p16", "civilian": "超市", "undercover": "便利店" },
+        { "id": "p17", "civilian": "电影院", "undercover": "剧院" },
+        { "id": "p18", "civilian": "海边", "undercover": "湖边" }
+      ]
+    },
+    {
+      "id": "job",
+      "name": "职业",
+      "pairs": [
+        { "id": "p19", "civilian": "医生", "undercover": "护士" },
+        { "id": "p20", "civilian": "老师", "undercover": "教练" },
+        { "id": "p21", "civilian": "警察", "undercover": "保安" },
+        { "id": "p22", "civilian": "厨师", "undercover": "服务员" },
+        { "id": "p23", "civilian": "司机", "undercover": "导游" },
+        { "id": "p24", "civilian": "记者", "undercover": "作家" }
+      ]
+    },
+    {
+      "id": "thing",
+      "name": "物品",
+      "pairs": [
+        { "id": "p25", "civilian": "手机", "undercover": "平板" },
+        { "id": "p26", "civilian": "眼镜", "undercover": "墨镜" },
+        { "id": "p27", "civilian": "背包", "undercover": "手提包" },
+        { "id": "p28", "civilian": "铅笔", "undercover": "钢笔" },
+        { "id": "p29", "civilian": "闹钟", "undercover": "手表" },
+        { "id": "p30", "civilian": "月亮", "undercover": "星星" }
+      ]
+    }
+  ]
+}

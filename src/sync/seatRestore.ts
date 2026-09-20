@@ -12,6 +12,7 @@ export interface SeatIdentity {
   seatId: string
   name: string
   role: SeatRole
+  seatToken?: string
 }
 
 export type RestoreDecision =
