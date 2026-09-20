@@ -16,13 +16,6 @@ const TOOLS = [
     ready: true,
   },
   {
-    id: 'random',
-    title: '随机工具',
-    subtitle: '骰子 / 抽签 / 转盘',
-    badge: '即将开放',
-    ready: false,
-  },
-  {
     id: 'timer',
     title: '计时回合',
     subtitle: '倒计时 · 轮流计时',
@@ -44,7 +37,9 @@ export function HomePage() {
   const navigate = useNavigate()
   const [joinCode, setJoinCode] = useState('')
   const [showJoin, setShowJoin] = useState(false)
+  const [showParty, setShowParty] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  const [partyMaxSeats, setPartyMaxSeats] = useState('8')
   const [buyInN, setBuyInN] = useState('')
   const [maxSeats, setMaxSeats] = useState('8')
   const [smallBlind, setSmallBlind] = useState('')
@@ -68,9 +63,48 @@ export function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  const confirmParty = () => {
+    const parsed = parseRoomCreate({
+      maxSeats: partyMaxSeats,
+      mode: 'partyGame',
+      gameId: 'undercover',
+    })
+    if (!parsed.ok) {
+      setCreateError(parsed.error)
+      toast(parsed.error)
+      return
+    }
+    if (busyRef.current) return
+    busyRef.current = true
+    setBusy(true)
+    setCreateError('')
+    void (async () => {
+      try {
+        const result = await createEmptyHostRoom({
+          maxSeats: parsed.maxSeats,
+          mode: 'partyGame',
+          gameId: 'undercover',
+        })
+        if ('error' in result) {
+          setCreateError(result.error)
+          toast(result.error)
+          return
+        }
+        navigate(`/r/${result.session.roomCode}`)
+      } catch {
+        const msg = ACK_REASONS.RELAY_UNREACHABLE
+        setCreateError(msg)
+        toast(msg)
+      } finally {
+        busyRef.current = false
+        setBusy(false)
+      }
+    })()
+  }
+
   const confirmCreate = () => {
     const parsed = parseRoomCreate(
-      { buyInN, maxSeats, smallBlind, bigBlind },
+      { buyInN, maxSeats, smallBlind, bigBlind, mode: 'chip' },
       { strictBuyIn: true },
     )
     if (!parsed.ok) {
@@ -89,6 +123,7 @@ export function HomePage() {
           maxSeats: parsed.maxSeats,
           smallBlind: parsed.smallBlind,
           bigBlind: parsed.bigBlind,
+          mode: 'chip',
         })
         if ('error' in result) {
           setCreateError(result.error)
@@ -143,24 +178,26 @@ export function HomePage() {
       <header className="home-hero">
         <p className="brand-en">Party Box</p>
         <h1 className="brand">聚会盒子</h1>
-        <p className="tagline">开一桌，筹码、计时、分账随身带</p>
+        <p className="tagline">局桌开房；筹码桌仍可进房</p>
         <div className="cta-row">
           <button
             type="button"
             className="btn primary"
             disabled={busy}
-            aria-busy={busy}
+            aria-busy={busy && showParty}
             onClick={() => {
               setShowJoin(false)
-              setShowCreate((v) => !v)
+              setShowCreate(false)
+              setShowParty((v) => !v)
             }}
           >
-            {busy ? '开桌中…' : '开一桌'}
+            {busy && showParty ? '开局中…' : '局桌'}
           </button>
           <button
             type="button"
             className="btn ghost"
             onClick={() => {
+              setShowParty(false)
               setShowCreate(false)
               setShowJoin((v) => !v)
             }}
@@ -168,6 +205,54 @@ export function HomePage() {
             加入
           </button>
         </div>
+        <button
+          type="button"
+          className="btn ghost compact chip-entry"
+          data-chip-create="1"
+          disabled={busy}
+          aria-busy={busy && showCreate}
+          onClick={() => {
+            setShowJoin(false)
+            setShowParty(false)
+            setShowCreate((v) => !v)
+          }}
+        >
+          {busy && showCreate ? '开桌中…' : '开一桌'}
+        </button>
+        {showParty && (
+          <form
+            className="create-room-form"
+            data-create-party="1"
+            onSubmit={(e) => {
+              e.preventDefault()
+              if (!busy) confirmParty()
+            }}
+          >
+            <label>
+              人数
+              <input
+                className="input"
+                name="maxSeats"
+                type="number"
+                inputMode="numeric"
+                step={1}
+                value={partyMaxSeats}
+                onChange={(e) => setPartyMaxSeats(e.target.value)}
+                disabled={busy}
+              />
+            </label>
+            <p className="hint">2–8 人 · 谁是卧底大厅（不发词）</p>
+            <button
+              type="submit"
+              className="btn primary wide"
+              disabled={busy}
+              aria-busy={busy}
+            >
+              {busy ? '开局中…' : '确认'}
+            </button>
+            {createError && <p className="error">{createError}</p>}
+          </form>
+        )}
         {showCreate && (
           <form
             className="create-room-form"

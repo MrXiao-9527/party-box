@@ -1,34 +1,33 @@
 import { JoinInvite } from '../components/JoinInvite'
 import type { RoomState } from '../types'
-import { normalizeMaxSeats, tableFullReason } from '../types'
+import { normalizeMaxSeats, partyStubOf, tableFullReason } from '../types'
 import type { Session } from '../store/localRoom'
 
-interface LobbyProps {
+interface PartyLobbyProps {
   room: RoomState
   session: Session
-  isHost: boolean
-  starting?: boolean
-  onStart: () => void
 }
 
-export function Lobby({
-  room,
-  session,
-  isHost,
-  starting = false,
-  onStart,
-}: LobbyProps) {
+/** Slice A shell: seats / invite / presence. No ChipTable, no dealing. */
+export function PartyLobby({ room, session }: PartyLobbyProps) {
   const cap = normalizeMaxSeats(room.maxSeats)
   const full = room.members.length >= cap
+  const party = partyStubOf(room.party)
 
   return (
-    <div className="page lobby" data-mode="chip">
+    <div
+      className="page lobby"
+      data-mode="partyGame"
+      data-party-phase={party.phase}
+      data-game-id={party.gameId}
+    >
       <header className="lobby-header">
-        <p className="eyebrow">等候开桌</p>
+        <p className="eyebrow">局桌 · 谁是卧底</p>
         <h1>房间 {room.roomCode.toUpperCase()}</h1>
+        <p className="hint">大厅 · 尚未发词</p>
       </header>
 
-      <JoinInvite room={room} showSettings />
+      <JoinInvite room={room} />
 
       <section className="member-list" aria-label="成员">
         <h2>
@@ -37,32 +36,27 @@ export function Lobby({
         {full && <p className="hint">{tableFullReason(cap)}</p>}
         <ul>
           {room.members.map((m) => (
-            <li key={m.seatId} className={m.seatId === session.seatId ? 'self' : ''}>
+            <li
+              key={m.seatId}
+              className={m.seatId === session.seatId ? 'self' : ''}
+            >
               <span className="member-name">
                 {m.name}
                 {m.seatId === session.seatId ? '（我）' : ''}
               </span>
               {m.isHost && <span className="host-badge">桌主</span>}
-              {!m.connected && <span className="offline-dot">离线</span>}
+              {m.connected ? (
+                <span className="online-dot">在线</span>
+              ) : (
+                <span className="offline-dot">离线</span>
+              )}
             </li>
           ))}
         </ul>
       </section>
 
       <footer className="lobby-footer">
-        {isHost ? (
-          <button
-            type="button"
-            className="btn primary wide"
-            disabled={starting}
-            aria-busy={starting}
-            onClick={onStart}
-          >
-            {starting ? '开桌中…' : '开桌'}
-          </button>
-        ) : (
-          <p className="waiting">等待桌主开桌…</p>
-        )}
+        <p className="waiting">等待开始（本切片不发词）</p>
       </footer>
     </div>
   )

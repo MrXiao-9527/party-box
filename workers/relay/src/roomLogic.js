@@ -37,6 +37,20 @@ export function tableFullReason(maxSeats = MAX_SEATS) {
   return `本桌已满（最多${normalizeMaxSeats(maxSeats)}人）`
 }
 
+export function parseRoomMode(raw) {
+  return raw === 'partyGame' ? 'partyGame' : 'chip'
+}
+
+/** Slice A: public stub only; unknown/missing → undercover + lobby. */
+export function partyStubOf(raw) {
+  const src = raw && typeof raw === 'object' ? raw : null
+  const gameId =
+    typeof src?.gameId === 'string' && src.gameId.trim()
+      ? src.gameId.trim()
+      : 'undercover'
+  return { gameId, phase: 'lobby' }
+}
+
 function optionalPositiveInt(raw) {
   if (raw === undefined || raw === null || raw === '') {
     return { ok: true, value: undefined }
@@ -46,19 +60,12 @@ function optionalPositiveInt(raw) {
   return { ok: true, value: n }
 }
 
-/** Create-room body. Omitted buy-in → 0; omitted seats → 8. Invalid 1/9 / ≤0 rejected. */
+/** Create-room body. Omitted buy-in → 0; omitted seats → 8. Invalid 1/9 / ≤0 rejected.
+ * mode=partyGame skips buy-in/blinds.
+ */
 export function parseRoomCreate(input = {}) {
   const src = input && typeof input === 'object' ? input : {}
-  const buyRaw = src.buyInN
-  const buyMissing = buyRaw === undefined || buyRaw === null || buyRaw === ''
-  let buyInN = 0
-  if (!buyMissing) {
-    const n = typeof buyRaw === 'number' ? buyRaw : Number(buyRaw)
-    if (!Number.isInteger(n) || n <= 0) {
-      return { error: ACK_REASONS.POSITIVE_INT }
-    }
-    buyInN = n
-  }
+  const mode = parseRoomMode(src.mode)
   const seatsRaw = src.maxSeats
   const seatsMissing =
     seatsRaw === undefined || seatsRaw === null || seatsRaw === ''
@@ -70,12 +77,34 @@ export function parseRoomCreate(input = {}) {
     }
     maxSeats = n
   }
+  const seatId =
+    typeof src.seatId === 'string' && src.seatId ? src.seatId : undefined
+
+  if (mode === 'partyGame') {
+    return {
+      ok: true,
+      buyInN: 0,
+      maxSeats,
+      seatId,
+      mode,
+      party: partyStubOf(src),
+    }
+  }
+
+  const buyRaw = src.buyInN
+  const buyMissing = buyRaw === undefined || buyRaw === null || buyRaw === ''
+  let buyInN = 0
+  if (!buyMissing) {
+    const n = typeof buyRaw === 'number' ? buyRaw : Number(buyRaw)
+    if (!Number.isInteger(n) || n <= 0) {
+      return { error: ACK_REASONS.POSITIVE_INT }
+    }
+    buyInN = n
+  }
   const small = optionalPositiveInt(src.smallBlind)
   if (!small.ok) return { error: ACK_REASONS.POSITIVE_INT }
   const big = optionalPositiveInt(src.bigBlind)
   if (!big.ok) return { error: ACK_REASONS.POSITIVE_INT }
-  const seatId =
-    typeof src.seatId === 'string' && src.seatId ? src.seatId : undefined
   return {
     ok: true,
     buyInN,
@@ -83,13 +112,15 @@ export function parseRoomCreate(input = {}) {
     smallBlind: small.value,
     bigBlind: big.value,
     seatId,
+    mode,
   }
 }
 
-/** Body carries a real create snapshot, not omitted defaults (buyIn 0 / seats 8). */
+/** Body carries a real create snapshot, not omitted defaults (buyIn 0 / seats 8 / chip). */
 export function hasCreateSnapshot(parsed) {
   if (!parsed || !parsed.ok) return false
   return (
+    parsed.mode === 'partyGame' ||
     parsed.buyInN > 0 ||
     parsed.maxSeats !== MAX_SEATS ||
     parsed.smallBlind != null ||
@@ -99,12 +130,23 @@ export function hasCreateSnapshot(parsed) {
 
 /**
  * Overlay create-room snapshot onto room when `input` includes it.
- * Repairs rooms whose POST /rooms dropped buyInN / maxSeats / blinds.
+ * Repairs rooms whose POST /rooms dropped buyInN / maxSeats / blinds / mode.
  */
 export function stampCreateSettings(room, input) {
   if (!input || typeof input !== 'object') return room
   const parsed = parseRoomCreate(input)
   if (!hasCreateSnapshot(parsed)) return room
+  if (parsed.mode === 'partyGame') {
+    return {
+      ...room,
+      mode: 'partyGame',
+      party: parsed.party,
+      maxSeats: parsed.maxSeats,
+      buyInN: 0,
+      smallBlind: undefined,
+      bigBlind: undefined,
+    }
+  }
   return {
     ...room,
     buyInN: parsed.buyInN,
@@ -155,6 +197,38 @@ function uid(prefix) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`
 }
 
+export function emptyPersistedRoom(roomCode, parsed) {
+  const now = Date.now()
+  const seatId = parsed.seatId || uid('seat')
+  const mode = parsed.mode === 'partyGame' ? 'partyGame' : 'chip'
+  const room = {
+    roomCode,
+    hostSeatId: seatId,
+    phase: 'lobby',
+    mode,
+    maxSeats: parsed.maxSeats,
+    buyInN: mode === 'partyGame' ? 0 : parsed.buyInN,
+    members: [],
+  }
+  if (mode === 'partyGame') {
+    room.party = parsed.party || partyStubOf(parsed)
+  } else {
+    if (parsed.smallBlind != null) room.smallBlind = parsed.smallBlind
+    if (parsed.bigBlind != null) room.bigBlind = parsed.bigBlind
+  }
+  return {
+    room,
+    table: {
+      snapshotAt: now,
+      denoms: [...DEFAULT_DENOMS],
+      seats: [],
+      pot: 0,
+      ledger: [],
+      settling: false,
+    },
+  }
+}
+
 export function generateRoomCode(existing) {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
   for (let attempt = 0; attempt < 40; attempt++) {
@@ -194,24 +268,38 @@ function undoPlusBuyIn(seat, delta) {
 
 function normalize(data) {
   const maxSeats = normalizeMaxSeats(data.room.maxSeats)
-  const buyInN = normalizeBuyIn(data.room.buyInN)
-  const smallBlind = optionalPositiveInt(data.room.smallBlind).ok
-    ? optionalPositiveInt(data.room.smallBlind).value
-    : undefined
-  const bigBlind = optionalPositiveInt(data.room.bigBlind).ok
-    ? optionalPositiveInt(data.room.bigBlind).value
-    : undefined
+  const mode = parseRoomMode(data.room.mode)
+  const buyInN = mode === 'partyGame' ? 0 : normalizeBuyIn(data.room.buyInN)
+  const smallBlind =
+    mode === 'partyGame'
+      ? undefined
+      : optionalPositiveInt(data.room.smallBlind).ok
+        ? optionalPositiveInt(data.room.smallBlind).value
+        : undefined
+  const bigBlind =
+    mode === 'partyGame'
+      ? undefined
+      : optionalPositiveInt(data.room.bigBlind).ok
+        ? optionalPositiveInt(data.room.bigBlind).value
+        : undefined
+  const room = {
+    ...data.room,
+    roomCode: data.room.roomCode.toUpperCase(),
+    maxSeats,
+    buyInN,
+    smallBlind,
+    bigBlind,
+    mode,
+    members: data.room.members.slice(0, maxSeats),
+  }
+  if (mode === 'partyGame') {
+    room.party = partyStubOf(data.room.party || data.room)
+  } else {
+    delete room.party
+  }
   return {
     ...data,
-    room: {
-      ...data.room,
-      roomCode: data.room.roomCode.toUpperCase(),
-      maxSeats,
-      buyInN,
-      smallBlind,
-      bigBlind,
-      members: data.room.members.slice(0, maxSeats),
-    },
+    room,
     table: {
       ...data.table,
       seats: data.table.seats.slice(0, maxSeats).map(normalizeSeat),
@@ -268,27 +356,7 @@ export function createRoomStore() {
     if (parsed.error) return { error: parsed.error }
     const roomCode = generateRoomCode(rooms)
     const seatId = parsed.seatId || uid('seat')
-    const now = Date.now()
-    const data = set({
-      room: {
-        roomCode,
-        hostSeatId: seatId,
-        phase: 'lobby',
-        maxSeats: parsed.maxSeats,
-        buyInN: parsed.buyInN,
-        smallBlind: parsed.smallBlind,
-        bigBlind: parsed.bigBlind,
-        members: [],
-      },
-      table: {
-        snapshotAt: now,
-        denoms: [...DEFAULT_DENOMS],
-        seats: [],
-        pot: 0,
-        ledger: [],
-        settling: false,
-      },
-    })
+    const data = set(emptyPersistedRoom(roomCode, { ...parsed, seatId }))
     return {
       session: { seatId, name: '', roomCode },
       data,
@@ -501,6 +569,17 @@ export function createRoomStore() {
           opId: op.opId,
           ok: false,
           reason: ACK_REASONS.TABLE_PAUSED,
+          snapshotAt: existing.table.snapshotAt,
+        },
+        data: existing,
+      }
+    }
+    if (existing.room.mode === 'partyGame') {
+      return {
+        ack: {
+          opId: op.opId,
+          ok: false,
+          reason: ACK_REASONS.INVALID,
           snapshotAt: existing.table.snapshotAt,
         },
         data: existing,
