@@ -19,6 +19,8 @@ import {
   setMemberConnected as localSetMemberConnected,
   setPhase as localSetPhase,
   startUndercover as localStartUndercover,
+  revealUndercover as localRevealUndercover,
+  nextRoundUndercover as localNextRoundUndercover,
   getSeatPrivate as localGetSeatPrivate,
   type PersistedRoom,
   type Session,
@@ -47,6 +49,8 @@ import {
   relaySetMemberConnected,
   relaySetPhase,
   relayStartUndercover,
+  relayRevealUndercover,
+  relayNextRoundUndercover,
   relayGetSeatPrivate,
 } from './relayClient'
 
@@ -249,6 +253,29 @@ export async function fetchSeatPrivate(
 ): Promise<{ private: SeatPrivate | null; hasWord: boolean } | { error: string }> {
   if (!isRelayEnabled()) return localGetSeatPrivate(roomCode, seatId, seatToken)
   return relayGetSeatPrivate(roomCode, seatId, seatToken)
+}
+
+export async function revealUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localRevealUndercover(roomCode, fromSeatId, seatToken)
+  return relayRevealUndercover(roomCode, fromSeatId, seatToken)
+}
+
+export async function nextRoundUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<
+  | { data: PersistedRoom; private: SeatPrivate | null }
+  | { error: string }
+> {
+  if (!isRelayEnabled()) {
+    return localNextRoundUndercover(roomCode, fromSeatId, seatToken)
+  }
+  return relayNextRoundUndercover(roomCode, fromSeatId, seatToken)
 }
 
 export async function deleteRoom(roomCode: string): Promise<void> {

@@ -258,6 +258,35 @@ export class RoomDurableObject {
         })
       }
 
+      if (request.method === 'POST' && action === 'reveal') {
+        const body = await request.json()
+        const result = this.store.revealUndercover(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'next-round') {
+        const body = await request.json()
+        const result = this.store.nextRoundUndercover(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({
+          data: publicPersisted(result.data),
+          private: result.private,
+        })
+      }
+
       if (request.method === 'POST' && action === 'seat-private') {
         const body = await request.json()
         const result = this.store.getSeatPrivate(code, body.seatId, body.seatToken)

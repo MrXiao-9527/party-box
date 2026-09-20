@@ -5,33 +5,42 @@ export type Phase = 'lobby' | 'playing' | 'paused'
 /** Room product. Omitted / unknown → chip (legacy rooms). */
 export type RoomMode = 'chip' | 'partyGame'
 
-/** Slice B: lobby | playing. Reveal / next-round is Slice C. */
-export type PartyPhase = 'lobby' | 'playing'
+/** lobby → playing → revealed → playing (next-round). */
+export type PartyPhase = 'lobby' | 'playing' | 'revealed'
 
 export type PartyGameId = 'undercover'
 
 export type UndercoverRole = 'civilian' | 'undercover'
 
-/** Per-seat word+role. Never placed on the shared room snapshot. */
+export const UNDERCOVER_ROLE_LABEL: Record<UndercoverRole, string> = {
+  civilian: '平民',
+  undercover: '卧底',
+}
+
+/** Per-seat word+role. Never placed on the shared room snapshot (playing). */
 export interface SeatPrivate {
   seatId: string
   word: string
   role: UndercoverRole
   pairId: string
+  round?: number
 }
 
-/** Public seat flag only — no role/word. */
+/** Playing: hasWord only. Revealed: word + role for dealt seats. */
 export interface PartyPublicSeat {
   seatId: string
   hasWord: boolean
+  word?: string
+  role?: UndercoverRole
 }
 
-/** Public party fields — pairId only, never word text. */
+/** Public party fields. Word/role text only when phase is revealed. */
 export interface PartyStub {
   gameId: string
   phase: PartyPhase
   pairId?: string
   undercoverCount?: number
+  round?: number
   seats?: PartyPublicSeat[]
 }
 
@@ -257,10 +266,32 @@ export function isPartyGame(
 }
 
 function asPartyPhase(raw: unknown): PartyPhase {
-  return raw === 'playing' ? 'playing' : 'lobby'
+  if (raw === 'playing' || raw === 'revealed') return raw
+  return 'lobby'
 }
 
-/** Public stub only — strips word/role/pair text. Unknown → undercover + lobby. */
+function asUndercoverRole(raw: unknown): UndercoverRole | undefined {
+  if (raw === 'civilian' || raw === 'undercover') return raw
+  return undefined
+}
+
+function publicPartySeat(raw: unknown, revealed: boolean): PartyPublicSeat | null {
+  if (!raw || typeof raw !== 'object') return null
+  const s = raw as { seatId?: unknown; hasWord?: unknown; word?: unknown; role?: unknown }
+  const seatId = typeof s.seatId === 'string' ? s.seatId : ''
+  if (!seatId) return null
+  const hasWord = !!s.hasWord
+  const seat: PartyPublicSeat = { seatId, hasWord }
+  if (revealed && hasWord) {
+    const word = typeof s.word === 'string' ? s.word.trim() : ''
+    const role = asUndercoverRole(s.role)
+    if (word) seat.word = word
+    if (role) seat.role = role
+  }
+  return seat
+}
+
+/** Public stub — playing strips word/role; revealed keeps them. Unknown → undercover + lobby. */
 export function partyStubOf(raw: unknown): PartyStub {
   const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
   const gameId =
@@ -269,20 +300,18 @@ export function partyStubOf(raw: unknown): PartyStub {
       : 'undercover'
   const phase = asPartyPhase(src?.phase)
   const stub: PartyStub = { gameId, phase }
-  if (phase !== 'playing') return stub
+  if (phase === 'lobby') return stub
   if (typeof src?.pairId === 'string' && src.pairId.trim()) {
     stub.pairId = src.pairId.trim()
   }
   const n = typeof src?.undercoverCount === 'number' ? src.undercoverCount : Number(src?.undercoverCount)
   if (Number.isInteger(n) && n > 0) stub.undercoverCount = n
+  const round = typeof src?.round === 'number' ? src.round : Number(src?.round)
+  if (Number.isInteger(round) && round > 0) stub.round = round
   if (Array.isArray(src?.seats)) {
     stub.seats = src.seats
-      .filter((s): s is { seatId?: unknown; hasWord?: unknown } => !!s && typeof s === 'object')
-      .map((s) => ({
-        seatId: typeof s.seatId === 'string' ? s.seatId : '',
-        hasWord: !!s.hasWord,
-      }))
-      .filter((s) => s.seatId)
+      .map((s) => publicPartySeat(s, phase === 'revealed'))
+      .filter((s): s is PartyPublicSeat => !!s)
   }
   return stub
 }
@@ -291,7 +320,9 @@ export function partyHasWord(
   party: PartyStub | null | undefined,
   seatId: string,
 ): boolean {
-  if (!party || party.phase !== 'playing') return false
+  if (!party || (party.phase !== 'playing' && party.phase !== 'revealed')) {
+    return false
+  }
   return !!party.seats?.find((s) => s.seatId === seatId)?.hasWord
 }
 
@@ -341,6 +372,8 @@ export const ACK_REASONS = {
   TABLE_SETTLING: '结算中，请先返回桌面',
   NEED_THREE_ONLINE: '至少 3 人在线才能开始',
   ALREADY_STARTED: '本局已开始',
+  NOT_PLAYING: '进行中才能揭晓',
+  NOT_REVEALED: '揭晓后才能开下一局',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */

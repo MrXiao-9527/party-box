@@ -27,6 +27,7 @@ export interface SeatPrivate {
   word: string
   role: UndercoverRole
   pairId: string
+  round?: number
 }
 
 export interface DealResult {

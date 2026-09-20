@@ -29,6 +29,8 @@ export const ACK_REASONS = {
   TABLE_SETTLING: '结算中，请先返回桌面',
   NEED_THREE_ONLINE: '至少 3 人在线才能开始',
   ALREADY_STARTED: '本局已开始',
+  NOT_PLAYING: '进行中才能揭晓',
+  NOT_REVEALED: '揭晓后才能开下一局',
 }
 
 export function normalizeMaxSeats(raw) {
@@ -45,16 +47,33 @@ export function parseRoomMode(raw) {
   return raw === 'partyGame' ? 'partyGame' : 'chip'
 }
 
-/** Public stub only — strips word/role/pair text. Unknown → undercover + lobby. */
+function asPartyPhase(raw) {
+  if (raw === 'playing' || raw === 'revealed') return raw
+  return 'lobby'
+}
+
+function mapPublicSeat(s, revealed) {
+  if (!s || typeof s !== 'object' || typeof s.seatId !== 'string' || !s.seatId) {
+    return null
+  }
+  const seat = { seatId: s.seatId, hasWord: !!s.hasWord }
+  if (revealed && seat.hasWord) {
+    if (typeof s.word === 'string' && s.word.trim()) seat.word = s.word.trim()
+    if (s.role === 'civilian' || s.role === 'undercover') seat.role = s.role
+  }
+  return seat
+}
+
+/** Public stub — playing strips word/role; revealed keeps them. Unknown → undercover + lobby. */
 export function partyStubOf(raw) {
   const src = raw && typeof raw === 'object' ? raw : null
   const gameId =
     typeof src?.gameId === 'string' && src.gameId.trim()
       ? src.gameId.trim()
       : 'undercover'
-  const phase = src?.phase === 'playing' ? 'playing' : 'lobby'
+  const phase = asPartyPhase(src?.phase)
   const stub = { gameId, phase }
-  if (phase !== 'playing') return stub
+  if (phase === 'lobby') return stub
   if (typeof src.pairId === 'string' && src.pairId.trim()) {
     stub.pairId = src.pairId.trim()
   }
@@ -63,22 +82,26 @@ export function partyStubOf(raw) {
       ? src.undercoverCount
       : Number(src.undercoverCount)
   if (Number.isInteger(n) && n > 0) stub.undercoverCount = n
+  const round = typeof src.round === 'number' ? src.round : Number(src.round)
+  if (Number.isInteger(round) && round > 0) stub.round = round
   if (Array.isArray(src.seats)) {
     stub.seats = src.seats
-      .filter((s) => s && typeof s === 'object' && typeof s.seatId === 'string')
-      .map((s) => ({ seatId: s.seatId, hasWord: !!s.hasWord }))
+      .map((s) => mapPublicSeat(s, phase === 'revealed'))
+      .filter(Boolean)
   }
   return stub
 }
 
 export function partyHasWord(party, seatId) {
-  if (!party || party.phase !== 'playing') return false
+  if (!party || (party.phase !== 'playing' && party.phase !== 'revealed')) {
+    return false
+  }
   return !!party.seats?.find((s) => s.seatId === seatId)?.hasWord
 }
 
 function appendPartySeat(raw, seatId, hasWord) {
   const party = partyStubOf(raw)
-  if (party.phase !== 'playing') return raw
+  if (party.phase !== 'playing' && party.phase !== 'revealed') return raw
   const seats = [...(party.seats || [])]
   if (seats.some((s) => s.seatId === seatId)) return party
   seats.push({ seatId, hasWord: !!hasWord })
@@ -97,6 +120,8 @@ function sanitizePrivates(raw) {
       role: p.role === 'undercover' ? 'undercover' : 'civilian',
       pairId: typeof p.pairId === 'string' ? p.pairId : '',
     }
+    const round = typeof p.round === 'number' ? p.round : Number(p.round)
+    if (Number.isInteger(round) && round > 0) out[seatId].round = round
   }
   return out
 }
@@ -557,7 +582,8 @@ export function createRoomStore() {
       })
     }
     let party = existing.room.party
-    if (partyStubOf(party).phase === 'playing') {
+    const partyPhase = partyStubOf(party).phase
+    if (partyPhase === 'playing' || partyPhase === 'revealed') {
       for (const s of seats) {
         if (!party.seats?.some((p) => p.seatId === s.seatId)) {
           party = appendPartySeat(party, s.seatId, false)
@@ -654,24 +680,31 @@ export function createRoomStore() {
     return setMemberConnected(roomCode, seatId, true)
   }
 
-  function startUndercover(roomCode, fromSeatId, seatToken) {
-    const existing = get(roomCode)
-    if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
-    if (existing.room.mode !== 'partyGame') return { error: ACK_REASONS.INVALID }
-    if (fromSeatId !== existing.room.hostSeatId) return { error: ACK_REASONS.NOT_HOST }
+  function partyHostError(existing, fromSeatId, seatToken) {
+    if (!existing) return ACK_REASONS.ROOM_MISSING
+    if (existing.room.mode !== 'partyGame') return ACK_REASONS.INVALID
+    if (fromSeatId !== existing.room.hostSeatId) return ACK_REASONS.NOT_HOST
     if (!seatToken || existing.seatTokens?.[fromSeatId] !== seatToken) {
-      return { error: ACK_REASONS.INVALID }
+      return ACK_REASONS.INVALID
     }
-    const party = partyStubOf(existing.room.party)
-    if (party.phase === 'playing') return { error: ACK_REASONS.ALREADY_STARTED }
+    return null
+  }
+
+  function needThreeSeated(existing) {
     const connected = existing.room.members.filter((m) => m.connected)
-    if (connected.length < 3) return { error: ACK_REASONS.NEED_THREE_ONLINE }
+    if (connected.length < 3) return ACK_REASONS.NEED_THREE_ONLINE
+    if (existing.room.members.length < 3) return ACK_REASONS.NEED_THREE_ONLINE
+    return null
+  }
+
+  function applyUndercoverDeal(existing, party, round) {
     const seatIds = existing.room.members.map((m) => m.seatId)
-    if (seatIds.length < 3) return { error: ACK_REASONS.NEED_THREE_ONLINE }
     const dealt = dealRound(seatIds)
     const partyPrivates = {}
-    for (const p of dealt.privates) partyPrivates[p.seatId] = p
-    const data = set({
+    for (const p of dealt.privates) {
+      partyPrivates[p.seatId] = { ...p, round }
+    }
+    return set({
       ...existing,
       room: {
         ...existing.room,
@@ -680,13 +713,76 @@ export function createRoomStore() {
           phase: 'playing',
           pairId: dealt.pairId,
           undercoverCount: dealt.undercoverCount,
+          round,
           seats: seatIds.map((seatId) => ({ seatId, hasWord: true })),
         },
       },
       table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
       partyPrivates,
     })
-    return { data, private: partyPrivates[fromSeatId] || null }
+  }
+
+  function startUndercover(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = partyStubOf(existing.room.party)
+    if (party.phase !== 'lobby') return { error: ACK_REASONS.ALREADY_STARTED }
+    const three = needThreeSeated(existing)
+    if (three) return { error: three }
+    const data = applyUndercoverDeal(existing, party, 1)
+    return { data, private: data.partyPrivates?.[fromSeatId] || null }
+  }
+
+  function revealUndercover(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = partyStubOf(existing.room.party)
+    if (party.phase !== 'playing') return { error: ACK_REASONS.NOT_PLAYING }
+    const privates = existing.partyPrivates || {}
+    const seats = existing.room.members.map((m) => {
+      const priv = privates[m.seatId]
+      if (priv && typeof priv.word === 'string' && priv.word) {
+        return {
+          seatId: m.seatId,
+          hasWord: true,
+          word: priv.word,
+          role: priv.role === 'undercover' ? 'undercover' : 'civilian',
+        }
+      }
+      return { seatId: m.seatId, hasWord: false }
+    })
+    const data = set({
+      ...existing,
+      room: {
+        ...existing.room,
+        party: {
+          gameId: party.gameId || 'undercover',
+          phase: 'revealed',
+          pairId: party.pairId,
+          undercoverCount: party.undercoverCount,
+          round: party.round || 1,
+          seats,
+        },
+      },
+      table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+      partyPrivates: existing.partyPrivates,
+    })
+    return { data }
+  }
+
+  function nextRoundUndercover(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = partyStubOf(existing.room.party)
+    if (party.phase !== 'revealed') return { error: ACK_REASONS.NOT_REVEALED }
+    const three = needThreeSeated(existing)
+    if (three) return { error: three }
+    const round = (party.round || 1) + 1
+    const data = applyUndercoverDeal(existing, party, round)
+    return { data, private: data.partyPrivates?.[fromSeatId] || null }
   }
 
   function getSeatPrivate(roomCode, seatId, seatToken) {
@@ -1179,6 +1275,8 @@ export function createRoomStore() {
     restoreSeat,
     applyChipOp,
     startUndercover,
+    revealUndercover,
+    nextRoundUndercover,
     getSeatPrivate,
     sweep,
     exportAll,

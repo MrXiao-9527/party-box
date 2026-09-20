@@ -485,6 +485,25 @@ input {
   color: var(--seat-own);
 }
 
+.reveal-word {
+  margin-left: 0.4rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+}
+
+.reveal-role {
+  margin-left: auto;
+  font-size: 0.68rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text-secondary);
+}
+
+.reveal-role[data-role='undercover'] {
+  color: var(--danger);
+}
+
 .paused {
   justify-content: center;
   gap: 0.5rem;
