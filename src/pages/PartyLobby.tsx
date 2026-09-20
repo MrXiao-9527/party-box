@@ -2,6 +2,7 @@ import { JoinInvite } from '../components/JoinInvite'
 import type { SeatPrivate } from '../games/undercover/deal'
 import type { RoomState } from '../types'
 import {
+  UNDERCOVER_ROLE_LABEL,
   normalizeMaxSeats,
   partyHasWord,
   partyStubOf,
@@ -16,6 +17,8 @@ interface PartyLobbyProps {
   starting?: boolean
   seatPrivate: SeatPrivate | null
   onStart: () => void
+  onReveal: () => void
+  onNextRound: () => void
 }
 
 const MIDJOIN = '本局已开始，本席未发词，请等下一局'
@@ -27,19 +30,28 @@ export function PartyLobby({
   starting = false,
   seatPrivate,
   onStart,
+  onReveal,
+  onNextRound,
 }: PartyLobbyProps) {
   const cap = normalizeMaxSeats(room.maxSeats)
   const full = room.members.length >= cap
   const party = partyStubOf(room.party)
   const playing = party.phase === 'playing'
+  const revealed = party.phase === 'revealed'
   const online = room.members.filter((m) => m.connected).length
-  const canStart = isHost && !playing && online >= 3
+  const canStart = isHost && party.phase === 'lobby' && online >= 3
   const selfHasWord = partyHasWord(party, session.seatId)
   const showWord =
     playing &&
     selfHasWord &&
     seatPrivate &&
     seatPrivate.seatId === session.seatId
+  const round = party.round ?? 1
+  const hint = revealed
+    ? `已揭晓 · 第${round}局`
+    : playing
+      ? `进行中 · 第${round}局`
+      : '大厅 · 尚未发词'
 
   return (
     <div
@@ -48,11 +60,12 @@ export function PartyLobby({
       data-party-phase={party.phase}
       data-game-id={party.gameId}
       data-has-word={selfHasWord ? 'true' : 'false'}
+      data-party-round={playing || revealed ? String(round) : ''}
     >
       <header className="lobby-header">
         <p className="eyebrow">局桌 · 谁是卧底</p>
         <h1>房间 {room.roomCode.toUpperCase()}</h1>
-        <p className="hint">{playing ? '进行中 · 已发词' : '大厅 · 尚未发词'}</p>
+        <p className="hint">{hint}</p>
       </header>
 
       <JoinInvite room={room} />
@@ -74,19 +87,33 @@ export function PartyLobby({
         </section>
       )}
 
-      <section className="member-list" aria-label="成员">
+      {revealed && !selfHasWord && (
+        <p className="midjoin-hint" data-midjoin="1">
+          {MIDJOIN}
+        </p>
+      )}
+
+      <section
+        className="member-list"
+        aria-label={revealed ? '揭晓' : '成员'}
+        data-reveal-list={revealed ? '1' : undefined}
+      >
         <h2>
-          成员 · {room.members.length}/{cap}
+          {revealed ? `揭晓 · 第${round}局` : `成员 · ${room.members.length}/${cap}`}
         </h2>
         {full && <p className="hint">{tableFullReason(cap)}</p>}
         <ul>
           {room.members.map((m) => {
             const flagged = partyHasWord(party, m.seatId)
+            const seat = party.seats?.find((s) => s.seatId === m.seatId)
             return (
               <li
                 key={m.seatId}
                 className={m.seatId === session.seatId ? 'self' : ''}
                 data-seat-has-word={flagged ? 'true' : 'false'}
+                data-reveal-seat={revealed ? m.seatId : undefined}
+                data-reveal-word={revealed ? seat?.word || '' : undefined}
+                data-reveal-role={revealed ? seat?.role || '' : undefined}
               >
                 <span className="member-name">
                   {m.name}
@@ -103,6 +130,17 @@ export function PartyLobby({
                     {flagged ? '已拿词' : '未发词'}
                   </span>
                 )}
+                {revealed && seat?.hasWord && seat.word && seat.role ? (
+                  <>
+                    <span className="reveal-word">{seat.word}</span>
+                    <span className="reveal-role" data-role={seat.role}>
+                      {UNDERCOVER_ROLE_LABEL[seat.role]}
+                    </span>
+                  </>
+                ) : null}
+                {revealed && !seat?.hasWord && (
+                  <span className="noword-dot">未发词</span>
+                )}
               </li>
             )
           })}
@@ -110,8 +148,36 @@ export function PartyLobby({
       </section>
 
       <footer className="lobby-footer">
-        {playing ? (
-          <p className="waiting">等待揭晓（本切片不揭晓）</p>
+        {revealed ? (
+          isHost ? (
+            <button
+              type="button"
+              className="btn primary wide"
+              data-next-round="1"
+              disabled={starting}
+              aria-busy={starting}
+              onClick={onNextRound}
+            >
+              {starting ? '发词中…' : '下一局'}
+            </button>
+          ) : (
+            <p className="waiting">等待桌主开下一局</p>
+          )
+        ) : playing ? (
+          isHost ? (
+            <button
+              type="button"
+              className="btn primary wide"
+              data-reveal="1"
+              disabled={starting}
+              aria-busy={starting}
+              onClick={onReveal}
+            >
+              {starting ? '揭晓中…' : '揭晓'}
+            </button>
+          ) : (
+            <p className="waiting">等待桌主揭晓</p>
+          )
         ) : isHost ? (
           <>
             <button

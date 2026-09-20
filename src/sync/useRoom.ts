@@ -35,6 +35,8 @@ import {
   setMemberConnected,
   setPhase,
   startUndercover as startUndercoverApi,
+  revealUndercover as revealUndercoverApi,
+  nextRoundUndercover as nextRoundUndercoverApi,
   syncRoomFromRelay,
   wasInRoomLocally,
 } from './roomApi'
@@ -120,6 +122,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   const [starting, setStarting] = useState(false)
   const [seatPrivate, setSeatPrivate] = useState<SeatPrivate | null>(null)
   const startingRef = useRef(false)
+  const privateRoundRef = useRef<number | null>(null)
   const snapshotRef = useRef<TableSnapshot | null>(null)
   const roomRef = useRef<RoomState | null>(null)
   /** Drop same-key denom taps while awaiting ack. */
@@ -159,6 +162,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       snapshotRef.current = null
       setSession(null)
       setSeatPrivate(null)
+      privateRoundRef.current = null
       if (!goneToastSentRef.current) {
         goneToastSentRef.current = true
         setFlashToast(toast)
@@ -278,7 +282,11 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       ? subscribeRelayRoom(roomCode, undefined, {
           seatId: session?.seatId,
           seatToken: session?.seatToken,
-          onPrivate: (priv) => setSeatPrivate(priv),
+          onPrivate: (priv) => {
+            const party = partyStubOf(roomRef.current?.party)
+            privateRoundRef.current = party.round ?? 1
+            setSeatPrivate(priv)
+          },
         })
       : () => {}
 
@@ -739,56 +747,111 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     if (!roomCode || !session?.seatId) return
     const party = partyStubOf(room?.party)
     if (party.phase !== 'playing') {
+      privateRoundRef.current = null
       if (seatPrivate) setSeatPrivate(null)
       return
     }
     const mine = partyHasWord(party, session.seatId)
     if (!mine) {
+      privateRoundRef.current = null
       if (seatPrivate) setSeatPrivate(null)
       return
     }
-    if (seatPrivate && seatPrivate.seatId === session.seatId) return
+    const round = party.round ?? 1
+    if (
+      seatPrivate &&
+      seatPrivate.seatId === session.seatId &&
+      privateRoundRef.current === round
+    ) {
+      return
+    }
     void fetchSeatPrivate(roomCode, session.seatId, session.seatToken).then(
       (result) => {
         if ('error' in result) return
+        privateRoundRef.current = round
         setSeatPrivate(result.private)
       },
     )
   }, [roomCode, room?.party, session?.seatId, session?.seatToken, seatPrivate])
 
+  const runPartyHostAction = useCallback(
+    (
+      action: () => Promise<
+        | { data: PersistedRoom; private?: SeatPrivate | null }
+        | { error: string }
+      >,
+      failCopy: string,
+    ) => {
+      if (!roomCode || !session) {
+        pushToast(failCopy)
+        return
+      }
+      if (startingRef.current) return
+      startingRef.current = true
+      setStarting(true)
+      void (async () => {
+        try {
+          const result = await action()
+          if ('error' in result) {
+            pushToast(result.error)
+            return
+          }
+          applySyncedRoom(result.data, { force: true })
+          if ('private' in result) {
+            privateRoundRef.current =
+              partyStubOf(result.data.room.party).round ?? 1
+            setSeatPrivate(result.private ?? null)
+          } else {
+            privateRoundRef.current = null
+            setSeatPrivate(null)
+          }
+        } catch (e) {
+          pushToast(
+            e instanceof RelayNetworkError
+              ? ACK_REASONS.RELAY_UNREACHABLE
+              : failCopy,
+          )
+        } finally {
+          startingRef.current = false
+          setStarting(false)
+        }
+      })()
+    },
+    [roomCode, session, applySyncedRoom, pushToast],
+  )
+
   const startUndercover = useCallback(() => {
-    if (!roomCode || !session) {
+    if (!session) {
       pushToast('开始失败，请重试')
       return
     }
-    if (startingRef.current) return
-    startingRef.current = true
-    setStarting(true)
-    void (async () => {
-      try {
-        const result = await startUndercoverApi(
-          roomCode,
-          session.seatId,
-          session.seatToken,
-        )
-        if ('error' in result) {
-          pushToast(result.error)
-          return
-        }
-        applySyncedRoom(result.data, { force: true })
-        setSeatPrivate(result.private)
-      } catch (e) {
-        pushToast(
-          e instanceof RelayNetworkError
-            ? ACK_REASONS.RELAY_UNREACHABLE
-            : '开始失败，请重试',
-        )
-      } finally {
-        startingRef.current = false
-        setStarting(false)
-      }
-    })()
-  }, [roomCode, session, applySyncedRoom, pushToast])
+    runPartyHostAction(
+      () => startUndercoverApi(roomCode!, session.seatId, session.seatToken),
+      '开始失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const revealUndercover = useCallback(() => {
+    if (!session) {
+      pushToast('揭晓失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => revealUndercoverApi(roomCode!, session.seatId, session.seatToken),
+      '揭晓失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const nextRoundUndercover = useCallback(() => {
+    if (!session) {
+      pushToast('开下一局失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => nextRoundUndercoverApi(roomCode!, session.seatId, session.seatToken),
+      '开下一局失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
 
   const startPlaying = useCallback(() => {
     if (!roomCode || !session) {
@@ -996,6 +1059,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     submitOp,
     startPlaying,
     startUndercover,
+    revealUndercover,
+    nextRoundUndercover,
     signalHostDisconnect,
     resumeTable,
     claimHost,

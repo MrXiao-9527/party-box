@@ -677,6 +677,8 @@ export function RoomPage() {
           starting={roomApi.starting}
           seatPrivate={roomApi.seatPrivate}
           onStart={denyIfReadOnly(roomApi.startUndercover)}
+          onReveal={denyIfReadOnly(roomApi.revealUndercover)}
+          onNextRound={denyIfReadOnly(roomApi.nextRoundUndercover)}
         />
       ) : party ? (
         <div className="page">

@@ -417,6 +417,54 @@ export async function relayGetSeatPrivate(
   return result.body
 }
 
+export async function relayRevealUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  const result = await api<{ data: PersistedRoom }>(
+    `/rooms/${encodeURIComponent(roomCode)}/reveal`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ fromSeatId, seatToken }),
+    },
+  )
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return { error: errorFromBody(result.body, ACK_REASONS.INVALID) }
+  }
+  return { data: cache(result.body.data) ?? result.body.data }
+}
+
+export async function relayNextRoundUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<
+  | { data: PersistedRoom; private: SeatPrivate | null }
+  | { error: string }
+> {
+  const result = await api<{ data: PersistedRoom; private: SeatPrivate | null }>(
+    `/rooms/${encodeURIComponent(roomCode)}/next-round`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ fromSeatId, seatToken }),
+    },
+  )
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return { error: errorFromBody(result.body, ACK_REASONS.INVALID) }
+  }
+  return {
+    data: cache(result.body.data) ?? result.body.data,
+    private: result.body.private ?? null,
+  }
+}
+
 /** Live room subscription; writes through to localStorage cache. */
 export function subscribeRelayRoom(
   roomCode: string,

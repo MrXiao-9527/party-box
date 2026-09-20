@@ -1,5 +1,5 @@
 /**
- * Slice B: dealing + SeatPrivate privacy (public snapshot has no words).
+ * Slice B+C: dealing, SeatPrivate privacy, reveal public words, next-round.
  * Run: npm run test:undercover
  */
 import { createRoomStore, ACK_REASONS, publicPersisted, partyStubOf } from '../server/roomLogic.mjs'
@@ -73,6 +73,7 @@ function assert(cond, msg) {
   const pub = publicPersisted(started.data)
   const party = partyStubOf(pub.room.party)
   assert(party.phase === 'playing', 'playing')
+  assert(party.round === 1, 'round 1 on deal')
   assert(party.pairId && !party.pairId.match(/[\u4e00-\u9fff]/), 'opaque pairId')
   assert(party.seats?.every((s) => s.hasWord === true), 'dealt seats hasWord')
   assert(party.seats?.every((s) => !('word' in s) && !('role' in s)), 'public seats flags only')
@@ -101,13 +102,106 @@ function assert(cond, msg) {
   const midPub = publicPersisted(mid.data)
   assert(!publicPayloadLeaks(midPub, words), 'mid-join public still clean')
 
+  {
+    const injected = partyStubOf({
+      gameId: 'undercover',
+      phase: 'playing',
+      seats: [{ seatId: 'x', hasWord: true, word: '机密词', role: 'civilian' }],
+    })
+    assert(
+      injected.seats.every((s) => !('word' in s) && !('role' in s)),
+      'playing stub strips word/role',
+    )
+  }
+
+  const guestReveal = store.revealUndercover(
+    code,
+    j1.session.seatId,
+    j1.session.seatToken,
+  )
+  assert(guestReveal.error === ACK_REASONS.NOT_HOST, 'guest cannot reveal')
+
+  const nextTooSoon = store.nextRoundUndercover(
+    code,
+    created.session.seatId,
+    hostTok,
+  )
+  assert(nextTooSoon.error === ACK_REASONS.NOT_REVEALED, 'next-round needs reveal')
+
+  const revealed = store.revealUndercover(code, created.session.seatId, hostTok)
+  assert(!('error' in revealed), `reveal ${revealed.error || ''}`)
+  const revPub = publicPersisted(revealed.data)
+  const revParty = partyStubOf(revPub.room.party)
+  assert(revParty.phase === 'revealed', 'revealed phase')
+  assert(revParty.round === 1, 'round 1')
+  const dealtSeats = revParty.seats.filter((s) => s.seatId !== mid.session.seatId)
+  assert(dealtSeats.length === 3, '3 dealt seats')
+  assert(
+    dealtSeats.every((s) => s.hasWord && s.word && (s.role === 'civilian' || s.role === 'undercover')),
+    'every dealt seat has public word+role',
+  )
+  const midReveal = revParty.seats.find((s) => s.seatId === mid.session.seatId)
+  assert(midReveal && midReveal.hasWord === false, 'mid-join still no word')
+  assert(!midReveal.word && !midReveal.role, 'mid-join no public identity')
+  const roles = dealtSeats.map((s) => s.role)
+  assert(roles.filter((r) => r === 'undercover').length === 1, '1 undercover revealed')
+  const pubWords = dealtSeats.map((s) => s.word)
+  assert(new Set(pubWords).size === 2, 'two public words')
+  for (const w of words) {
+    assert(pubWords.includes(w), `revealed includes ${w}`)
+  }
+
+  const againStart = store.startUndercover(code, created.session.seatId, hostTok)
+  assert(againStart.error === ACK_REASONS.ALREADY_STARTED, 'no start after reveal')
+
+  const dumpedRev = store.exportAll()
+  const storeRev = createRoomStore()
+  storeRev.importAll(dumpedRev)
+  const restoredRev = partyStubOf(publicPersisted(storeRev.get(code)).room.party)
+  assert(restoredRev.phase === 'revealed', 'persist keeps revealed')
+  assert(
+    restoredRev.seats.filter((s) => s.hasWord).every((s) => s.word && s.role),
+    'persisted reveal still has word+role',
+  )
+
+  const next = store.nextRoundUndercover(code, created.session.seatId, hostTok)
+  assert(!('error' in next), `next-round ${next.error || ''}`)
+  const nextPub = publicPersisted(next.data)
+  const nextParty = partyStubOf(nextPub.room.party)
+  assert(nextParty.phase === 'playing', 'next-round playing')
+  assert(nextParty.round === 2, 'round 2')
+  assert(
+    nextParty.seats?.every((s) => s.hasWord === true && !('word' in s) && !('role' in s)),
+    'next-round public flags only',
+  )
+  const nextWords = []
+  for (const sess of [
+    created.session,
+    j1.session,
+    j2.session,
+    mid.session,
+  ]) {
+    const priv = store.getSeatPrivate(code, sess.seatId, sess.seatToken)
+    assert(priv.private?.word, `${sess.name || sess.seatId} has new word`)
+    assert(priv.private.round === 2, 'private round 2')
+    nextWords.push(priv.private.word)
+  }
+  assert(!publicPayloadLeaks(nextPub, nextWords), `next-round public leak ${publicPayloadLeaks(nextPub, nextWords)}`)
+  const internals = store.get(code)
+  assert(
+    Object.values(internals.partyPrivates).every((p) => p.round === 2),
+    'previous privates replaced',
+  )
+  const peekOld = store.getSeatPrivate(code, j1.session.seatId, j1.session.seatToken)
+  assert(peekOld.private.round === 2, 'cannot keep previous private')
+
   const dumped = store.exportAll()
   const store2 = createRoomStore()
   store2.importAll(dumped)
   const restored = store2.getSeatPrivate(code, j1.session.seatId, j1.session.seatToken)
-  assert(restored.private?.word === guestA.private.word, 'persist keeps private')
+  assert(restored.private?.word === peekOld.private.word, 'persist keeps private')
   const restoredPub = publicPersisted(store2.get(code))
-  assert(!publicPayloadLeaks(restoredPub, words), 'imported public clean')
+  assert(!publicPayloadLeaks(restoredPub, nextWords), 'imported public clean')
 }
 
 console.log('OK test-undercover')
