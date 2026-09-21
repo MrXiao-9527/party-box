@@ -170,6 +170,11 @@ assert(kept.room.mode === 'chip', 'legacy create is chip')
   assert(chipDefault.ok && chipDefault.mode === 'chip', 'omitted mode is chip')
   const seats1 = parseRoomCreate({ mode: 'partyGame', maxSeats: 1 })
   assert(seats1.error === ACK_REASONS.SEATS_RANGE, 'party seats 1')
+  const td = parseRoomCreate({ mode: 'partyGame', gameId: 'truthDare', maxSeats: 4 })
+  assert(td.ok && td.party.gameId === 'truthDare', 'truthDare gameId')
+  assert(td.maxSeats === 4, 'truthDare seats')
+  const unknown = parseRoomCreate({ mode: 'partyGame', gameId: 'foo' })
+  assert(unknown.ok && unknown.party.gameId === 'undercover', 'unknown → undercover')
 }
 
 {
@@ -216,6 +221,27 @@ assert(kept.room.mode === 'chip', 'legacy create is chip')
   })
   assert(op.ack.ok === false, 'chip op rejected')
   assert(op.ack.reason === ACK_REASONS.INVALID, 'party chip isolation')
+}
+
+{
+  const td = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 2,
+    gameId: 'truthDare',
+  })
+  assert(!('error' in td), 'truthDare create ok')
+  assert(td.data.room.mode === 'partyGame', 'truthDare mode')
+  assert(td.data.room.party.gameId === 'truthDare', 'persist truthDare')
+  assert(td.data.room.party.phase === 'lobby', 'truthDare lobby')
+  assert(td.data.room.buyInN === 0, 'truthDare buyInN 0')
+  const tdCode = td.data.room.roomCode
+  const host = store.claimHostSeat(tdCode, td.session.seatId, '桌主')
+  assert(host && host.room.party.gameId === 'truthDare', 'claim keeps truthDare')
+  const j1 = store.joinRoom(tdCode, '甲')
+  assert(!('error' in j1), 'truthDare second seat')
+  assert(j1.data.room.members.length === 2, 'truthDare two seats')
+  const j2 = store.joinRoom(tdCode, '乙')
+  assert(j2.error === '本桌已满（最多2人）', 'truthDare full copy')
 }
 
 console.log('OK test-room-create')

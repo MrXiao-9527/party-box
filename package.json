@@ -22,6 +22,7 @@
     "test:settlement": "node --experimental-strip-types scripts/test-settlement.mjs",
     "test:room-create": "node --experimental-strip-types scripts/test-room-create.mjs",
     "test:e2e-party-lobby": "node scripts/e2e-party-lobby.mjs",
+    "test:e2e-party-truth-dare": "node scripts/e2e-party-truth-dare.mjs",
     "test:undercover": "node scripts/test-undercover.mjs",
     "test:e2e-party-undercover": "node scripts/e2e-party-undercover.mjs",
     "test:e2e-party-reveal": "node scripts/e2e-party-reveal.mjs",

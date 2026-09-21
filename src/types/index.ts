@@ -8,7 +8,17 @@ export type RoomMode = 'chip' | 'partyGame'
 /** lobby → playing → revealed → playing (next-round). */
 export type PartyPhase = 'lobby' | 'playing' | 'revealed'
 
-export type PartyGameId = 'undercover'
+export type PartyGameId = 'undercover' | 'truthDare'
+
+export const PARTY_GAME_LABEL: Record<PartyGameId, string> = {
+  undercover: '谁是卧底',
+  truthDare: '真心话大冒险',
+}
+
+/** Omitted / unknown → undercover (first-knife index path). */
+export function parsePartyGameId(raw: unknown): PartyGameId {
+  return raw === 'truthDare' ? 'truthDare' : 'undercover'
+}
 
 export type UndercoverRole = 'civilian' | 'undercover'
 
@@ -36,7 +46,7 @@ export interface PartyPublicSeat {
 
 /** Public party fields. Word/role text only when phase is revealed. */
 export interface PartyStub {
-  gameId: string
+  gameId: PartyGameId
   phase: PartyPhase
   pairId?: string
   undercoverCount?: number
@@ -294,10 +304,7 @@ function publicPartySeat(raw: unknown, revealed: boolean): PartyPublicSeat | nul
 /** Public stub — playing strips word/role; revealed keeps them. Unknown → undercover + lobby. */
 export function partyStubOf(raw: unknown): PartyStub {
   const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
-  const gameId =
-    typeof src?.gameId === 'string' && src.gameId.trim()
-      ? src.gameId.trim()
-      : 'undercover'
+  const gameId = parsePartyGameId(src?.gameId)
   const phase = asPartyPhase(src?.phase)
   const stub: PartyStub = { gameId, phase }
   if (phase === 'lobby') return stub
@@ -314,6 +321,12 @@ export function partyStubOf(raw: unknown): PartyStub {
       .filter((s): s is PartyPublicSeat => !!s)
   }
   return stub
+}
+
+export function isTruthDareGame(
+  room: { mode?: unknown; party?: unknown } | null | undefined,
+): boolean {
+  return isPartyGame(room) && partyStubOf(room?.party).gameId === 'truthDare'
 }
 
 export function partyHasWord(

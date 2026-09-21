@@ -746,7 +746,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   useEffect(() => {
     if (!roomCode || !session?.seatId) return
     const party = partyStubOf(room?.party)
-    if (party.phase !== 'playing') {
+    if (party.gameId !== 'undercover' || party.phase !== 'playing') {
       privateRoundRef.current = null
       if (seatPrivate) setSeatPrivate(null)
       return

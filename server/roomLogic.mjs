@@ -47,6 +47,11 @@ export function parseRoomMode(raw) {
   return raw === 'partyGame' ? 'partyGame' : 'chip'
 }
 
+/** Omitted / unknown → undercover (first-knife index path). */
+export function parsePartyGameId(raw) {
+  return raw === 'truthDare' ? 'truthDare' : 'undercover'
+}
+
 function asPartyPhase(raw) {
   if (raw === 'playing' || raw === 'revealed') return raw
   return 'lobby'
@@ -67,10 +72,7 @@ function mapPublicSeat(s, revealed) {
 /** Public stub — playing strips word/role; revealed keeps them. Unknown → undercover + lobby. */
 export function partyStubOf(raw) {
   const src = raw && typeof raw === 'object' ? raw : null
-  const gameId =
-    typeof src?.gameId === 'string' && src.gameId.trim()
-      ? src.gameId.trim()
-      : 'undercover'
+  const gameId = parsePartyGameId(src?.gameId)
   const phase = asPartyPhase(src?.phase)
   const stub = { gameId, phase }
   if (phase === 'lobby') return stub
@@ -727,6 +729,7 @@ export function createRoomStore() {
     const hostErr = partyHostError(existing, fromSeatId, seatToken)
     if (hostErr) return { error: hostErr }
     const party = partyStubOf(existing.room.party)
+    if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
     if (party.phase !== 'lobby') return { error: ACK_REASONS.ALREADY_STARTED }
     const three = needThreeSeated(existing)
     if (three) return { error: three }
@@ -739,6 +742,7 @@ export function createRoomStore() {
     const hostErr = partyHostError(existing, fromSeatId, seatToken)
     if (hostErr) return { error: hostErr }
     const party = partyStubOf(existing.room.party)
+    if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
     if (party.phase !== 'playing') return { error: ACK_REASONS.NOT_PLAYING }
     const privates = existing.partyPrivates || {}
     const seats = existing.room.members.map((m) => {
@@ -777,6 +781,7 @@ export function createRoomStore() {
     const hostErr = partyHostError(existing, fromSeatId, seatToken)
     if (hostErr) return { error: hostErr }
     const party = partyStubOf(existing.room.party)
+    if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
     if (party.phase !== 'revealed') return { error: ACK_REASONS.NOT_REVEALED }
     const three = needThreeSeated(existing)
     if (three) return { error: three }

@@ -204,4 +204,26 @@ function assert(cond, msg) {
   assert(!publicPayloadLeaks(restoredPub, nextWords), 'imported public clean')
 }
 
+{
+  const store = createRoomStore()
+  const created = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 8,
+    gameId: 'truthDare',
+  })
+  assert(!('error' in created), 'truthDare create')
+  const code = created.data.room.roomCode
+  store.claimHostSeat(code, created.session.seatId, '桌主')
+  store.joinRoom(code, '甲')
+  store.joinRoom(code, '乙')
+  const started = store.startUndercover(
+    code,
+    created.session.seatId,
+    created.session.seatToken,
+  )
+  assert(started.error === ACK_REASONS.INVALID, 'truthDare cannot start-undercover')
+  const party = partyStubOf(store.get(code).room.party)
+  assert(party.gameId === 'truthDare' && party.phase === 'lobby', 'truthDare stays lobby')
+}
+
 console.log('OK test-undercover')

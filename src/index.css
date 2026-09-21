@@ -190,6 +190,47 @@ input {
   color: var(--text-secondary);
 }
 
+.game-pick {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.game-pick-label {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.game-pick-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.game-pick .btn {
+  padding: 0.65rem 0.45rem;
+  font-size: 0.9rem;
+}
+
+.prompt-area {
+  margin-top: 1.25rem;
+  min-height: 7rem;
+  padding: 1.15rem 1.1rem;
+  border-radius: var(--radius);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  text-align: center;
+  gap: 0.35rem;
+}
+
+.prompt-placeholder {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+}
+
 .join-invite {
   margin: 1rem 0 0;
   display: flex;

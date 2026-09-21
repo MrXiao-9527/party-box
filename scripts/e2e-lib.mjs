@@ -57,9 +57,13 @@ export async function confirmCreateRoom(page, opts) {
   await clickText(page, '确认')
 }
 
-export async function confirmCreateParty(page, { maxSeats } = {}) {
+export async function confirmCreateParty(page, { maxSeats, gameId } = {}) {
   await clickText(page, '局桌')
   await page.waitForSelector('[data-create-party] [name="maxSeats"]')
+  if (gameId) {
+    await page.waitForSelector(`[data-create-party] [data-game-id="${gameId}"]`)
+    await page.click(`[data-create-party] [data-game-id="${gameId}"]`)
+  }
   if (maxSeats != null) {
     await setInputValue(page, '[data-create-party] [name="maxSeats"]', maxSeats)
   }

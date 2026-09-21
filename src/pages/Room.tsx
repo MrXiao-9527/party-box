@@ -6,6 +6,7 @@ import { useRoom } from '../sync/useRoom'
 import { NicknameGate } from './Nickname'
 import { Lobby } from './Lobby'
 import { PartyLobby } from './PartyLobby'
+import { TruthDareLobby } from './TruthDareLobby'
 import { ChipTable } from './ChipTable'
 import { PausedTable } from './PausedTable'
 import { Settlement } from './Settlement'
@@ -27,7 +28,15 @@ import {
   wasInRoomLocally,
 } from '../sync/roomApi'
 import { setFlashToast } from '../sync/flashToast'
-import { ACK_REASONS, MAX_SEATS, isPartyGame, normalizeMaxSeats, parseRoomCode, tableFullReason } from '../types'
+import {
+  ACK_REASONS,
+  MAX_SEATS,
+  isPartyGame,
+  isTruthDareGame,
+  normalizeMaxSeats,
+  parseRoomCode,
+  tableFullReason,
+} from '../types'
 import {
   decideRestore,
   hasHadSeat,
@@ -656,6 +665,7 @@ export function RoomPage() {
 
   const phase = roomApi.room.phase
   const party = isPartyGame(roomApi.room)
+  const truthDare = isTruthDareGame(roomApi.room)
 
   return (
     <>
@@ -670,16 +680,24 @@ export function RoomPage() {
       )}
       {debug}
       {party && roomApi.session ? (
-        <PartyLobby
-          room={roomApi.room}
-          session={roomApi.session}
-          isHost={roomApi.isHost}
-          starting={roomApi.starting}
-          seatPrivate={roomApi.seatPrivate}
-          onStart={denyIfReadOnly(roomApi.startUndercover)}
-          onReveal={denyIfReadOnly(roomApi.revealUndercover)}
-          onNextRound={denyIfReadOnly(roomApi.nextRoundUndercover)}
-        />
+        truthDare ? (
+          <TruthDareLobby
+            room={roomApi.room}
+            session={roomApi.session}
+            isHost={roomApi.isHost}
+          />
+        ) : (
+          <PartyLobby
+            room={roomApi.room}
+            session={roomApi.session}
+            isHost={roomApi.isHost}
+            starting={roomApi.starting}
+            seatPrivate={roomApi.seatPrivate}
+            onStart={denyIfReadOnly(roomApi.startUndercover)}
+            onReveal={denyIfReadOnly(roomApi.revealUndercover)}
+            onNextRound={denyIfReadOnly(roomApi.nextRoundUndercover)}
+          />
+        )
       ) : party ? (
         <div className="page">
           <p>加载局桌…</p>
