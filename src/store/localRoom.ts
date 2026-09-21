@@ -1,5 +1,5 @@
 import { dealRound, type SeatPrivate } from '../games/undercover/deal'
-import { pickPrompt } from '../games/truthDare/draw'
+import { pickPrompt, ensureTruthDareTurn, nextDrawerSeatId } from '../games/truthDare/draw'
 import {
   ACK_REASONS,
   DEFAULT_DENOMS,
@@ -191,7 +191,7 @@ function normalizeRoom(data: PersistedRoom): PersistedRoom {
     members: stamped.members.slice(0, maxSeats),
   }
   if (mode === 'partyGame') {
-    room.party = partyStubOf(stamped.party)
+    room.party = ensureTruthDareTurn(partyStubOf(stamped.party), room.members)
     room.buyInN = 0
     delete room.smallBlind
     delete room.bigBlind
@@ -367,14 +367,13 @@ export function claimHostSeat(
         ledger: existing.table.ledger ?? [],
       },
     }
-    saveRoom(data)
     saveSession({
       seatId,
       name,
       roomCode: existing.room.roomCode,
       seatToken: loadSession()?.seatToken ?? loadSecrets(roomCode).seatTokens[seatId],
     })
-    return data
+    return saveRoom(data)
   }
 
   if (room.members.length >= normalizeMaxSeats(room.maxSeats)) {
@@ -415,7 +414,7 @@ export function claimHostSeat(
     roomCode: existing.room.roomCode,
     seatToken,
   })
-  return data
+  return saveRoom(data)
 }
 
 export function createRoomAsHost(name: string): {
@@ -497,7 +496,6 @@ export function joinRoom(
       ledger: existing.table.ledger ?? [],
     },
   }
-  saveRoom(data)
   const secrets = loadSecrets(code)
   saveSecrets(code, {
     ...secrets,
@@ -505,7 +503,7 @@ export function joinRoom(
   })
   const nextSession: Session = { seatId, name, roomCode: code, seatToken }
   saveSession(nextSession)
-  return { session: nextSession, data }
+  return { session: nextSession, data: saveRoom(data) }
 }
 
 /** DEV: pad fake members up to MAX_SEATS (keeps real seats). */
@@ -584,8 +582,7 @@ export function setMemberConnected(
     },
     table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
   }
-  saveRoom(data)
-  return data
+  return saveRoom(data)
 }
 
 /**
@@ -1257,67 +1254,74 @@ export function getSeatPrivate(
   return { private: priv, hasWord: !!priv }
 }
 
-function applyLocalTruthDareDraw(
+function applyLocalTruthDareParty(
   existing: PersistedRoom,
-  party: ReturnType<typeof partyStubOf>,
-  mustChange: boolean,
-): { data: PersistedRoom } | { error: string } {
-  const current = party.prompt
-  if (mustChange && !current) return { error: ACK_REASONS.INVALID }
-  const picked = pickPrompt({
-    recentIds: party.recentPromptIds ?? [],
-    previousId: current?.id ?? '',
-    previousText: current?.text ?? '',
-    mustChange,
-  })
-  if (!picked) return { error: ACK_REASONS.INVALID }
-  if (mustChange && current) {
-    if (picked.prompt.id === current.id || picked.prompt.text === current.text) {
-      return { error: ACK_REASONS.INVALID }
-    }
-  }
+  partyPatch: Record<string, unknown>,
+): { data: PersistedRoom } {
   const data: PersistedRoom = {
     room: {
       ...existing.room,
       party: {
-        ...party,
         gameId: 'truthDare',
-        prompt: picked.prompt,
-        recentPromptIds: picked.recentPromptIds,
-      },
+        ...partyPatch,
+      } as RoomState['party'],
     },
     table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
   }
-  saveRoom(data)
-  return { data }
+  return { data: saveRoom(data) }
 }
 
-function truthDareHostError(
+function truthDarePartyOf(existing: PersistedRoom) {
+  return ensureTruthDareTurn(
+    partyStubOf(existing.room.party),
+    existing.room.members,
+  )
+}
+
+function partySeatError(
   existing: PersistedRoom | null,
   fromSeatId: string,
   seatToken?: string,
 ): string | null {
   if (!existing) return ACK_REASONS.ROOM_MISSING
   if (!isPartyGame(existing.room)) return ACK_REASONS.INVALID
-  if (fromSeatId !== existing.room.hostSeatId) return ACK_REASONS.NOT_HOST
+  if (!fromSeatId || !seatToken) return ACK_REASONS.INVALID
   const secrets = loadSecrets(existing.room.roomCode)
-  if (!seatToken || secrets.seatTokens[fromSeatId] !== seatToken) {
+  if (secrets.seatTokens[fromSeatId] !== seatToken) return ACK_REASONS.INVALID
+  if (!existing.room.members.some((m) => m.seatId === fromSeatId)) {
     return ACK_REASONS.INVALID
   }
   return null
+}
+
+function connectedMember(existing: PersistedRoom, seatId: string | undefined) {
+  if (!seatId) return null
+  const m = existing.room.members.find((x) => x.seatId === seatId)
+  return m && m.connected ? m : null
 }
 
 export function drawPrompt(
   roomCode: string,
   fromSeatId: string,
   seatToken?: string,
+  _mode = 'direct',
 ): { data: PersistedRoom } | { error: string } {
   const existing = loadRoom(roomCode)
-  const hostErr = truthDareHostError(existing, fromSeatId, seatToken)
-  if (hostErr) return { error: hostErr }
-  const party = partyStubOf(existing!.room.party)
+  const seatErr = partySeatError(existing, fromSeatId, seatToken)
+  if (seatErr) return { error: seatErr }
+  const party = truthDarePartyOf(existing!)
   if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
-  return applyLocalTruthDareDraw(existing!, party, false)
+  if (party.phase !== 'drawing') return { error: ACK_REASONS.INVALID }
+  if (fromSeatId !== party.drawerSeatId) return { error: ACK_REASONS.NOT_YOUR_TURN }
+  const picked = pickPrompt({ recentIds: party.recentPromptIds ?? [] })
+  if (!picked) return { error: ACK_REASONS.INVALID }
+  return applyLocalTruthDareParty(existing!, {
+    phase: 'answering',
+    drawerSeatId: party.drawerSeatId,
+    answererSeatId: party.drawerSeatId,
+    prompt: { ...picked.prompt, drawnAt: Date.now() },
+    recentPromptIds: picked.recentPromptIds,
+  })
 }
 
 export function redrawPrompt(
@@ -1326,9 +1330,80 @@ export function redrawPrompt(
   seatToken?: string,
 ): { data: PersistedRoom } | { error: string } {
   const existing = loadRoom(roomCode)
-  const hostErr = truthDareHostError(existing, fromSeatId, seatToken)
-  if (hostErr) return { error: hostErr }
-  const party = partyStubOf(existing!.room.party)
+  const seatErr = partySeatError(existing, fromSeatId, seatToken)
+  if (seatErr) return { error: seatErr }
+  return { error: ACK_REASONS.INVALID }
+}
+
+export function setDrawer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  targetSeatId: string,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+  if (!isPartyGame(existing.room)) return { error: ACK_REASONS.INVALID }
+  if (fromSeatId !== existing.room.hostSeatId) return { error: ACK_REASONS.NOT_HOST }
+  const secrets = loadSecrets(existing.room.roomCode)
+  if (!seatToken || secrets.seatTokens[fromSeatId] !== seatToken) {
+    return { error: ACK_REASONS.INVALID }
+  }
+  const party = truthDarePartyOf(existing)
   if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
-  return applyLocalTruthDareDraw(existing!, party, true)
+  if (party.phase !== 'drawing') return { error: ACK_REASONS.INVALID }
+  if (!connectedMember(existing, targetSeatId)) return { error: ACK_REASONS.INVALID }
+  return applyLocalTruthDareParty(existing, {
+    phase: 'drawing',
+    drawerSeatId: targetSeatId,
+    answererSeatId: null,
+    recentPromptIds: party.recentPromptIds,
+  })
+}
+
+export function setAnswerer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  targetSeatId: string,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  const seatErr = partySeatError(existing, fromSeatId, seatToken)
+  if (seatErr) return { error: seatErr }
+  const party = truthDarePartyOf(existing!)
+  if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'answering') return { error: ACK_REASONS.INVALID }
+  const isHost = fromSeatId === existing!.room.hostSeatId
+  const isDrawer = fromSeatId === party.drawerSeatId
+  if (!isHost && !isDrawer) return { error: ACK_REASONS.INVALID }
+  if (!connectedMember(existing!, targetSeatId)) return { error: ACK_REASONS.INVALID }
+  return applyLocalTruthDareParty(existing!, {
+    phase: 'answering',
+    drawerSeatId: party.drawerSeatId,
+    answererSeatId: targetSeatId,
+    prompt: party.prompt,
+    recentPromptIds: party.recentPromptIds,
+  })
+}
+
+export function advancePrompt(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  const seatErr = partySeatError(existing, fromSeatId, seatToken)
+  if (seatErr) return { error: seatErr }
+  const party = truthDarePartyOf(existing!)
+  if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'answering') return { error: ACK_REASONS.INVALID }
+  const isHost = fromSeatId === existing!.room.hostSeatId
+  const isAnswerer = fromSeatId === party.answererSeatId
+  if (!isHost && !isAnswerer) return { error: ACK_REASONS.INVALID }
+  return applyLocalTruthDareParty(existing!, {
+    phase: 'drawing',
+    drawerSeatId: nextDrawerSeatId(existing!.room.members, party.drawerSeatId || ''),
+    answererSeatId: null,
+    recentPromptIds: party.recentPromptIds,
+  })
 }

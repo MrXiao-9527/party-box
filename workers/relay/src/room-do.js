@@ -299,7 +299,12 @@ export class RoomDurableObject {
 
       if (request.method === 'POST' && action === 'draw') {
         const body = await request.json()
-        const result = this.store.drawPrompt(code, body.fromSeatId, body.seatToken)
+        const result = this.store.drawPrompt(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.mode,
+        )
         if ('error' in result) {
           return Response.json(result, { status: 400 })
         }
@@ -311,6 +316,49 @@ export class RoomDurableObject {
       if (request.method === 'POST' && action === 'redraw') {
         const body = await request.json()
         const result = this.store.redrawPrompt(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'set-drawer') {
+        const body = await request.json()
+        const result = this.store.setDrawer(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.seatId,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'set-answerer') {
+        const body = await request.json()
+        const result = this.store.setAnswerer(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.seatId,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'advance') {
+        const body = await request.json()
+        const result = this.store.advancePrompt(code, body.fromSeatId, body.seatToken)
         if ('error' in result) {
           return Response.json(result, { status: 400 })
         }

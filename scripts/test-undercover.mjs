@@ -223,7 +223,7 @@ function assert(cond, msg) {
   )
   assert(started.error === ACK_REASONS.INVALID, 'truthDare cannot start-undercover')
   const party = partyStubOf(store.get(code).room.party)
-  assert(party.gameId === 'truthDare' && party.phase === 'lobby', 'truthDare stays lobby')
+  assert(party.gameId === 'truthDare' && party.phase === 'drawing', 'truthDare stays drawing')
 }
 
 console.log('OK test-undercover')

@@ -351,7 +351,12 @@ async function handle(req, res) {
 
       if (req.method === 'POST' && action === 'draw') {
         const body = await readBody(req)
-        const result = store.drawPrompt(code, body.fromSeatId, body.seatToken)
+        const result = store.drawPrompt(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.mode,
+        )
         if ('error' in result) {
           sendJson(res, 400, result)
           return
@@ -364,6 +369,52 @@ async function handle(req, res) {
       if (req.method === 'POST' && action === 'redraw') {
         const body = await readBody(req)
         const result = store.redrawPrompt(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'set-drawer') {
+        const body = await readBody(req)
+        const result = store.setDrawer(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.seatId,
+        )
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'set-answerer') {
+        const body = await readBody(req)
+        const result = store.setAnswerer(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.seatId,
+        )
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'advance') {
+        const body = await readBody(req)
+        const result = store.advancePrompt(code, body.fromSeatId, body.seatToken)
         if ('error' in result) {
           sendJson(res, 400, result)
           return

@@ -1,6 +1,6 @@
 /**
- * Slice B: 真心话大冒险 draw / redraw.
- * Dual-end same public prompt, host-only, recent-K, redraw changes text.
+ * Slice A (full): truthDare turn machine — drawer/answerer/phase.
+ * Draw privilege, set-drawer (drawing only), set-answerer, advance, late-join.
  * Run: npm run test:truth-dare
  */
 import {
@@ -15,6 +15,8 @@ import {
   allPrompts,
   pickPrompt,
   RECENT_K,
+  nextDrawerSeatId,
+  ensureTruthDareTurn,
 } from '../server/truthDare.mjs'
 import { publicPayloadLeaks } from '../server/undercover.mjs'
 
@@ -30,8 +32,17 @@ function openTruthDare(store, { maxSeats = 8, host = '桌主' } = {}) {
   })
   assert(!('error' in created), 'create')
   const code = created.data.room.roomCode
-  store.claimHostSeat(code, created.session.seatId, host)
-  return { code, hostSeat: created.session.seatId, hostTok: created.session.seatToken }
+  const claimed = store.claimHostSeat(code, created.session.seatId, host)
+  assert(claimed, 'claim')
+  return {
+    code,
+    hostSeat: created.session.seatId,
+    hostTok: created.session.seatToken,
+  }
+}
+
+function partyOf(store, code) {
+  return partyStubOf(store.get(code).room.party)
 }
 
 {
@@ -80,17 +91,40 @@ function openTruthDare(store, { maxSeats = 8, host = '桌主' } = {}) {
     first.prompt.displayType === entry.type,
     'displayType frozen to bank type',
   )
-  assert(first.prompt.displayType === 'truth' || first.prompt.displayType === 'dare')
-  const second = pickPrompt({
-    recentIds: first.recentPromptIds,
-    previousId: first.prompt.id,
-    previousText: first.prompt.text,
-    mustChange: true,
-    rng: () => 0,
+}
+
+{
+  const members = [
+    { seatId: 'a', connected: true },
+    { seatId: 'b', connected: true },
+    { seatId: 'c', connected: false },
+  ]
+  assert(nextDrawerSeatId(members, 'a') === 'b', 'next after a is b')
+  assert(nextDrawerSeatId(members, 'b') === 'a', 'wrap skips offline c')
+  assert(nextDrawerSeatId(members, 'c') === 'a', 'offline current → next online')
+  assert(
+    nextDrawerSeatId([{ seatId: 'solo', connected: true }], 'solo') === 'solo',
+    'solo wraps to self',
+  )
+}
+
+{
+  const store = createRoomStore()
+  const created = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 8,
+    gameId: 'truthDare',
   })
-  assert(second, 'redraw pick')
-  assert(second.prompt.id !== first.prompt.id, 'redraw id changes')
-  assert(second.prompt.text !== first.prompt.text, 'redraw text changes')
+  const empty = partyStubOf(created.data.room.party)
+  assert(empty.phase === 'idle', 'create idle')
+  assert(empty.drawerSeatId == null, 'create no drawer')
+  const code = created.data.room.roomCode
+  const claimed = store.claimHostSeat(code, created.session.seatId, '桌主')
+  const after = partyStubOf(claimed.room.party)
+  assert(after.phase === 'drawing', 'claim → drawing')
+  assert(after.drawerSeatId === created.session.seatId, 'host is drawer')
+  assert(after.answererSeatId == null, 'no answerer before draw')
+  assert(!after.prompt, 'no prompt at drawing')
 }
 
 {
@@ -100,46 +134,153 @@ function openTruthDare(store, { maxSeats = 8, host = '桌主' } = {}) {
   assert(!('error' in guest), 'join')
 
   const denied = store.drawPrompt(code, guest.session.seatId, guest.session.seatToken)
-  assert(denied.error === ACK_REASONS.NOT_HOST, 'non-host cannot draw')
-  assert(!partyStubOf(store.get(code).room.party).prompt, 'no prompt after reject')
+  assert(denied.error === ACK_REASONS.NOT_YOUR_TURN, 'non-drawer cannot draw')
+  assert(!partyOf(store, code).prompt, 'no prompt after reject')
+  assert(partyOf(store, code).phase === 'drawing', 'reject keeps drawing')
 
   const badTok = store.drawPrompt(code, hostSeat, guest.session.seatToken)
   assert(badTok.error === ACK_REASONS.INVALID, 'wrong token cannot draw')
 
   const drawn = store.drawPrompt(code, hostSeat, hostTok)
   assert(!('error' in drawn), `draw ${drawn.error || ''}`)
-  const prompt = partyStubOf(drawn.data.room.party).prompt
+  const party = partyStubOf(drawn.data.room.party)
+  assert(party.phase === 'answering', 'draw → answering')
+  assert(party.drawerSeatId === hostSeat, 'drawer unchanged')
+  assert(party.answererSeatId === hostSeat, 'default answerer = drawer')
+  const prompt = party.prompt
   assert(prompt?.id && prompt.text, 'public prompt')
   assert(prompt.displayType === 'truth' || prompt.displayType === 'dare', 'frozen type')
+  assert(typeof prompt.drawnAt === 'number' && prompt.drawnAt > 0, 'drawnAt')
   const bankHit = allPrompts().find((p) => p.id === prompt.id)
   assert(bankHit && bankHit.type === prompt.displayType, 'type matches bank')
   assert(bankHit.text === prompt.text, 'text matches bank')
 
   const pub = publicPersisted(drawn.data)
-  const pubPrompt = partyStubOf(pub.room.party).prompt
-  assert(pubPrompt?.id === prompt.id, 'public id')
-  assert(pubPrompt.text === prompt.text, 'public text')
-  assert(pubPrompt.displayType === prompt.displayType, 'public type')
+  const pubParty = partyStubOf(pub.room.party)
+  assert(pubParty.phase === 'answering', 'public phase')
+  assert(pubParty.drawerSeatId === hostSeat, 'public drawer')
+  assert(pubParty.answererSeatId === hostSeat, 'public answerer')
+  assert(pubParty.prompt?.id === prompt.id, 'public id')
+  assert(pubParty.prompt.text === prompt.text, 'public text')
   assert(!('partyPrivates' in pub), 'no SeatPrivate on public')
   assert(!('seatTokens' in pub), 'no tokens on public')
   assert(!publicPayloadLeaks(pub), `public leak ${publicPayloadLeaks(pub)}`)
 
-  const guestRedraw = store.redrawPrompt(
+  const guestAgain = store.drawPrompt(
     code,
     guest.session.seatId,
     guest.session.seatToken,
   )
-  assert(guestRedraw.error === ACK_REASONS.NOT_HOST, 'non-host cannot redraw')
-  const still = partyStubOf(store.get(code).room.party).prompt
+  assert(guestAgain.error === ACK_REASONS.INVALID, 'no draw while answering')
+  const still = partyOf(store, code).prompt
   assert(still.id === prompt.id && still.text === prompt.text, 'reject does not mutate')
 
   const redrew = store.redrawPrompt(code, hostSeat, hostTok)
-  assert(!('error' in redrew), `redraw ${redrew.error || ''}`)
-  const next = partyStubOf(redrew.data.room.party).prompt
-  assert(next.id !== prompt.id, 'redraw id changed')
-  assert(next.text !== prompt.text, 'redraw text changed')
-  const nextPub = publicPersisted(redrew.data).room.party.prompt
-  assert(nextPub.id === next.id && nextPub.text === next.text, 'dual-end redraw public')
+  assert(redrew.error === ACK_REASONS.INVALID, 'no redraw in slice A')
+  const afterRedraw = partyOf(store, code).prompt
+  assert(afterRedraw.id === prompt.id, 'redraw rejected keeps prompt')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const guest = store.joinRoom(code, '玩家B')
+  const guestSet = store.setDrawer(
+    code,
+    guest.session.seatId,
+    guest.session.seatToken,
+    guest.session.seatId,
+  )
+  assert(guestSet.error === ACK_REASONS.NOT_HOST, 'non-host cannot set-drawer')
+  assert(partyOf(store, code).drawerSeatId === hostSeat, 'drawer unchanged')
+
+  const named = store.setDrawer(code, hostSeat, hostTok, guest.session.seatId)
+  assert(!('error' in named), `set-drawer ${named.error || ''}`)
+  assert(partyOf(store, code).phase === 'drawing', 'still drawing')
+  assert(partyOf(store, code).drawerSeatId === guest.session.seatId, 'named drawer')
+
+  const hostDraw = store.drawPrompt(code, hostSeat, hostTok)
+  assert(hostDraw.error === ACK_REASONS.NOT_YOUR_TURN, 'old drawer cannot draw')
+  assert(!partyOf(store, code).prompt, 'non-drawer draw does not write')
+
+  const drawn = store.drawPrompt(
+    code,
+    guest.session.seatId,
+    guest.session.seatToken,
+  )
+  assert(!('error' in drawn), 'named drawer can draw')
+  assert(partyOf(store, code).phase === 'answering', 'named draw answering')
+  assert(partyOf(store, code).answererSeatId === guest.session.seatId, 'answerer=drawer')
+
+  const duringAnswer = store.setDrawer(code, hostSeat, hostTok, hostSeat)
+  assert(duringAnswer.error === ACK_REASONS.INVALID, 'set-drawer only in drawing')
+  assert(partyOf(store, code).drawerSeatId === guest.session.seatId, 'answering drawer stays')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const a = store.joinRoom(code, '甲')
+  const b = store.joinRoom(code, '乙')
+  assert(!('error' in store.drawPrompt(code, hostSeat, hostTok)), 'draw for set-answerer')
+  const promptId = partyOf(store, code).prompt.id
+
+  const outsider = store.setAnswerer(
+    code,
+    b.session.seatId,
+    b.session.seatToken,
+    a.session.seatId,
+  )
+  assert(outsider.error === ACK_REASONS.INVALID, 'non drawer/host cannot set-answerer')
+  assert(partyOf(store, code).answererSeatId === hostSeat, 'answerer unchanged')
+
+  const offline = store.setAnswerer(code, hostSeat, hostTok, 'seat_missing')
+  assert(offline.error === ACK_REASONS.INVALID, 'offline/missing target')
+
+  const byHost = store.setAnswerer(code, hostSeat, hostTok, a.session.seatId)
+  assert(!('error' in byHost), `set-answerer host ${byHost.error || ''}`)
+  const afterHost = partyOf(store, code)
+  assert(afterHost.answererSeatId === a.session.seatId, 'host changed answerer')
+  assert(afterHost.prompt.id === promptId, 'prompt kept')
+  const pubA = partyStubOf(publicPersisted(byHost.data).room.party)
+  assert(pubA.answererSeatId === a.session.seatId, 'dual-end answerer')
+
+  const byDrawer = store.setAnswerer(code, hostSeat, hostTok, b.session.seatId)
+  assert(!('error' in byDrawer), 'drawer can set-answerer')
+  assert(partyOf(store, code).answererSeatId === b.session.seatId, 'drawer changed answerer')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const a = store.joinRoom(code, '甲')
+  assert(!('error' in store.drawPrompt(code, hostSeat, hostTok)), 'draw for advance')
+  const promptId = partyOf(store, code).prompt.id
+  const recent = partyOf(store, code).recentPromptIds
+
+  const denied = store.advancePrompt(
+    code,
+    a.session.seatId,
+    a.session.seatToken,
+  )
+  assert(denied.error === ACK_REASONS.INVALID, 'non answerer/host cannot advance')
+  assert(partyOf(store, code).prompt?.id === promptId, 'advance reject keeps prompt')
+
+  const advanced = store.advancePrompt(code, hostSeat, hostTok)
+  assert(!('error' in advanced), `advance ${advanced.error || ''}`)
+  const next = partyOf(store, code)
+  assert(next.phase === 'drawing', 'advance → drawing')
+  assert(!next.prompt, 'advance clears prompt (no grey)')
+  assert(next.answererSeatId == null, 'advance clears answerer')
+  assert(next.drawerSeatId === a.session.seatId, 'next drawer after host')
+  assert(
+    JSON.stringify(next.recentPromptIds || []) === JSON.stringify(recent || []),
+    'recent-K kept',
+  )
+  const pub = partyStubOf(publicPersisted(advanced.data).room.party)
+  assert(!pub.prompt, 'public has no leftover prompt')
+  assert(pub.phase === 'drawing', 'public drawing')
+  assert(pub.drawerSeatId === a.session.seatId, 'public next drawer')
 }
 
 {
@@ -147,17 +288,91 @@ function openTruthDare(store, { maxSeats = 8, host = '桌主' } = {}) {
   const { code, hostSeat, hostTok } = openTruthDare(store, { maxSeats: 4 })
   const a = store.joinRoom(code, '甲')
   const b = store.joinRoom(code, '乙')
-  assert(!('error' in a) && !('error' in b), 'join A/B')
-  const drawn = store.drawPrompt(code, hostSeat, hostTok)
-  const before = partyStubOf(drawn.data.room.party).prompt
+  assert(!('error' in store.drawPrompt(code, hostSeat, hostTok)), 'draw for late-join')
+  store.setAnswerer(code, hostSeat, hostTok, a.session.seatId)
+  const before = partyOf(store, code)
+  const late = store.joinRoom(code, '晚进')
+  assert(!('error' in late), 'late join')
+  const snap = partyStubOf(publicPersisted(late.data).room.party)
+  assert(snap.phase === 'answering', 'late-join phase')
+  assert(snap.drawerSeatId === hostSeat, 'late-join drawer')
+  assert(snap.answererSeatId === a.session.seatId, 'late-join answerer')
+  assert(snap.prompt?.id === before.prompt.id, 'late-join prompt id')
+  assert(snap.prompt.text === before.prompt.text, 'late-join prompt text')
+
   store.setPhase(code, 'paused')
   store.setMemberConnected(code, hostSeat, false)
+  const afterOffline = partyOf(store, code)
+  assert(afterOffline.phase === 'answering', 'drawer offline keeps answering')
+  assert(afterOffline.prompt.id === before.prompt.id, 'drawer offline keeps prompt')
+  assert(afterOffline.answererSeatId === a.session.seatId, 'answerer kept')
+  assert(afterOffline.drawerSeatId === a.session.seatId, 'drawer skipped to next online')
+
   const picked = store.pickNewHost(code, b.session.seatId, a.session.seatId)
   assert(!('error' in picked), `pick-host ${picked.error || ''}`)
-  const after = partyStubOf(picked.room.party).prompt
-  assert(after.id === before.id && after.text === before.text, 'host transfer keeps prompt')
-  assert(after.displayType === before.displayType, 'host transfer keeps type')
+  const after = partyStubOf(picked.room.party)
+  assert(after.phase === afterOffline.phase, 'pick-host keeps phase')
+  assert(after.prompt.id === afterOffline.prompt.id, 'pick-host keeps prompt')
+  assert(after.prompt.text === afterOffline.prompt.text, 'pick-host keeps text')
+  assert(after.drawerSeatId === afterOffline.drawerSeatId, 'pick-host keeps drawer')
+  assert(after.answererSeatId === afterOffline.answererSeatId, 'pick-host keeps answerer')
   assert(picked.room.hostSeatId === b.session.seatId, 'new host seated')
+
+  const hostAdvance = store.advancePrompt(
+    code,
+    b.session.seatId,
+    b.session.seatToken,
+  )
+  assert(!('error' in hostAdvance), 'new host can advance')
+  assert(partyOf(store, code).phase === 'drawing', 'host advance drawing')
+  assert(!partyOf(store, code).prompt, 'host advance clears prompt')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const a = store.joinRoom(code, '甲')
+  store.drawPrompt(code, hostSeat, hostTok)
+  store.setMemberConnected(code, a.session.seatId, false)
+  const ok = store.advancePrompt(code, hostSeat, hostTok)
+  assert(!('error' in ok), 'host can advance while others offline')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const existing = store.get(code)
+  store.set({
+    ...existing,
+    room: {
+      ...existing.room,
+      party: {
+        gameId: 'truthDare',
+        phase: 'lobby',
+        prompt: { id: 'td01', displayType: 'truth', text: '旧题留着' },
+        recentPromptIds: ['td01'],
+      },
+    },
+  })
+  const migrated = partyOf(store, code)
+  assert(migrated.phase === 'answering', 'old lobby+prompt → answering')
+  assert(migrated.drawerSeatId === hostSeat, 'migrate assigns drawer')
+  assert(migrated.answererSeatId === hostSeat, 'migrate answerer=drawer')
+  assert(migrated.prompt.text === '旧题留着', 'migrate keeps prompt')
+
+  const noPrompt = store.get(code)
+  store.set({
+    ...noPrompt,
+    room: {
+      ...noPrompt.room,
+      party: { gameId: 'truthDare', phase: 'lobby' },
+    },
+  })
+  const drawing = partyOf(store, code)
+  assert(drawing.phase === 'drawing', 'old lobby no prompt → drawing')
+  assert(drawing.drawerSeatId === hostSeat, 'migrate drawer from seats')
+  assert(!drawing.prompt, 'no prompt after lobby migrate')
+  assert(hostTok, 'host token still valid')
 }
 
 {
@@ -186,13 +401,16 @@ function openTruthDare(store, { maxSeats = 8, host = '桌主' } = {}) {
   const party = partyStubOf(started.data.room.party)
   assert(party.gameId === 'undercover' && party.phase === 'playing', 'undercover playing')
   assert(!party.prompt, 'undercover has no truthDare prompt')
+  assert(party.drawerSeatId == null, 'undercover has no drawer')
 }
 
 {
-  const store = createRoomStore()
-  const { code, hostSeat, hostTok } = openTruthDare(store)
-  const early = store.redrawPrompt(code, hostSeat, hostTok)
-  assert(early.error === ACK_REASONS.INVALID, 'redraw before draw invalid')
+  const repaired = ensureTruthDareTurn(
+    { gameId: 'truthDare', phase: 'lobby' },
+    [{ seatId: 's1', connected: true }],
+  )
+  assert(repaired.phase === 'drawing', 'ensure drawing')
+  assert(repaired.drawerSeatId === 's1', 'ensure drawer')
 }
 
 console.log('OK test-truth-dare')

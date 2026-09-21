@@ -465,17 +465,16 @@ export async function relayNextRoundUndercover(
   }
 }
 
-async function relayTruthDareDraw(
+async function relayTruthDareAction(
   roomCode: string,
-  action: 'draw' | 'redraw',
-  fromSeatId: string,
-  seatToken?: string,
+  action: 'draw' | 'redraw' | 'set-drawer' | 'set-answerer' | 'advance',
+  body: Record<string, unknown>,
 ): Promise<{ data: PersistedRoom } | { error: string }> {
   const result = await api<{ data: PersistedRoom }>(
     `/rooms/${encodeURIComponent(roomCode)}/${action}`,
     {
       method: 'POST',
-      body: JSON.stringify({ fromSeatId, seatToken }),
+      body: JSON.stringify(body),
     },
   )
   if (!result.ok) {
@@ -492,7 +491,11 @@ export async function relayDrawPrompt(
   fromSeatId: string,
   seatToken?: string,
 ): Promise<{ data: PersistedRoom } | { error: string }> {
-  return relayTruthDareDraw(roomCode, 'draw', fromSeatId, seatToken)
+  return relayTruthDareAction(roomCode, 'draw', {
+    fromSeatId,
+    seatToken,
+    mode: 'direct',
+  })
 }
 
 export async function relayRedrawPrompt(
@@ -500,7 +503,41 @@ export async function relayRedrawPrompt(
   fromSeatId: string,
   seatToken?: string,
 ): Promise<{ data: PersistedRoom } | { error: string }> {
-  return relayTruthDareDraw(roomCode, 'redraw', fromSeatId, seatToken)
+  return relayTruthDareAction(roomCode, 'redraw', { fromSeatId, seatToken })
+}
+
+export async function relaySetDrawer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  seatId: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayTruthDareAction(roomCode, 'set-drawer', {
+    fromSeatId,
+    seatToken,
+    seatId,
+  })
+}
+
+export async function relaySetAnswerer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  seatId: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayTruthDareAction(roomCode, 'set-answerer', {
+    fromSeatId,
+    seatToken,
+    seatId,
+  })
+}
+
+export async function relayAdvancePrompt(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayTruthDareAction(roomCode, 'advance', { fromSeatId, seatToken })
 }
 
 /** Live room subscription; writes through to localStorage cache. */

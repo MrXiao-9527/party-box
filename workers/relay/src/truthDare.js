@@ -31,6 +31,97 @@ function usable(entry) {
   )
 }
 
+export function onlineMembers(members = []) {
+  return (members || []).filter(
+    (m) => m && typeof m.seatId === 'string' && m.seatId && m.connected,
+  )
+}
+
+export function firstOnlineSeatId(members = []) {
+  return onlineMembers(members)[0]?.seatId || null
+}
+
+/** Next online seat after current, wrapping; full member order. */
+export function nextDrawerSeatId(members = [], currentSeatId = '') {
+  const seats = (members || []).filter(
+    (m) => m && typeof m.seatId === 'string' && m.seatId,
+  )
+  const online = seats.filter((m) => m.connected)
+  if (!online.length) return null
+  if (!currentSeatId) return online[0].seatId
+  const start = seats.findIndex((m) => m.seatId === currentSeatId)
+  const from = start === -1 ? -1 : start
+  for (let i = 1; i <= seats.length; i++) {
+    const m = seats[(from + i) % seats.length]
+    if (m.connected) return m.seatId
+  }
+  return online[0].seatId
+}
+
+export function isTruthDarePhase(raw) {
+  return raw === 'idle' || raw === 'drawing' || raw === 'answering'
+}
+
+function memberBySeat(members, seatId) {
+  if (!seatId) return null
+  return (members || []).find((m) => m && m.seatId === seatId) || null
+}
+
+/**
+ * Repair/migrate truthDare turn fields.
+ * Old lobby snapshots: prompt → answering; else drawing when someone is online.
+ * Offline drawer → next online. Answering without prompt → drawing.
+ */
+export function ensureTruthDareTurn(party, members = []) {
+  if (!party || party.gameId !== 'truthDare') return party
+  const prompt = party.prompt || null
+  const recent = Array.isArray(party.recentPromptIds)
+    ? party.recentPromptIds.filter((id) => typeof id === 'string' && id)
+    : []
+  const online = firstOnlineSeatId(members)
+  let drawerSeatId =
+    typeof party.drawerSeatId === 'string' && party.drawerSeatId
+      ? party.drawerSeatId
+      : null
+  let answererSeatId =
+    typeof party.answererSeatId === 'string' && party.answererSeatId
+      ? party.answererSeatId
+      : null
+
+  if (online) {
+    const drawerMember = memberBySeat(members, drawerSeatId)
+    if (!drawerMember) drawerSeatId = online
+    else if (!drawerMember.connected) {
+      drawerSeatId = nextDrawerSeatId(members, drawerSeatId)
+    }
+  }
+
+  let phase
+  if (prompt) phase = 'answering'
+  else if (online) phase = 'drawing'
+  else phase = 'idle'
+
+  if (phase === 'answering') {
+    if (!answererSeatId || !memberBySeat(members, answererSeatId)) {
+      answererSeatId = drawerSeatId
+    }
+  } else {
+    answererSeatId = null
+  }
+
+  if (phase === 'idle') drawerSeatId = null
+
+  const next = {
+    gameId: 'truthDare',
+    phase,
+    drawerSeatId,
+    answererSeatId,
+  }
+  if (prompt && phase === 'answering') next.prompt = prompt
+  if (recent.length) next.recentPromptIds = recent
+  return next
+}
+
 export function pickPrompt({
   recentIds = [],
   previousId = '',
