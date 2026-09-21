@@ -276,7 +276,7 @@ export function HomePage() {
             </label>
             <p className="hint">
               {partyGameId === 'truthDare'
-                ? '2–8 人 · 真心话大冒险（抽题下一刀开放）'
+                ? '2–8 人 · 真心话大冒险（桌主抽题，双端同屏）'
                 : '2–8 人 · 谁是卧底（满 3 人在线可发词）'}
             </p>
             <button

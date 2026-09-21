@@ -1,6 +1,7 @@
 /**
- * Slice A: 真心话大冒险 enter-room shell — create/join/deep-link, dual-end seats.
- * No draw / prompt bank / SeatPrivate. Spawns vite + node relay.
+ * Slice A+B: 真心话大冒险 enter-room + host draw/redraw.
+ * Dual-end same public prompt; non-host cannot draw; redraw changes text.
+ * Spawns vite + node relay.
  *
  * Run: npm run test:e2e-party-truth-dare
  */
@@ -127,6 +128,18 @@ function membersOf(page) {
   )
 }
 
+function promptOf(page) {
+  return page.evaluate(() => {
+    const area = document.querySelector('[data-prompt-area]')
+    const textEl = document.querySelector('[data-prompt-text]')
+    return {
+      id: area?.getAttribute('data-prompt-id') || '',
+      type: area?.getAttribute('data-prompt-type') || '',
+      text: textEl?.getAttribute('data-prompt-text') || textEl?.textContent?.trim() || '',
+    }
+  })
+}
+
 let relay
 let vite
 let browser
@@ -186,12 +199,15 @@ try {
   const meta = await host.page.evaluate(() => {
     const el = document.querySelector('[data-mode="partyGame"]')
     const body = document.body.innerText || ''
+    const draw = document.querySelector('[data-draw]')
     return {
       mode: el?.getAttribute('data-mode'),
       phase: el?.getAttribute('data-party-phase'),
       gameId: el?.getAttribute('data-game-id'),
-      hasPrompt: !!document.querySelector('[data-prompt-area]'),
-      drawDisabled: document.querySelector('[data-draw-placeholder]')?.disabled === true,
+      hasPromptArea: !!document.querySelector('[data-prompt-area]'),
+      hasDraw: !!draw,
+      drawDisabled: draw?.disabled === true,
+      hasRedraw: !!document.querySelector('[data-redraw]'),
       hasStart: [...document.querySelectorAll('button')].some(
         (b) => (b.textContent || '').trim() === '开始游戏',
       ),
@@ -205,8 +221,9 @@ try {
   assert(meta.mode === 'partyGame', 'host lobby mode')
   assert(meta.phase === 'lobby', 'host party phase lobby')
   assert(meta.gameId === 'truthDare', 'gameId truthDare')
-  assert(meta.hasPrompt, 'public prompt area')
-  assert(meta.drawDisabled, 'draw placeholder disabled')
+  assert(meta.hasPromptArea, 'public prompt area')
+  assert(meta.hasDraw && !meta.drawDisabled, 'host 抽题 enabled')
+  assert(!meta.hasRedraw, 'no 重抽 before draw')
   assert(!meta.hasStart, 'no undercover 开始游戏')
   assert(!meta.hasWord, 'no SeatPrivate word')
   assert(!meta.hasPrivate, 'no private screen')
@@ -241,16 +258,18 @@ try {
       gameId: document
         .querySelector('[data-mode="partyGame"]')
         ?.getAttribute('data-game-id'),
-      hasPrompt: !!document.querySelector('[data-prompt-area]'),
-      hasDraw: !!document.querySelector('[data-draw-placeholder]'),
+      hasPromptArea: !!document.querySelector('[data-prompt-area]'),
+      hasDraw: !!document.querySelector('[data-draw]'),
+      hasRedraw: !!document.querySelector('[data-redraw]'),
       hasWord: body.includes('你的词'),
       waiting: body.includes('等待桌主抽题'),
       hasHost: body.includes('桌主'),
     }
   })
   assert(guestMeta.gameId === 'truthDare', 'guest gameId')
-  assert(guestMeta.hasPrompt, 'guest prompt area')
+  assert(guestMeta.hasPromptArea, 'guest prompt area')
   assert(!guestMeta.hasDraw, 'guest has no host draw button')
+  assert(!guestMeta.hasRedraw, 'guest has no redraw button')
   assert(!guestMeta.hasWord, 'guest no private word')
   assert(guestMeta.waiting, 'guest waiting copy')
   assert(guestMeta.hasHost, 'guest sees host seat')
@@ -264,6 +283,93 @@ try {
     fullPage: true,
   })
   console.log('PASS: typed join — dual-end seats match, truth-dare shell')
+
+  const guestSession = await guest.page.evaluate(() =>
+    JSON.parse(localStorage.getItem('party-box:session') || 'null'),
+  )
+  const guestDraw = await fetch(`${RELAY_URL}/rooms/${code}/draw`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fromSeatId: guestSession.seatId,
+      seatToken: guestSession.seatToken,
+    }),
+  })
+  const guestDrawBody = await guestDraw.json()
+  assert(guestDraw.status === 400, `guest draw status ${guestDraw.status}`)
+  assert(guestDrawBody.error === '仅桌主可执行此操作', 'guest draw copy')
+  const emptyPrompt = await promptOf(host.page)
+  assert(!emptyPrompt.id && !emptyPrompt.text, 'reject left prompt empty')
+  console.log('PASS: non-host draw rejected')
+
+  await clickText(host.page, '抽题')
+  await host.page.waitForSelector('[data-prompt-text]')
+  await guest.page.waitForSelector('[data-prompt-text]')
+  const hostPrompt = await promptOf(host.page)
+  const guestPrompt = await promptOf(guest.page)
+  assert(hostPrompt.id && hostPrompt.text, 'host prompt')
+  assert(hostPrompt.type === 'truth' || hostPrompt.type === 'dare', 'frozen type')
+  assert(hostPrompt.id === guestPrompt.id, 'dual-end prompt id')
+  assert(hostPrompt.type === guestPrompt.type, 'dual-end prompt type')
+  assert(hostPrompt.text === guestPrompt.text, 'dual-end prompt text')
+  const snap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
+  const snapPrompt = snap.data?.room?.party?.prompt
+  assert(snapPrompt?.id === hostPrompt.id, 'GET prompt id')
+  assert(snapPrompt.text === hostPrompt.text, 'GET prompt text')
+  assert(snapPrompt.displayType === hostPrompt.type, 'GET displayType')
+  assert(!('partyPrivates' in (snap.data || {})), 'GET has no SeatPrivate')
+  const hostHasDraw = await host.page.$('[data-draw]')
+  const hostHasRedraw = await host.page.$('[data-redraw]')
+  const guestHasDraw = await guest.page.$('[data-draw]')
+  assert(!hostHasDraw && hostHasRedraw, 'host 抽题 → 重抽')
+  assert(!guestHasDraw, 'guest still no draw')
+  await host.page.screenshot({
+    path: `${ART}/truth-dare-host-draw.png`,
+    fullPage: true,
+  })
+  await guest.page.screenshot({
+    path: `${ART}/truth-dare-guest-draw.png`,
+    fullPage: true,
+  })
+  console.log('PASS: host draw — dual-end same type+text')
+
+  await clickText(host.page, '重抽')
+  await host.page.waitForFunction(
+    (prev) => {
+      const el = document.querySelector('[data-prompt-text]')
+      const text = el?.getAttribute('data-prompt-text') || el?.textContent?.trim() || ''
+      const id = document.querySelector('[data-prompt-area]')?.getAttribute('data-prompt-id') || ''
+      return text && id && text !== prev.text && id !== prev.id
+    },
+    {},
+    hostPrompt,
+  )
+  await guest.page.waitForFunction(
+    (prev) => {
+      const el = document.querySelector('[data-prompt-text]')
+      const text = el?.getAttribute('data-prompt-text') || el?.textContent?.trim() || ''
+      const id = document.querySelector('[data-prompt-area]')?.getAttribute('data-prompt-id') || ''
+      return text && id && text !== prev.text && id !== prev.id
+    },
+    {},
+    hostPrompt,
+  )
+  const hostRedraw = await promptOf(host.page)
+  const guestRedrawPrompt = await promptOf(guest.page)
+  assert(hostRedraw.id !== hostPrompt.id, 'redraw id changed')
+  assert(hostRedraw.text !== hostPrompt.text, 'redraw text changed')
+  assert(hostRedraw.id === guestRedrawPrompt.id, 'dual-end redraw id')
+  assert(hostRedraw.text === guestRedrawPrompt.text, 'dual-end redraw text')
+  assert(hostRedraw.type === guestRedrawPrompt.type, 'dual-end redraw type')
+  await host.page.screenshot({
+    path: `${ART}/truth-dare-host-redraw.png`,
+    fullPage: true,
+  })
+  await guest.page.screenshot({
+    path: `${ART}/truth-dare-guest-redraw.png`,
+    fullPage: true,
+  })
+  console.log('PASS: redraw — dual-end refresh, text changed')
   await guest.ctx.close()
   await host.ctx.close()
 

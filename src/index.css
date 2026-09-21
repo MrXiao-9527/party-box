@@ -231,6 +231,20 @@ input {
   font-size: 1.35rem;
 }
 
+.prompt-type {
+  margin: 0;
+  font-size: 0.78rem;
+  letter-spacing: 0.12em;
+  color: var(--text-secondary);
+}
+
+.prompt-text {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  line-height: 1.45;
+}
+
 .join-invite {
   margin: 1rem 0 0;
   display: flex;

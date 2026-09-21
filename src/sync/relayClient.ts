@@ -465,6 +465,44 @@ export async function relayNextRoundUndercover(
   }
 }
 
+async function relayTruthDareDraw(
+  roomCode: string,
+  action: 'draw' | 'redraw',
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  const result = await api<{ data: PersistedRoom }>(
+    `/rooms/${encodeURIComponent(roomCode)}/${action}`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ fromSeatId, seatToken }),
+    },
+  )
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return { error: errorFromBody(result.body, ACK_REASONS.INVALID) }
+  }
+  return { data: cache(result.body.data) ?? result.body.data }
+}
+
+export async function relayDrawPrompt(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayTruthDareDraw(roomCode, 'draw', fromSeatId, seatToken)
+}
+
+export async function relayRedrawPrompt(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayTruthDareDraw(roomCode, 'redraw', fromSeatId, seatToken)
+}
+
 /** Live room subscription; writes through to localStorage cache. */
 export function subscribeRelayRoom(
   roomCode: string,
