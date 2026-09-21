@@ -63,7 +63,7 @@ export function TruthDareLobby({
 
   const hint = prompt
     ? `当前 · ${PROMPT_TYPE_LABEL[prompt.displayType]}`
-    : stage
+    : null
 
   function handleDraw() {
     if (!isDrawer) {
@@ -96,10 +96,8 @@ export function TruthDareLobby({
       <header className="lobby-header">
         <p className="eyebrow">局桌 · {PARTY_GAME_LABEL.truthDare}</p>
         <h1>房间 {room.roomCode.toUpperCase()}</h1>
-        <p className="hint" data-stage="1">
-          {hint}
-        </p>
-        <p className="stage-copy" data-stage-copy="1">
+        {hint ? <p className="hint">{hint}</p> : null}
+        <p className="stage-copy" data-stage="1" data-stage-copy="1">
           {stage}
         </p>
       </header>
