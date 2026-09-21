@@ -5,7 +5,13 @@ import { ToastStack } from '../components/Toast'
 import { createEmptyHostRoom, syncRoomFromRelay, syncStatusToast } from '../sync/roomApi'
 import { dropForeignSession } from '../store/localRoom'
 import { takeFlashToast } from '../sync/flashToast'
-import { ACK_REASONS, parseRoomCode, parseRoomCreate } from '../types'
+import {
+  ACK_REASONS,
+  PARTY_GAME_LABEL,
+  parseRoomCode,
+  parseRoomCreate,
+  type PartyGameId,
+} from '../types'
 
 const TOOLS = [
   {
@@ -39,6 +45,7 @@ export function HomePage() {
   const [showJoin, setShowJoin] = useState(false)
   const [showParty, setShowParty] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  const [partyGameId, setPartyGameId] = useState<PartyGameId>('undercover')
   const [partyMaxSeats, setPartyMaxSeats] = useState('8')
   const [buyInN, setBuyInN] = useState('')
   const [maxSeats, setMaxSeats] = useState('8')
@@ -67,7 +74,7 @@ export function HomePage() {
     const parsed = parseRoomCreate({
       maxSeats: partyMaxSeats,
       mode: 'partyGame',
-      gameId: 'undercover',
+      gameId: partyGameId,
     })
     if (!parsed.ok) {
       setCreateError(parsed.error)
@@ -83,7 +90,7 @@ export function HomePage() {
         const result = await createEmptyHostRoom({
           maxSeats: parsed.maxSeats,
           mode: 'partyGame',
-          gameId: 'undercover',
+          gameId: partyGameId,
         })
         if ('error' in result) {
           setCreateError(result.error)
@@ -223,11 +230,37 @@ export function HomePage() {
           <form
             className="create-room-form"
             data-create-party="1"
+            data-selected-game={partyGameId}
             onSubmit={(e) => {
               e.preventDefault()
               if (!busy) confirmParty()
             }}
           >
+            <div className="game-pick" data-game-pick="1">
+              <p className="game-pick-label">玩法</p>
+              <div className="game-pick-row">
+                <button
+                  type="button"
+                  className={partyGameId === 'undercover' ? 'btn primary' : 'btn ghost'}
+                  data-game-id="undercover"
+                  aria-pressed={partyGameId === 'undercover'}
+                  disabled={busy}
+                  onClick={() => setPartyGameId('undercover')}
+                >
+                  {PARTY_GAME_LABEL.undercover}
+                </button>
+                <button
+                  type="button"
+                  className={partyGameId === 'truthDare' ? 'btn primary' : 'btn ghost'}
+                  data-game-id="truthDare"
+                  aria-pressed={partyGameId === 'truthDare'}
+                  disabled={busy}
+                  onClick={() => setPartyGameId('truthDare')}
+                >
+                  {PARTY_GAME_LABEL.truthDare}
+                </button>
+              </div>
+            </div>
             <label>
               人数
               <input
@@ -241,7 +274,11 @@ export function HomePage() {
                 disabled={busy}
               />
             </label>
-            <p className="hint">2–8 人 · 谁是卧底（满 3 人在线可发词）</p>
+            <p className="hint">
+              {partyGameId === 'truthDare'
+                ? '2–8 人 · 真心话大冒险（抽题下一刀开放）'
+                : '2–8 人 · 谁是卧底（满 3 人在线可发词）'}
+            </p>
             <button
               type="submit"
               className="btn primary wide"

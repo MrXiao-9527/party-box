@@ -1125,6 +1125,7 @@ export function startUndercover(
     return { error: ACK_REASONS.INVALID }
   }
   const party = partyStubOf(existing.room.party)
+  if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
   if (party.phase !== 'lobby') return { error: ACK_REASONS.ALREADY_STARTED }
   const connected = existing.room.members.filter((m) => m.connected)
   if (connected.length < 3) return { error: ACK_REASONS.NEED_THREE_ONLINE }
@@ -1177,6 +1178,7 @@ export function revealUndercover(
     return { error: ACK_REASONS.INVALID }
   }
   const party = partyStubOf(existing.room.party)
+  if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
   if (party.phase !== 'playing') return { error: ACK_REASONS.NOT_PLAYING }
   const seats = existing.room.members.map((m) => {
     const priv = secrets.partyPrivates[m.seatId]
@@ -1224,6 +1226,7 @@ export function nextRoundUndercover(
     return { error: ACK_REASONS.INVALID }
   }
   const party = partyStubOf(existing.room.party)
+  if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
   if (party.phase !== 'revealed') return { error: ACK_REASONS.NOT_REVEALED }
   const connected = existing.room.members.filter((m) => m.connected)
   if (connected.length < 3) return { error: ACK_REASONS.NEED_THREE_ONLINE }
