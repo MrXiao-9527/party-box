@@ -1313,6 +1313,7 @@ export function drawPrompt(
   if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
   if (party.phase !== 'drawing') return { error: ACK_REASONS.INVALID }
   if (fromSeatId !== party.drawerSeatId) return { error: ACK_REASONS.NOT_YOUR_TURN }
+  // mode=direct|wheel: same pickPrompt write; wheel animation is client-only.
   const picked = pickPrompt({ recentIds: party.recentPromptIds ?? [] })
   if (!picked) return { error: ACK_REASONS.INVALID }
   return applyLocalTruthDareParty(existing!, {
