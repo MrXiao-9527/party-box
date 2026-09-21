@@ -1,6 +1,7 @@
 /**
- * Slice A (full): truthDare turn machine — drawer/answerer/phase.
+ * Slice A+B (full): truthDare turn machine + wheel ritual + ≥80 bank.
  * Draw privilege, set-drawer (drawing only), set-answerer, advance, late-join.
+ * Wheel/direct write the same snapshot; animation is not room state.
  * Run: npm run test:truth-dare
  */
 import {
@@ -47,7 +48,7 @@ function partyOf(store, code) {
 
 {
   const pool = allPrompts(PROMPTS)
-  assert(pool.length >= 16, `bank size ${pool.length}`)
+  assert(pool.length >= 80, `bank size ${pool.length}`)
   assert(RECENT_K === 8 && PROMPT_RECENT_K === 8, 'K=8')
   const ids = new Set(pool.map((p) => p.id))
   const texts = new Set(pool.map((p) => p.text))
@@ -55,6 +56,12 @@ function partyOf(store, code) {
   assert(texts.size === pool.length, 'prompt texts unique')
   const types = new Set(pool.map((p) => p.type))
   assert(types.has('truth') && types.has('dare'), 'truth+dare in bank')
+  const truths = pool.filter((p) => p.type === 'truth')
+  const dares = pool.filter((p) => p.type === 'dare')
+  assert(Math.abs(truths.length - dares.length) <= 8, 'truth/dare roughly balanced')
+  const cats = new Set(pool.map((p) => p.category).filter(Boolean))
+  assert(cats.size >= 4, `categories ${cats.size}`)
+  assert(ids.has('t01') && ids.has('d16'), 'old ids still valid')
   for (const p of pool) {
     assert(p.type === 'truth' || p.type === 'dare', `type ${p.id}`)
     assert(p.text && p.text.length >= 4, `text ${p.id}`)
@@ -411,6 +418,76 @@ function partyOf(store, code) {
   )
   assert(repaired.phase === 'drawing', 'ensure drawing')
   assert(repaired.drawerSeatId === 's1', 'ensure drawer')
+}
+
+{
+  const storeD = createRoomStore()
+  const storeW = createRoomStore()
+  const direct = openTruthDare(storeD)
+  const wheel = openTruthDare(storeW)
+  const drawnD = storeD.drawPrompt(direct.code, direct.hostSeat, direct.hostTok, 'direct')
+  const drawnW = storeW.drawPrompt(wheel.code, wheel.hostSeat, wheel.hostTok, 'wheel')
+  assert(!('error' in drawnD) && !('error' in drawnW), 'direct+wheel draw')
+  const pubD = partyStubOf(publicPersisted(drawnD.data).room.party)
+  const pubW = partyStubOf(publicPersisted(drawnW.data).room.party)
+  function promptShape(party) {
+    const p = party.prompt
+    return {
+      phase: party.phase,
+      answererIsDrawer: party.answererSeatId === party.drawerSeatId,
+      promptKeys: p ? Object.keys(p).sort().join(',') : '',
+      hasId: typeof p?.id === 'string' && !!p.id,
+      hasText: typeof p?.text === 'string' && !!p.text,
+      typeOk: p?.displayType === 'truth' || p?.displayType === 'dare',
+      drawnAt: typeof p?.drawnAt === 'number' && p.drawnAt > 0,
+      recent: Array.isArray(party.recentPromptIds) && party.recentPromptIds.length >= 1,
+      noSpin: !('spinning' in party) && !('wheel' in party) && !('drawMode' in party),
+    }
+  }
+  const shapeD = promptShape(pubD)
+  const shapeW = promptShape(pubW)
+  assert(shapeD.phase === 'answering' && shapeW.phase === 'answering', 'both answering')
+  assert(shapeD.answererIsDrawer && shapeW.answererIsDrawer, 'answerer=drawer')
+  assert(shapeD.promptKeys === shapeW.promptKeys, `prompt keys ${shapeD.promptKeys}`)
+  assert(shapeD.hasId && shapeW.hasId, 'both ids')
+  assert(shapeD.hasText && shapeW.hasText, 'both text')
+  assert(shapeD.typeOk && shapeW.typeOk, 'both frozen type')
+  assert(shapeD.drawnAt && shapeW.drawnAt, 'both drawnAt')
+  assert(shapeD.recent && shapeW.recent, 'both recent-K')
+  assert(shapeD.noSpin && shapeW.noSpin, 'no wheel field on snapshot')
+  const unknown = createRoomStore()
+  const u = openTruthDare(unknown)
+  const drawnU = unknown.drawPrompt(u.code, u.hostSeat, u.hostTok, 'nope')
+  assert(!('error' in drawnU), 'unknown mode still draws')
+  assert(partyStubOf(drawnU.data.room.party).phase === 'answering', 'unknown mode answering')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const a = store.joinRoom(code, '甲')
+  const wheel = store.drawPrompt(code, hostSeat, hostTok, 'wheel')
+  assert(!('error' in wheel), 'wheel then advance')
+  const promptId = partyOf(store, code).prompt.id
+  const advanced = store.advancePrompt(code, hostSeat, hostTok)
+  assert(!('error' in advanced), 'advance after wheel')
+  const next = partyOf(store, code)
+  assert(next.phase === 'drawing', 'wheel-advance drawing')
+  assert(!next.prompt, 'wheel-advance clears prompt')
+  assert(next.drawerSeatId === a.session.seatId, 'wheel-advance next drawer')
+  assert(
+    Array.isArray(next.recentPromptIds) && next.recentPromptIds.includes(promptId),
+    'wheel recent-K kept',
+  )
+}
+
+{
+  let recent = ['t01', 't02', 't03', 't04', 't05', 't06', 't07', 't08']
+  const picked = pickPrompt({ recentIds: recent, rng: () => 0, k: 8 })
+  assert(picked, 'expanded bank pick')
+  assert(!recent.includes(picked.prompt.id), 'real bank avoids recent-K')
+  assert(picked.recentPromptIds.length === 8, 'recent window still K=8')
+  assert(picked.recentPromptIds[7] === picked.prompt.id, 'new id appended')
 }
 
 console.log('OK test-truth-dare')

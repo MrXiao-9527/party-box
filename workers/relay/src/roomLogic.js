@@ -926,6 +926,7 @@ export function createRoomStore() {
     if (fromSeatId !== party.drawerSeatId) {
       return { error: ACK_REASONS.NOT_YOUR_TURN }
     }
+    // mode=direct|wheel: same pickPrompt write; wheel animation is client-only.
     return applyTruthDareDraw(existing, party)
   }
 

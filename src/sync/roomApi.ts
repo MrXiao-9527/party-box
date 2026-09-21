@@ -292,9 +292,12 @@ export async function drawPrompt(
   roomCode: string,
   fromSeatId: string,
   seatToken?: string,
+  mode: 'direct' | 'wheel' = 'direct',
 ): Promise<{ data: PersistedRoom } | { error: string }> {
-  if (!isRelayEnabled()) return localDrawPrompt(roomCode, fromSeatId, seatToken)
-  return relayDrawPrompt(roomCode, fromSeatId, seatToken)
+  if (!isRelayEnabled()) {
+    return localDrawPrompt(roomCode, fromSeatId, seatToken, mode)
+  }
+  return relayDrawPrompt(roomCode, fromSeatId, seatToken, mode)
 }
 
 export async function redrawPrompt(

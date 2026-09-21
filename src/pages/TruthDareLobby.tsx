@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { JoinInvite } from '../components/JoinInvite'
 import type { RoomMember, RoomState } from '../types'
 import {
@@ -10,13 +10,16 @@ import {
   tableFullReason,
 } from '../types'
 import type { Session } from '../store/localRoom'
+import { TruthDareWheel } from './TruthDareWheel'
+
+const WHEEL_SKIP_MS = 2000
 
 interface TruthDareLobbyProps {
   room: RoomState
   session: Session
   isHost: boolean
   drawing?: boolean
-  onDraw: () => void
+  onDraw: (mode?: 'direct' | 'wheel') => void
   onAdvance: () => void
   onSetDrawer: (seatId: string) => void
   onSetAnswerer: (seatId: string) => void
@@ -55,6 +58,9 @@ export function TruthDareLobby({
   const answerer = room.members.find((m) => m.seatId === party.answererSeatId)
   const answererOffline = phase === 'answering' && !!answerer && !answerer.connected
   const [picking, setPicking] = useState<'drawer' | 'answerer' | null>(null)
+  const [wheelSpin, setWheelSpin] = useState(false)
+  const awaitingWheel = useRef(false)
+  const wheelAt = useRef(0)
 
   const stage =
     phase === 'answering'
@@ -70,8 +76,37 @@ export function TruthDareLobby({
       onDeniedDraw()
       return
     }
-    onDraw()
+    awaitingWheel.current = false
+    onDraw('direct')
   }
+
+  function handleWheel() {
+    if (!isDrawer) {
+      onDeniedDraw()
+      return
+    }
+    awaitingWheel.current = true
+    wheelAt.current = Date.now()
+    onDraw('wheel')
+  }
+
+  useEffect(() => {
+    if (phase === 'drawing' && !drawing && !prompt) {
+      awaitingWheel.current = false
+      setWheelSpin(false)
+    }
+    if (phase !== 'answering' || !prompt || !awaitingWheel.current) return
+    awaitingWheel.current = false
+    const slow = Date.now() - wheelAt.current > WHEEL_SKIP_MS
+    const reduced =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    if (slow || reduced) {
+      setWheelSpin(false)
+      return
+    }
+    setWheelSpin(true)
+  }, [phase, prompt?.id, drawing])
 
   function pickDrawer(seatId: string) {
     setPicking(null)
@@ -173,19 +208,40 @@ export function TruthDareLobby({
         </ul>
       </section>
 
+      {wheelSpin && prompt && (
+        <TruthDareWheel
+          promptId={prompt.id}
+          displayType={prompt.displayType}
+          onSettled={() => setWheelSpin(false)}
+        />
+      )}
+
       <footer className="lobby-footer">
         {phase === 'drawing' && (
-          <button
-            type="button"
-            className={isDrawer ? 'btn primary wide' : 'btn ghost wide'}
-            data-draw="1"
-            data-draw-self={isDrawer ? 'true' : 'false'}
-            disabled={drawing}
-            aria-busy={drawing}
-            onClick={handleDraw}
-          >
-            {drawing && isDrawer ? '抽题中…' : '直接出题'}
-          </button>
+          <>
+            <button
+              type="button"
+              className={isDrawer ? 'btn primary wide' : 'btn ghost wide'}
+              data-draw="1"
+              data-draw-self={isDrawer ? 'true' : 'false'}
+              disabled={drawing}
+              aria-busy={drawing}
+              onClick={handleDraw}
+            >
+              {drawing && isDrawer ? '抽题中…' : '直接出题'}
+            </button>
+            <button
+              type="button"
+              className={isDrawer ? 'btn secondary wide' : 'btn ghost wide'}
+              data-draw-wheel="1"
+              data-draw-wheel-self={isDrawer ? 'true' : 'false'}
+              disabled={drawing}
+              aria-busy={drawing}
+              onClick={handleWheel}
+            >
+              {drawing && isDrawer ? '抽题中…' : '转盘抽题'}
+            </button>
+          </>
         )}
         {canSetDrawer && (
           <button

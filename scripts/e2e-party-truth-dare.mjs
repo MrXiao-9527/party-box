@@ -1,6 +1,7 @@
 /**
- * Slice A (full): 真心话大冒险 turn machine — 直接出题 / 过题 / 指定抽答人 / 晚进.
- * Dual-end phase+prompt; non-drawer toast 还没轮到你. No wheel / no ≥80 bank.
+ * Slice A+B (full): 真心话大冒险 turn machine + 转盘抽题.
+ * Dual-end phase+prompt; non-drawer toast 还没轮到你.
+ * Wheel/direct same authority; late join never sees half-spin.
  * Spawns vite + node relay.
  *
  * Run: npm run test:e2e-party-truth-dare
@@ -267,6 +268,8 @@ try {
   assert(meta.hasPromptArea, 'public prompt area')
   assert(meta.hasDraw && !meta.drawDisabled, 'host 直接出题 enabled')
   assert(meta.drawLabel === '直接出题', 'draw label')
+  const hostWheel = await host.page.$('[data-draw-wheel]')
+  assert(hostWheel, 'host 转盘抽题')
   assert(!meta.hasRedraw, 'no 重抽')
   assert(meta.hasSetDrawer, 'host 指定抽题人')
   assert(!meta.hasStart, 'no undercover 开始游戏')
@@ -309,6 +312,10 @@ try {
       hasPromptArea: !!document.querySelector('[data-prompt-area]'),
       hasDraw: !!document.querySelector('[data-draw]'),
       drawSelf: document.querySelector('[data-draw]')?.getAttribute('data-draw-self'),
+      hasWheel: !!document.querySelector('[data-draw-wheel]'),
+      wheelSelf: document
+        .querySelector('[data-draw-wheel]')
+        ?.getAttribute('data-draw-wheel-self'),
       hasRedraw: !!document.querySelector('[data-redraw]'),
       hasSetDrawer: !!document.querySelector('[data-set-drawer]'),
       hasWord: body.includes('你的词'),
@@ -321,6 +328,8 @@ try {
   assert(guestMeta.hasPromptArea, 'guest prompt area')
   assert(guestMeta.hasDraw, 'guest sees 直接出题')
   assert(guestMeta.drawSelf === 'false', 'guest is not drawer')
+  assert(guestMeta.hasWheel, 'guest sees 转盘抽题')
+  assert(guestMeta.wheelSelf === 'false', 'guest wheel not self')
   assert(!guestMeta.hasRedraw, 'guest has no redraw button')
   assert(!guestMeta.hasSetDrawer, 'guest has no 指定抽题人')
   assert(!guestMeta.hasWord, 'guest no private word')
@@ -336,6 +345,14 @@ try {
     fullPage: true,
   })
   await clickText(guest.page, '直接出题')
+  await guest.page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.toast')].some((el) =>
+        (el.textContent || '').includes('还没轮到你'),
+      ),
+    { timeout: 8000 },
+  )
+  await clickText(guest.page, '转盘抽题')
   await guest.page.waitForFunction(
     () =>
       [...document.querySelectorAll('.toast')].some((el) =>
@@ -514,6 +531,97 @@ try {
   await late.ctx.close()
   await guest.ctx.close()
   await host.ctx.close()
+
+  const wheelHost = await newDevice(browser)
+  const wheelCode = await hostCreateTruthDare(wheelHost.page, {
+    name: '桌主W',
+    maxSeats: '8',
+  })
+  const wheelGuest = await newDevice(browser)
+  await wheelGuest.page.goto(`${BASE}/r/${wheelCode}`, {
+    waitUntil: 'domcontentloaded',
+  })
+  await nickEnter(wheelGuest.page, '玩家W')
+  await wheelGuest.page.waitForSelector(
+    '[data-mode="partyGame"][data-game-id="truthDare"]',
+  )
+  await wheelHost.page.waitForFunction(() =>
+    (document.body?.innerText || '').includes('玩家W'),
+  )
+  await clickText(wheelHost.page, '转盘抽题')
+  await wheelHost.page.waitForSelector('[data-prompt-text]')
+  await wheelGuest.page.waitForSelector('[data-prompt-text]')
+  const wheelHostPrompt = await promptOf(wheelHost.page)
+  const wheelGuestPrompt = await promptOf(wheelGuest.page)
+  assert(wheelHostPrompt.id && wheelHostPrompt.text, 'wheel host prompt')
+  assert(
+    wheelHostPrompt.type === 'truth' || wheelHostPrompt.type === 'dare',
+    'wheel frozen type',
+  )
+  assert(wheelHostPrompt.id === wheelGuestPrompt.id, 'wheel dual-end id')
+  assert(wheelHostPrompt.type === wheelGuestPrompt.type, 'wheel dual-end type')
+  assert(wheelHostPrompt.text === wheelGuestPrompt.text, 'wheel dual-end text')
+  assert((await stageOf(wheelHost.page)) === '轮到 桌主W 答', 'wheel host answering')
+  assert((await stageOf(wheelGuest.page)) === '轮到 桌主W 答', 'wheel guest answering')
+  const wheelSnap = await fetch(`${RELAY_URL}/rooms/${wheelCode}`).then((r) =>
+    r.json(),
+  )
+  const wheelParty = wheelSnap.data?.room?.party
+  assert(wheelParty?.phase === 'answering', 'wheel GET answering')
+  assert(wheelParty?.answererSeatId === wheelParty?.drawerSeatId, 'wheel answerer=drawer')
+  assert(wheelParty?.prompt?.id === wheelHostPrompt.id, 'wheel GET id')
+  assert(wheelParty?.prompt?.text === wheelHostPrompt.text, 'wheel GET text')
+  assert(wheelParty?.prompt?.displayType === wheelHostPrompt.type, 'wheel GET type')
+  assert(
+    !('spinning' in (wheelParty || {})) &&
+      !('wheel' in (wheelParty || {})) &&
+      !('drawMode' in (wheelParty || {})),
+    'GET has no wheel animation field',
+  )
+  const guestHasWheelOverlay = await wheelGuest.page.$('[data-wheel]')
+  assert(!guestHasWheelOverlay, 'guest never sees local half-spin')
+  const hostWheelOverlay = await wheelHost.page.$('[data-wheel]')
+  if (hostWheelOverlay) {
+    await wheelHost.page.screenshot({
+      path: `${ART}/truth-dare-host-wheel.png`,
+      fullPage: true,
+    })
+    await clickText(wheelHost.page, '跳过')
+    await wheelHost.page.waitForFunction(() => !document.querySelector('[data-wheel]'))
+  } else {
+    await wheelHost.page.screenshot({
+      path: `${ART}/truth-dare-host-wheel.png`,
+      fullPage: true,
+    })
+  }
+  const wheelLate = await newDevice(browser)
+  await wheelLate.page.goto(`${BASE}/r/${wheelCode}`, {
+    waitUntil: 'domcontentloaded',
+  })
+  await nickEnter(wheelLate.page, '晚进W')
+  await wheelLate.page.waitForSelector('[data-prompt-text]')
+  const wheelLatePrompt = await promptOf(wheelLate.page)
+  assert(wheelLatePrompt.id === wheelHostPrompt.id, 'wheel late-join id')
+  assert(wheelLatePrompt.text === wheelHostPrompt.text, 'wheel late-join text')
+  assert((await turnOf(wheelLate.page)).phase === 'answering', 'wheel late-join phase')
+  assert(!(await wheelLate.page.$('[data-wheel]')), 'late join has no half-spin')
+  await wheelGuest.page.screenshot({
+    path: `${ART}/truth-dare-guest-wheel.png`,
+    fullPage: true,
+  })
+  await wheelLate.page.screenshot({
+    path: `${ART}/truth-dare-late-wheel.png`,
+    fullPage: true,
+  })
+  console.log('PASS: wheel draw — dual-end same type+text, no half-spin snapshot')
+  await clickText(wheelHost.page, '过题')
+  await wheelHost.page.waitForFunction(() => !document.querySelector('[data-prompt-text]'))
+  await wheelGuest.page.waitForFunction(() => !document.querySelector('[data-prompt-text]'))
+  assert((await turnOf(wheelHost.page)).phase === 'drawing', 'wheel advance drawing')
+  assert(!(await promptOf(wheelHost.page)).text, 'wheel advance no grey prompt')
+  await wheelLate.ctx.close()
+  await wheelGuest.ctx.close()
+  await wheelHost.ctx.close()
 
   const host2 = await newDevice(browser)
   const code2 = await hostCreateTruthDare(host2.page, { name: '桌主C', maxSeats: '2' })

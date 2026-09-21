@@ -858,13 +858,13 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     )
   }, [roomCode, session, runPartyHostAction, pushToast])
 
-  const drawPrompt = useCallback(() => {
+  const drawPrompt = useCallback((mode: 'direct' | 'wheel' = 'direct') => {
     if (!session) {
       pushToast('抽题失败，请重试')
       return
     }
     runPartyHostAction(
-      () => drawPromptApi(roomCode!, session.seatId, session.seatToken),
+      () => drawPromptApi(roomCode!, session.seatId, session.seatToken, mode),
       '抽题失败，请重试',
     )
   }, [roomCode, session, runPartyHostAction, pushToast])

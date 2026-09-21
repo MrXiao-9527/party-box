@@ -490,11 +490,12 @@ export async function relayDrawPrompt(
   roomCode: string,
   fromSeatId: string,
   seatToken?: string,
+  mode: 'direct' | 'wheel' = 'direct',
 ): Promise<{ data: PersistedRoom } | { error: string }> {
   return relayTruthDareAction(roomCode, 'draw', {
     fromSeatId,
     seatToken,
-    mode: 'direct',
+    mode: mode === 'wheel' ? 'wheel' : 'direct',
   })
 }
 
