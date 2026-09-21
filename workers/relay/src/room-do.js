@@ -297,6 +297,28 @@ export class RoomDurableObject {
         return Response.json(result)
       }
 
+      if (request.method === 'POST' && action === 'draw') {
+        const body = await request.json()
+        const result = this.store.drawPrompt(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'redraw') {
+        const body = await request.json()
+        const result = this.store.redrawPrompt(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
       if (request.method === 'POST' && action === 'ops') {
         const body = await request.json()
         const result = this.store.applyChipOp({ ...body, roomCode: code })

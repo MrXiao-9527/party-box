@@ -349,6 +349,30 @@ async function handle(req, res) {
         return
       }
 
+      if (req.method === 'POST' && action === 'draw') {
+        const body = await readBody(req)
+        const result = store.drawPrompt(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'redraw') {
+        const body = await readBody(req)
+        const result = store.redrawPrompt(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
       if (req.method === 'POST' && action === 'ops') {
         const body = await readBody(req)
         const result = store.applyChipOp({ ...body, roomCode: code })

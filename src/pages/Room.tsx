@@ -685,6 +685,9 @@ export function RoomPage() {
             room={roomApi.room}
             session={roomApi.session}
             isHost={roomApi.isHost}
+            drawing={roomApi.starting}
+            onDraw={denyIfReadOnly(roomApi.drawPrompt)}
+            onRedraw={denyIfReadOnly(roomApi.redrawPrompt)}
           />
         ) : (
           <PartyLobby

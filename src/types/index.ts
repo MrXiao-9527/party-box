@@ -10,9 +10,26 @@ export type PartyPhase = 'lobby' | 'playing' | 'revealed'
 
 export type PartyGameId = 'undercover' | 'truthDare'
 
+export type PromptDisplayType = 'truth' | 'dare'
+
 export const PARTY_GAME_LABEL: Record<PartyGameId, string> = {
   undercover: '谁是卧底',
   truthDare: '真心话大冒险',
+}
+
+export const PROMPT_TYPE_LABEL: Record<PromptDisplayType, string> = {
+  truth: '真心话',
+  dare: '大冒险',
+}
+
+/** Recent-K window for truth/dare draws (PRD Q2). */
+export const PROMPT_RECENT_K = 8
+
+/** Public shared prompt — dual-end same screen. Never SeatPrivate. */
+export interface PartyPrompt {
+  id: string
+  displayType: PromptDisplayType
+  text: string
 }
 
 /** Omitted / unknown → undercover (first-knife index path). */
@@ -52,6 +69,10 @@ export interface PartyStub {
   undercoverCount?: number
   round?: number
   seats?: PartyPublicSeat[]
+  /** truthDare: current public prompt (both ends). */
+  prompt?: PartyPrompt
+  /** truthDare: last-K prompt ids for draw dedupe. */
+  recentPromptIds?: string[]
 }
 
 export type ChipOpType =
@@ -301,12 +322,42 @@ function publicPartySeat(raw: unknown, revealed: boolean): PartyPublicSeat | nul
   return seat
 }
 
+function asPromptDisplayType(raw: unknown): PromptDisplayType | undefined {
+  if (raw === 'truth' || raw === 'dare') return raw
+  return undefined
+}
+
+function publicPartyPrompt(raw: unknown): PartyPrompt | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const p = raw as { id?: unknown; displayType?: unknown; text?: unknown }
+  const id = typeof p.id === 'string' ? p.id.trim() : ''
+  const text = typeof p.text === 'string' ? p.text.trim() : ''
+  const displayType = asPromptDisplayType(p.displayType)
+  if (!id || !text || !displayType) return undefined
+  return { id, displayType, text }
+}
+
+function recentPromptIdsOf(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const ids = raw
+    .filter((x): x is string => typeof x === 'string' && !!x.trim())
+    .map((x) => x.trim())
+  if (!ids.length) return undefined
+  return ids.slice(-PROMPT_RECENT_K)
+}
+
 /** Public stub — playing strips word/role; revealed keeps them. Unknown → undercover + lobby. */
 export function partyStubOf(raw: unknown): PartyStub {
   const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
   const gameId = parsePartyGameId(src?.gameId)
   const phase = asPartyPhase(src?.phase)
   const stub: PartyStub = { gameId, phase }
+  if (gameId === 'truthDare') {
+    const prompt = publicPartyPrompt(src?.prompt)
+    if (prompt) stub.prompt = prompt
+    const recent = recentPromptIdsOf(src?.recentPromptIds)
+    if (recent) stub.recentPromptIds = recent
+  }
   if (phase === 'lobby') return stub
   if (typeof src?.pairId === 'string' && src.pairId.trim()) {
     stub.pairId = src.pairId.trim()

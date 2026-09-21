@@ -22,6 +22,8 @@ import {
   revealUndercover as localRevealUndercover,
   nextRoundUndercover as localNextRoundUndercover,
   getSeatPrivate as localGetSeatPrivate,
+  drawPrompt as localDrawPrompt,
+  redrawPrompt as localRedrawPrompt,
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
@@ -52,6 +54,8 @@ import {
   relayRevealUndercover,
   relayNextRoundUndercover,
   relayGetSeatPrivate,
+  relayDrawPrompt,
+  relayRedrawPrompt,
 } from './relayClient'
 
 export { isRelayEnabled, loadRoom, RelayNetworkError }
@@ -276,6 +280,24 @@ export async function nextRoundUndercover(
     return localNextRoundUndercover(roomCode, fromSeatId, seatToken)
   }
   return relayNextRoundUndercover(roomCode, fromSeatId, seatToken)
+}
+
+export async function drawPrompt(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localDrawPrompt(roomCode, fromSeatId, seatToken)
+  return relayDrawPrompt(roomCode, fromSeatId, seatToken)
+}
+
+export async function redrawPrompt(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localRedrawPrompt(roomCode, fromSeatId, seatToken)
+  return relayRedrawPrompt(roomCode, fromSeatId, seatToken)
 }
 
 export async function deleteRoom(roomCode: string): Promise<void> {

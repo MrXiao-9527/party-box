@@ -37,6 +37,8 @@ import {
   startUndercover as startUndercoverApi,
   revealUndercover as revealUndercoverApi,
   nextRoundUndercover as nextRoundUndercoverApi,
+  drawPrompt as drawPromptApi,
+  redrawPrompt as redrawPromptApi,
   syncRoomFromRelay,
   wasInRoomLocally,
 } from './roomApi'
@@ -853,6 +855,28 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     )
   }, [roomCode, session, runPartyHostAction, pushToast])
 
+  const drawPrompt = useCallback(() => {
+    if (!session) {
+      pushToast('抽题失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => drawPromptApi(roomCode!, session.seatId, session.seatToken),
+      '抽题失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const redrawPrompt = useCallback(() => {
+    if (!session) {
+      pushToast('重抽失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => redrawPromptApi(roomCode!, session.seatId, session.seatToken),
+      '重抽失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
   const startPlaying = useCallback(() => {
     if (!roomCode || !session) {
       pushToast('开桌失败，请重开一桌或检查网络')
@@ -1061,6 +1085,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     startUndercover,
     revealUndercover,
     nextRoundUndercover,
+    drawPrompt,
+    redrawPrompt,
     signalHostDisconnect,
     resumeTable,
     claimHost,

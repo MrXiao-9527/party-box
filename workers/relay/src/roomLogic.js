@@ -4,10 +4,13 @@
  */
 
 import { dealRound } from './undercover.js'
+import { pickPrompt } from './truthDare.js'
 
 export const MIN_SEATS = 2
 export const MAX_SEATS = 8
 export const DEFAULT_DENOMS = [1, 5, 10, 25, 100]
+export const PROMPT_RECENT_K = 8
+
 export const ACK_REASONS = {
   SEAT_LOCKED: '席位已锁定',
   NOT_HOST: '仅桌主可执行此操作',
@@ -69,12 +72,40 @@ function mapPublicSeat(s, revealed) {
   return seat
 }
 
+function asDisplayType(raw) {
+  return raw === 'truth' || raw === 'dare' ? raw : null
+}
+
+function publicPartyPrompt(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const id = typeof raw.id === 'string' ? raw.id.trim() : ''
+  const text = typeof raw.text === 'string' ? raw.text.trim() : ''
+  const displayType = asDisplayType(raw.displayType)
+  if (!id || !text || !displayType) return null
+  return { id, displayType, text }
+}
+
+function recentPromptIdsOf(raw) {
+  if (!Array.isArray(raw)) return null
+  const ids = raw
+    .filter((x) => typeof x === 'string' && x.trim())
+    .map((x) => x.trim())
+  if (!ids.length) return null
+  return ids.slice(-PROMPT_RECENT_K)
+}
+
 /** Public stub — playing strips word/role; revealed keeps them. Unknown → undercover + lobby. */
 export function partyStubOf(raw) {
   const src = raw && typeof raw === 'object' ? raw : null
   const gameId = parsePartyGameId(src?.gameId)
   const phase = asPartyPhase(src?.phase)
   const stub = { gameId, phase }
+  if (gameId === 'truthDare') {
+    const prompt = publicPartyPrompt(src?.prompt)
+    if (prompt) stub.prompt = prompt
+    const recent = recentPromptIdsOf(src?.recentPromptIds)
+    if (recent) stub.recentPromptIds = recent
+  }
   if (phase === 'lobby') return stub
   if (typeof src.pairId === 'string' && src.pairId.trim()) {
     stub.pairId = src.pairId.trim()
@@ -800,6 +831,55 @@ export function createRoomStore() {
     return { private: priv, hasWord: !!priv }
   }
 
+  function applyTruthDareDraw(existing, party, mustChange) {
+    const current = party.prompt
+    if (mustChange && !current) return { error: ACK_REASONS.INVALID }
+    const picked = pickPrompt({
+      recentIds: party.recentPromptIds || [],
+      previousId: current?.id || '',
+      previousText: current?.text || '',
+      mustChange,
+    })
+    if (!picked) return { error: ACK_REASONS.INVALID }
+    if (mustChange && current) {
+      if (picked.prompt.id === current.id || picked.prompt.text === current.text) {
+        return { error: ACK_REASONS.INVALID }
+      }
+    }
+    const data = set({
+      ...existing,
+      room: {
+        ...existing.room,
+        party: {
+          ...party,
+          gameId: 'truthDare',
+          prompt: picked.prompt,
+          recentPromptIds: picked.recentPromptIds,
+        },
+      },
+      table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+    })
+    return { data }
+  }
+
+  function drawPrompt(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = partyStubOf(existing.room.party)
+    if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
+    return applyTruthDareDraw(existing, party, false)
+  }
+
+  function redrawPrompt(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = partyStubOf(existing.room.party)
+    if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
+    return applyTruthDareDraw(existing, party, true)
+  }
+
   function applyChipOp(op) {
     const existing = get(op.roomCode)
     if (!existing) {
@@ -1283,6 +1363,8 @@ export function createRoomStore() {
     revealUndercover,
     nextRoundUndercover,
     getSeatPrivate,
+    drawPrompt,
+    redrawPrompt,
     sweep,
     exportAll,
     importAll,
