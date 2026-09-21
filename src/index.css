@@ -486,9 +486,35 @@ input {
   gap: 0.65rem;
 }
 
-.waiting {
-  text-align: center;
-  color: var(--text-secondary);
+.stage-copy {
+  margin: 0.15rem 0 0;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.turn-badge {
+  font-size: 0.68rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--radius);
+  background: var(--text);
+  color: var(--bg);
+}
+
+.member-list li.turn-drawer {
+  box-shadow: inset 0 0 0 2px var(--text-secondary);
+}
+
+.member-list li.turn-answerer:not(.turn-drawer) {
+  box-shadow: inset 0 0 0 2px var(--text);
+}
+
+.seat-picker {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
 }
 
 .private-screen {

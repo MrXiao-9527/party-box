@@ -8,6 +8,9 @@ export type RoomMode = 'chip' | 'partyGame'
 /** lobby → playing → revealed → playing (next-round). */
 export type PartyPhase = 'lobby' | 'playing' | 'revealed'
 
+/** truthDare room-level turn (replaces second-knife lobby-as-shell). */
+export type TruthDarePhase = 'idle' | 'drawing' | 'answering'
+
 export type PartyGameId = 'undercover' | 'truthDare'
 
 export type PromptDisplayType = 'truth' | 'dare'
@@ -30,6 +33,7 @@ export interface PartyPrompt {
   id: string
   displayType: PromptDisplayType
   text: string
+  drawnAt?: number
 }
 
 /** Omitted / unknown → undercover (first-knife index path). */
@@ -64,7 +68,7 @@ export interface PartyPublicSeat {
 /** Public party fields. Word/role text only when phase is revealed. */
 export interface PartyStub {
   gameId: PartyGameId
-  phase: PartyPhase
+  phase: PartyPhase | TruthDarePhase
   pairId?: string
   undercoverCount?: number
   round?: number
@@ -73,6 +77,10 @@ export interface PartyStub {
   prompt?: PartyPrompt
   /** truthDare: last-K prompt ids for draw dedupe. */
   recentPromptIds?: string[]
+  /** truthDare: current drawer (online seat when anyone is seated). */
+  drawerSeatId?: string | null
+  /** truthDare: current answerer (set while answering). */
+  answererSeatId?: string | null
 }
 
 export type ChipOpType =
@@ -301,6 +309,18 @@ function asPartyPhase(raw: unknown): PartyPhase {
   return 'lobby'
 }
 
+export function isTruthDarePhase(raw: unknown): raw is TruthDarePhase {
+  return raw === 'idle' || raw === 'drawing' || raw === 'answering'
+}
+
+function asTruthDarePhase(raw: unknown): TruthDarePhase | null {
+  return isTruthDarePhase(raw) ? raw : null
+}
+
+function seatIdOrNull(raw: unknown): string | null {
+  return typeof raw === 'string' && raw.trim() ? raw.trim() : null
+}
+
 function asUndercoverRole(raw: unknown): UndercoverRole | undefined {
   if (raw === 'civilian' || raw === 'undercover') return raw
   return undefined
@@ -329,12 +349,21 @@ function asPromptDisplayType(raw: unknown): PromptDisplayType | undefined {
 
 function publicPartyPrompt(raw: unknown): PartyPrompt | undefined {
   if (!raw || typeof raw !== 'object') return undefined
-  const p = raw as { id?: unknown; displayType?: unknown; text?: unknown }
+  const p = raw as {
+    id?: unknown
+    displayType?: unknown
+    text?: unknown
+    drawnAt?: unknown
+  }
   const id = typeof p.id === 'string' ? p.id.trim() : ''
   const text = typeof p.text === 'string' ? p.text.trim() : ''
   const displayType = asPromptDisplayType(p.displayType)
   if (!id || !text || !displayType) return undefined
-  return { id, displayType, text }
+  const prompt: PartyPrompt = { id, displayType, text }
+  const drawnAt =
+    typeof p.drawnAt === 'number' ? p.drawnAt : Number(p.drawnAt)
+  if (Number.isFinite(drawnAt) && drawnAt > 0) prompt.drawnAt = drawnAt
+  return prompt
 }
 
 function recentPromptIdsOf(raw: unknown): string[] | undefined {
@@ -346,18 +375,28 @@ function recentPromptIdsOf(raw: unknown): string[] | undefined {
   return ids.slice(-PROMPT_RECENT_K)
 }
 
+function truthDareStubOf(src: Record<string, unknown> | null): PartyStub {
+  const prompt = publicPartyPrompt(src?.prompt)
+  const recent = recentPromptIdsOf(src?.recentPromptIds)
+  const phase = asTruthDarePhase(src?.phase) || (prompt ? 'answering' : 'idle')
+  const stub: PartyStub = {
+    gameId: 'truthDare',
+    phase,
+    drawerSeatId: seatIdOrNull(src?.drawerSeatId),
+    answererSeatId: seatIdOrNull(src?.answererSeatId),
+  }
+  if (prompt) stub.prompt = prompt
+  if (recent) stub.recentPromptIds = recent
+  return stub
+}
+
 /** Public stub — playing strips word/role; revealed keeps them. Unknown → undercover + lobby. */
 export function partyStubOf(raw: unknown): PartyStub {
   const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
   const gameId = parsePartyGameId(src?.gameId)
+  if (gameId === 'truthDare') return truthDareStubOf(src)
   const phase = asPartyPhase(src?.phase)
   const stub: PartyStub = { gameId, phase }
-  if (gameId === 'truthDare') {
-    const prompt = publicPartyPrompt(src?.prompt)
-    if (prompt) stub.prompt = prompt
-    const recent = recentPromptIdsOf(src?.recentPromptIds)
-    if (recent) stub.recentPromptIds = recent
-  }
   if (phase === 'lobby') return stub
   if (typeof src?.pairId === 'string' && src.pairId.trim()) {
     stub.pairId = src.pairId.trim()
@@ -414,6 +453,7 @@ export function publicPersistedRoom<T extends { room: RoomState; table: unknown 
 export const ACK_REASONS = {
   SEAT_LOCKED: '席位已锁定',
   NOT_HOST: '仅桌主可执行此操作',
+  NOT_YOUR_TURN: '还没轮到你',
   OFFLINE: '以桌主为准',
   TIMEOUT: '以桌主为准',
   ROLLBACK: '操作未生效，已回滚',

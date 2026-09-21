@@ -549,12 +549,14 @@ export function RoomPage() {
     return roomApi.submitOp(...args)
   }
 
-  const denyIfReadOnly = (fn: () => void) => () => {
-    if (readOnlyRef.current || readOnly) {
-      roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
-      return
+  const denyIfReadOnly = <T extends unknown[]>(fn: (...args: T) => void) => {
+    return (...args: T) => {
+      if (readOnlyRef.current || readOnly) {
+        roomApi.pushToast(RESTORE_COPY.TAKEN_OVER)
+        return
+      }
+      fn(...args)
     }
-    fn()
   }
 
   const debug =
@@ -687,7 +689,12 @@ export function RoomPage() {
             isHost={roomApi.isHost}
             drawing={roomApi.starting}
             onDraw={denyIfReadOnly(roomApi.drawPrompt)}
-            onRedraw={denyIfReadOnly(roomApi.redrawPrompt)}
+            onAdvance={denyIfReadOnly(roomApi.advancePrompt)}
+            onSetDrawer={denyIfReadOnly(roomApi.setDrawer)}
+            onSetAnswerer={denyIfReadOnly(roomApi.setAnswerer)}
+            onDeniedDraw={denyIfReadOnly(() =>
+              roomApi.pushToast(ACK_REASONS.NOT_YOUR_TURN),
+            )}
           />
         ) : (
           <PartyLobby

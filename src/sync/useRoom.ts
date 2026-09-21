@@ -39,6 +39,9 @@ import {
   nextRoundUndercover as nextRoundUndercoverApi,
   drawPrompt as drawPromptApi,
   redrawPrompt as redrawPromptApi,
+  setDrawer as setDrawerApi,
+  setAnswerer as setAnswererApi,
+  advancePrompt as advancePromptApi,
   syncRoomFromRelay,
   wasInRoomLocally,
 } from './roomApi'
@@ -877,6 +880,46 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     )
   }, [roomCode, session, runPartyHostAction, pushToast])
 
+  const setDrawer = useCallback(
+    (seatId: string) => {
+      if (!session) {
+        pushToast('指定抽题人失败，请重试')
+        return
+      }
+      runPartyHostAction(
+        () => setDrawerApi(roomCode!, session.seatId, session.seatToken, seatId),
+        '指定抽题人失败，请重试',
+      )
+    },
+    [roomCode, session, runPartyHostAction, pushToast],
+  )
+
+  const setAnswerer = useCallback(
+    (seatId: string) => {
+      if (!session) {
+        pushToast('指定答题人失败，请重试')
+        return
+      }
+      runPartyHostAction(
+        () =>
+          setAnswererApi(roomCode!, session.seatId, session.seatToken, seatId),
+        '指定答题人失败，请重试',
+      )
+    },
+    [roomCode, session, runPartyHostAction, pushToast],
+  )
+
+  const advancePrompt = useCallback(() => {
+    if (!session) {
+      pushToast('过题失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => advancePromptApi(roomCode!, session.seatId, session.seatToken),
+      '过题失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
   const startPlaying = useCallback(() => {
     if (!roomCode || !session) {
       pushToast('开桌失败，请重开一桌或检查网络')
@@ -1087,6 +1130,9 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     nextRoundUndercover,
     drawPrompt,
     redrawPrompt,
+    setDrawer,
+    setAnswerer,
+    advancePrompt,
     signalHostDisconnect,
     resumeTable,
     claimHost,

@@ -24,6 +24,9 @@ import {
   getSeatPrivate as localGetSeatPrivate,
   drawPrompt as localDrawPrompt,
   redrawPrompt as localRedrawPrompt,
+  setDrawer as localSetDrawer,
+  setAnswerer as localSetAnswerer,
+  advancePrompt as localAdvancePrompt,
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
@@ -56,6 +59,9 @@ import {
   relayGetSeatPrivate,
   relayDrawPrompt,
   relayRedrawPrompt,
+  relaySetDrawer,
+  relaySetAnswerer,
+  relayAdvancePrompt,
 } from './relayClient'
 
 export { isRelayEnabled, loadRoom, RelayNetworkError }
@@ -298,6 +304,39 @@ export async function redrawPrompt(
 ): Promise<{ data: PersistedRoom } | { error: string }> {
   if (!isRelayEnabled()) return localRedrawPrompt(roomCode, fromSeatId, seatToken)
   return relayRedrawPrompt(roomCode, fromSeatId, seatToken)
+}
+
+export async function setDrawer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  seatId: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localSetDrawer(roomCode, fromSeatId, seatToken, seatId)
+  }
+  return relaySetDrawer(roomCode, fromSeatId, seatToken, seatId)
+}
+
+export async function setAnswerer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  seatId: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localSetAnswerer(roomCode, fromSeatId, seatToken, seatId)
+  }
+  return relaySetAnswerer(roomCode, fromSeatId, seatToken, seatId)
+}
+
+export async function advancePrompt(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localAdvancePrompt(roomCode, fromSeatId, seatToken)
+  return relayAdvancePrompt(roomCode, fromSeatId, seatToken)
 }
 
 export async function deleteRoom(roomCode: string): Promise<void> {
