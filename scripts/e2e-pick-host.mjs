@@ -136,7 +136,6 @@ try {
   await prep(soloGuest)
   await soloHost.goto(BASE, { waitUntil: 'domcontentloaded' })
   await soloHost.waitForSelector('.brand')
-  await clickText(soloHost, '开一桌')
   await fillCreateRoom(soloHost, { maxSeats: '2' })
   await clickText(soloHost, '确认')
   await soloHost.waitForSelector('.nickname-card input')
@@ -180,7 +179,6 @@ try {
 
   await host.goto(BASE, { waitUntil: 'domcontentloaded' })
   await host.waitForSelector('.brand')
-  await clickText(host, '开一桌')
   await fillCreateRoom(host, { maxSeats: '3' })
   await clickText(host, '确认')
   await host.waitForSelector('.nickname-card input')

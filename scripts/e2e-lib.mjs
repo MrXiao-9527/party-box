@@ -35,12 +35,57 @@ export async function setInputValue(page, selector, value) {
   )
 }
 
-/** After homepage「开一桌」is showing the create form. */
+function pageOrigin(page) {
+  try {
+    return new URL(page.url()).origin
+  } catch {
+    return ''
+  }
+}
+
+/** Tool landing: /tools/chip | /tools/undercover | /tools/truthDare */
+export async function gotoTool(page, tool) {
+  const origin = pageOrigin(page)
+  const path =
+    tool === 'truthDare'
+      ? '/tools/truthDare'
+      : tool === 'undercover'
+        ? '/tools/undercover'
+        : '/tools/chip'
+  let here = ''
+  try {
+    here = new URL(page.url()).pathname
+  } catch {
+    here = ''
+  }
+  if (here !== path) {
+    await page.goto(`${origin}${path}`, { waitUntil: 'domcontentloaded' })
+  }
+}
+
+export async function openChipCreate(page) {
+  await gotoTool(page, 'chip')
+  if (!(await page.$('[data-create-room] [name="buyInN"]'))) {
+    await clickText(page, '开一桌')
+  }
+  await page.waitForSelector('[data-create-room] [name="buyInN"]')
+}
+
+export async function openPartyCreate(page, gameId) {
+  const tool = gameId === 'truthDare' ? 'truthDare' : 'undercover'
+  await gotoTool(page, tool)
+  if (!(await page.$(`[data-create-party][data-game-id="${tool}"] [name="maxSeats"]`))) {
+    await clickText(page, '开一桌')
+  }
+  await page.waitForSelector('[data-create-party] [name="maxSeats"]')
+}
+
+/** After chip tool「开一桌」is showing the create form. */
 export async function fillCreateRoom(
   page,
   { buyIn = '100', maxSeats, smallBlind, bigBlind } = {},
 ) {
-  await page.waitForSelector('[data-create-room] [name="buyInN"]')
+  await openChipCreate(page)
   await setInputValue(page, '[data-create-room] [name="buyInN"]', buyIn)
   await setInputValue(page, '[data-create-room] [name="maxSeats"]', maxSeats ?? '8')
   if (smallBlind != null) {
@@ -52,18 +97,12 @@ export async function fillCreateRoom(
 }
 
 export async function confirmCreateRoom(page, opts) {
-  await clickText(page, '开一桌')
   await fillCreateRoom(page, opts)
   await clickText(page, '确认')
 }
 
 export async function confirmCreateParty(page, { maxSeats, gameId } = {}) {
-  await clickText(page, '局桌')
-  await page.waitForSelector('[data-create-party] [name="maxSeats"]')
-  if (gameId) {
-    await page.waitForSelector(`[data-create-party] [data-game-id="${gameId}"]`)
-    await page.click(`[data-create-party] [data-game-id="${gameId}"]`)
-  }
+  await openPartyCreate(page, gameId)
   if (maxSeats != null) {
     await setInputValue(page, '[data-create-party] [name="maxSeats"]', maxSeats)
   }

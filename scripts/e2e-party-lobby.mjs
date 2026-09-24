@@ -10,7 +10,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
-import { clickText, confirmCreateParty, setInputValue } from './e2e-lib.mjs'
+import { clickText, confirmCreateParty } from './e2e-lib.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const FE = Number(process.env.E2E_FE_PORT || 45381)
@@ -159,26 +159,29 @@ try {
     defaultViewport: { width: 390, height: 844 },
   })
 
-  // Home: 局桌 primary, chip demoted, dice hidden
+  // Home: tool wall, no direct-create primary CTAs
   const home = await newDevice(browser)
   await home.page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await home.page.waitForSelector('.brand')
   const homeText = await home.page.evaluate(() => document.body.innerText)
-  assert(homeText.includes('局桌'), 'home has 局桌')
-  assert(homeText.includes('开一桌'), 'chip create kept')
-  assert(homeText.includes('筹码桌'), 'chip tile kept')
+  assert(homeText.includes('筹码桌'), 'chip tile')
+  assert(homeText.includes('谁是卧底'), 'undercover tile')
+  assert(homeText.includes('真心话大冒险'), 'truthDare tile')
+  assert(homeText.includes('加入'), 'join kept')
   assert(!homeText.includes('骰子'), 'dice hidden')
   assert(!homeText.includes('随机工具'), 'random tile hidden')
-  const primary = await home.page.$eval('.cta-row .btn.primary', (el) =>
-    (el.textContent || '').trim(),
+  const homeCreateBtns = await home.page.evaluate(() =>
+    [...document.querySelectorAll('button')]
+      .map((b) => (b.textContent || '').trim())
+      .filter((t) => t === '开一桌' || t === '局桌'),
   )
-  assert(primary === '局桌', `primary CTA is 局桌, got ${primary}`)
+  assert(homeCreateBtns.length === 0, `home has no create CTAs, got ${homeCreateBtns}`)
   await home.page.screenshot({
     path: `${ART}/party-home.png`,
     fullPage: true,
   })
   await home.ctx.close()
-  console.log('PASS: home promotes 局桌, keeps 开一桌, hides dice')
+  console.log('PASS: home tool wall, no direct-create CTAs')
 
   // Dual-end: typed join
   const host = await newDevice(browser)
@@ -318,10 +321,7 @@ try {
     },
   })
   await fail.page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await clickText(fail.page, '局桌')
-  await fail.page.waitForSelector('[data-create-party]')
-  await setInputValue(fail.page, '[data-create-party] [name="maxSeats"]', '8')
-  await clickText(fail.page, '确认')
+  await confirmCreateParty(fail.page, { maxSeats: '8' })
   await fail.page.waitForFunction(
     (copy) =>
       [...document.querySelectorAll('.toast, .error')].some((el) =>

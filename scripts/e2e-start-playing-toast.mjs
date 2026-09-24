@@ -79,7 +79,6 @@ try {
 
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.brand')
-  await clickText(page, '开一桌')
   await fillCreateRoom(page)
   await clickText(page, '确认')
   await page.waitForSelector('.nickname-card input')

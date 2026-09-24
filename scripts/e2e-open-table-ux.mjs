@@ -1,5 +1,5 @@
 /**
- * Homepage「开一桌」/「确认」and lobby「开桌」must show 开桌中…
+ * Chip tool「开一桌」/「确认」and lobby「开桌」must show 开桌中…
  * then a human toast on failure (never silent no-op).
  *
  * Spawns vite + node relay. Run: node scripts/e2e-open-table-ux.mjs
@@ -171,13 +171,12 @@ try {
     return { ctx, page }
   }
 
-  // —— Home create: Loading then fail toast ——
+  // —— Chip tool create: Loading then fail toast ——
   roomsMode = 'slow-fail'
   phaseMode = 'ok'
   const home = await newInterceptedPage()
   await home.page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await home.page.waitForSelector('.brand')
-  await clickText(home.page, '开一桌')
   await fillCreateRoom(home.page)
   await clickText(home.page, '确认')
   await hasButton(home.page, BUSY)
@@ -189,14 +188,14 @@ try {
   const homeToast = await home.page.$eval('.toast', (el) => el.textContent.trim())
   assert(homeToast === UNREACHABLE, `home toast: ${homeToast}`)
   assert(
-    await home.page.$('.page.home'),
-    'home create fail must stay on homepage',
+    await home.page.$('[data-tool-page="chip"]'),
+    'chip create fail must stay on /tools/chip',
   )
   await home.page.screenshot({
     path: `${ART}/open-table-home-fail-toast.png`,
     fullPage: true,
   })
-  console.log('PASS: homepage 确认 shows 开桌中… then RELAY_UNREACHABLE toast')
+  console.log('PASS: chip tool 确认 shows 开桌中… then RELAY_UNREACHABLE toast')
   await home.ctx.close()
 
   // —— Lobby 开桌: Loading then fail toast, then success still works ——
@@ -205,7 +204,6 @@ try {
   const lobby = await newInterceptedPage()
   await lobby.page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await lobby.page.waitForSelector('.brand')
-  await clickText(lobby.page, '开一桌')
   await fillCreateRoom(lobby.page)
   await clickText(lobby.page, '确认')
   await lobby.page.waitForSelector('.nickname-card input')

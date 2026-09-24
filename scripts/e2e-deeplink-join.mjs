@@ -103,7 +103,6 @@ async function newDevice(browser) {
 async function hostCreateLobby(page, { name = '桌主', maxSeats = '8' } = {}) {
   await page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('.brand')
-  await clickText(page, '开一桌')
   await fillCreateRoom(page, { buyIn: '100', maxSeats })
   await clickText(page, '确认')
   await page.waitForSelector('.nickname-card input')
