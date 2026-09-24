@@ -46,7 +46,6 @@ async function shot(name) {
 
 try {
   await page.goto(BASE, { waitUntil: 'networkidle0' })
-  await clickText('开一桌')
   await fillCreateRoom(page)
   await clickText('确认')
   await page.waitForSelector('.nickname-card input')

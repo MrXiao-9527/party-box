@@ -49,7 +49,6 @@ try {
   await page.waitForSelector('.brand')
 
   // buy-in ≤0 blocked
-  await clickText(page, '开一桌')
   await fillCreateRoom(page, { buyIn: '0' })
   await clickText(page, '确认')
   await page.waitForFunction(() =>

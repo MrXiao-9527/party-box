@@ -161,7 +161,6 @@ try {
 
   await host.goto(BASE, { waitUntil: 'domcontentloaded' })
   await host.waitForSelector('.brand')
-  await clickText(host, '开一桌')
   await fillCreateRoom(host, {
     buyIn: '100',
     maxSeats: '4',
@@ -229,7 +228,6 @@ try {
   await prep(host2)
   await host2.goto(BASE, { waitUntil: 'domcontentloaded' })
   await host2.waitForSelector('.brand')
-  await clickText(host2, '开一桌')
   await fillCreateRoom(host2, { buyIn: '100', maxSeats: '4' })
   await clickText(host2, '确认')
   await host2.waitForSelector('.nickname-card input')

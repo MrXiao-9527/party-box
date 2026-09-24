@@ -12,7 +12,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
-import { clickText, confirmCreateParty, setInputValue } from './e2e-lib.mjs'
+import { clickText, confirmCreateParty } from './e2e-lib.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const FE = Number(process.env.E2E_FE_PORT || 45391)
@@ -215,21 +215,22 @@ try {
   const home = await newDevice(browser)
   await home.page.goto(BASE, { waitUntil: 'domcontentloaded' })
   await home.page.waitForSelector('.brand')
-  await clickText(home.page, '局桌')
-  await home.page.waitForSelector('[data-create-party]')
   const homeText = await home.page.evaluate(() => document.body.innerText)
   assert(homeText.includes('谁是卧底'), 'home keeps 谁是卧底')
   assert(homeText.includes('真心话大冒险'), 'home has 真心话大冒险')
+  await home.page.click('[data-tool="truthDare"]')
+  await home.page.waitForSelector('[data-tool-page="truthDare"]')
+  await clickText(home.page, '开一桌')
   const selected = await home.page.$eval('[data-create-party]', (el) =>
     el.getAttribute('data-selected-game'),
   )
-  assert(selected === 'undercover', 'default game remains undercover')
+  assert(selected === 'truthDare', 'truthDare page locks gameId')
   await home.page.screenshot({
     path: `${ART}/truth-dare-home-pick.png`,
     fullPage: true,
   })
   await home.ctx.close()
-  console.log('PASS: home keeps 谁是卧底 and adds 真心话大冒险')
+  console.log('PASS: home tool wall + truthDare page locks gameId')
 
   const host = await newDevice(browser)
   const code = await hostCreateTruthDare(host.page, { name: '桌主A', maxSeats: '8' })
@@ -696,11 +697,7 @@ try {
     },
   })
   await fail.page.goto(BASE, { waitUntil: 'domcontentloaded' })
-  await clickText(fail.page, '局桌')
-  await fail.page.waitForSelector('[data-create-party]')
-  await fail.page.click('[data-create-party] [data-game-id="truthDare"]')
-  await setInputValue(fail.page, '[data-create-party] [name="maxSeats"]', '8')
-  await clickText(fail.page, '确认')
+  await confirmCreateParty(fail.page, { maxSeats: '8', gameId: 'truthDare' })
   await fail.page.waitForFunction(
     (copy) =>
       [...document.querySelectorAll('.toast, .error')].some((el) =>

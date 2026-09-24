@@ -83,7 +83,6 @@ try {
 
   await host.goto(BASE, { waitUntil: 'domcontentloaded' })
   await host.waitForSelector('.brand')
-  await clickText(host, '开一桌')
   await fillCreateRoom(host, { maxSeats: '2' })
   await clickText(host, '确认')
   await host.waitForSelector('.nickname-card input')

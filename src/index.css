@@ -61,12 +61,12 @@ input {
 
 /* —— Home —— */
 .home-hero {
-  flex: 1;
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  padding: 18vh 0 3.5rem;
-  min-height: 62dvh;
+  justify-content: flex-start;
+  padding: 2.75rem 0 1.25rem;
+  min-height: 0;
   animation: rise 0.55s ease-out both;
 }
 
@@ -88,7 +88,7 @@ input {
 }
 
 .tagline {
-  margin: 0 0 2.25rem;
+  margin: 0 0 1.25rem;
   color: var(--text-secondary);
   font-size: 0.95rem;
   line-height: 1.5;
@@ -347,6 +347,19 @@ input {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
+}
+
+.tool-grid-main {
+  grid-template-columns: 1fr;
+}
+
+.tool-open-btn {
+  margin-top: 1.25rem;
+  align-self: flex-start;
+}
+
+.tool-back-row {
+  margin-top: 1.5rem;
 }
 
 .tool-tile {
