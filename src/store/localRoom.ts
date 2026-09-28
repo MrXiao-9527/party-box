@@ -2,10 +2,16 @@ import { dealRound, type SeatPrivate } from '../games/undercover/deal'
 import {
   applyDisconnectSkip,
   applyRejoinSpeakTail,
+  applyVotingDisconnect,
   advanceSpeakRing,
   buildSpeakingRound,
   isUndercoverDealtPhase,
   onlineAliveSeatIds,
+  canSettleVotes,
+  castVoteOnParty,
+  settleVoteParty,
+  checkUndercoverWinner,
+  VOTE_ERR,
 } from '../games/undercover/speak'
 import { pickPrompt, ensureTruthDareTurn, nextDrawerSeatId } from '../games/truthDare/draw'
 import {
@@ -586,6 +592,14 @@ export function setMemberConnected(
     party = connected
       ? applyRejoinSpeakTail(stub, seatId, members)
       : applyDisconnectSkip(stub, members)
+  } else if (stub.gameId === 'undercover' && stub.phase === 'voting' && !connected) {
+    const secrets = loadSecrets(roomCode)
+    party = nextLocalUndercoverParty(
+      existing,
+      secrets,
+      applyVotingDisconnect(stub, members, seatId),
+      members,
+    )
   }
 
   // Connection flag only. Host-leave pause is explicit via setPhase('paused')
@@ -1124,6 +1138,70 @@ export function newOpId(): string {
   return uid('op')
 }
 
+function hydrateLocalReveal(
+  existing: PersistedRoom,
+  secrets: PartySecrets,
+  party: ReturnType<typeof partyStubOf>,
+  members = existing.room.members,
+) {
+  const seats = members.map((m) => {
+    const priv = secrets.partyPrivates[m.seatId]
+    if (priv?.word) {
+      return {
+        seatId: m.seatId,
+        hasWord: true,
+        word: priv.word,
+        role: priv.role === 'undercover' ? ('undercover' as const) : ('civilian' as const),
+      }
+    }
+    return { seatId: m.seatId, hasWord: false }
+  })
+  const eliminatedSeatIds = party.eliminatedSeatIds || []
+  const elim = new Set(eliminatedSeatIds)
+  const aliveIds = seats
+    .filter((s) => s.hasWord && !elim.has(s.seatId))
+    .map((s) => s.seatId)
+  const winner =
+    party.winner === 'civilian' || party.winner === 'undercover'
+      ? party.winner
+      : checkUndercoverWinner(eliminatedSeatIds, secrets.partyPrivates, aliveIds)
+  return {
+    gameId: party.gameId || 'undercover',
+    phase: 'revealed' as const,
+    pairId: party.pairId,
+    undercoverCount: party.undercoverCount,
+    round: party.round || 1,
+    seats,
+    eliminatedSeatIds,
+    ...(winner ? { winner } : {}),
+  }
+}
+
+function nextLocalUndercoverParty(
+  existing: PersistedRoom,
+  secrets: PartySecrets,
+  party: ReturnType<typeof partyStubOf>,
+  members = existing.room.members,
+): ReturnType<typeof partyStubOf> | ReturnType<typeof hydrateLocalReveal> {
+  let next = party
+  if (next.phase === 'voting' && canSettleVotes(next, members)) {
+    next = partyStubOf({
+      ...next,
+      ...settleVoteParty(next, members, secrets.partyPrivates),
+    })
+  }
+  if (next.phase === 'revealed') {
+    return hydrateLocalReveal(existing, secrets, next, members)
+  }
+  return next
+}
+
+function voteErrorAck(code: string): string {
+  if (code === VOTE_ERR.NOT_VOTING) return ACK_REASONS.NOT_VOTING
+  if (code === VOTE_ERR.NOT_ALIVE) return ACK_REASONS.NOT_ALIVE_VOTER
+  return ACK_REASONS.BAD_VOTE_TARGET
+}
+
 export function startUndercover(
   roomCode: string,
   fromSeatId: string,
@@ -1206,29 +1284,11 @@ export function revealUndercover(
   ) {
     return { error: ACK_REASONS.NOT_PLAYING }
   }
-  const seats = existing.room.members.map((m) => {
-    const priv = secrets.partyPrivates[m.seatId]
-    if (priv?.word) {
-      return {
-        seatId: m.seatId,
-        hasWord: true,
-        word: priv.word,
-        role: priv.role === 'undercover' ? ('undercover' as const) : ('civilian' as const),
-      }
-    }
-    return { seatId: m.seatId, hasWord: false }
-  })
+  const revealed = hydrateLocalReveal(existing, secrets, party)
   const data: PersistedRoom = {
     room: {
       ...existing.room,
-      party: {
-        gameId: party.gameId || 'undercover',
-        phase: 'revealed',
-        pairId: party.pairId,
-        undercoverCount: party.undercoverCount,
-        round: party.round || 1,
-        seats,
-      },
+      party: revealed,
     },
     table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
   }
@@ -1303,6 +1363,46 @@ export function speakDoneUndercover(
         ...party,
         ...ring,
       },
+    },
+    table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+  }
+  return { data: saveRoom(data) }
+}
+
+export function castVoteUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+  targetSeatId?: string,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+  if (!isPartyGame(existing.room)) return { error: ACK_REASONS.INVALID }
+  const secrets = loadSecrets(roomCode)
+  if (!seatToken || secrets.seatTokens[fromSeatId] !== seatToken) {
+    return { error: ACK_REASONS.INVALID }
+  }
+  if (!existing.room.members.some((m) => m.seatId === fromSeatId)) {
+    return { error: ACK_REASONS.INVALID }
+  }
+  const party = partyStubOf(existing.room.party)
+  if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
+  const voted = castVoteOnParty(
+    party,
+    existing.room.members,
+    fromSeatId,
+    targetSeatId,
+  )
+  if ('error' in voted) return { error: voteErrorAck(voted.error) }
+  const next = nextLocalUndercoverParty(
+    existing,
+    secrets,
+    partyStubOf({ ...party, ...voted.party }),
+  )
+  const data: PersistedRoom = {
+    room: {
+      ...existing.room,
+      party: next,
     },
     table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
   }

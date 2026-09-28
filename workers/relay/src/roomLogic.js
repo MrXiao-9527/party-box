@@ -9,8 +9,14 @@ import {
   advanceSpeakRing,
   applyDisconnectSkip,
   applyRejoinSpeakTail,
+  applyVotingDisconnect,
   onlineAliveSeatIds,
   isUndercoverDealtPhase,
+  canSettleVotes,
+  castVoteOnParty,
+  settleVoteParty,
+  checkUndercoverWinner,
+  VOTE_ERR,
 } from './undercover.js'
 import {
   pickPrompt,
@@ -48,6 +54,9 @@ export const ACK_REASONS = {
   ALREADY_STARTED: '本局已开始',
   NOT_PLAYING: '进行中才能揭晓',
   NOT_SPEAKING: '发言中才能操作',
+  NOT_VOTING: '投票中才能投票',
+  NOT_ALIVE_VOTER: '已出局或未发词，无法投票',
+  BAD_VOTE_TARGET: '只能投其他存活席',
   NOT_REVEALED: '揭晓后才能开下一局',
 }
 
@@ -115,11 +124,21 @@ function seatIdOrNull(raw) {
   return typeof raw === 'string' && raw.trim() ? raw.trim() : null
 }
 
-function mapPublicSeat(s, revealed) {
+function asVoteNotice(raw) {
+  if (raw === '平票，请再投一次' || raw === '平票，无人出局') return raw
+  return undefined
+}
+
+function mapPublicSeat(s, revealed, eliminated) {
   if (!s || typeof s !== 'object' || typeof s.seatId !== 'string' || !s.seatId) {
     return null
   }
-  const seat = { seatId: s.seatId, hasWord: !!s.hasWord }
+  const elim = eliminated instanceof Set ? eliminated : new Set()
+  const seat = {
+    seatId: s.seatId,
+    hasWord: !!s.hasWord,
+    alive: !elim.has(s.seatId),
+  }
   if (revealed && seat.hasWord) {
     if (typeof s.word === 'string' && s.word.trim()) seat.word = s.word.trim()
     if (s.role === 'civilian' || s.role === 'undercover') seat.role = s.role
@@ -186,20 +205,23 @@ export function partyStubOf(raw) {
   if (Number.isInteger(n) && n > 0) stub.undercoverCount = n
   const round = typeof src.round === 'number' ? src.round : Number(src.round)
   if (Number.isInteger(round) && round > 0) stub.round = round
-  if (Array.isArray(src.seats)) {
-    stub.seats = src.seats
-      .map((s) => mapPublicSeat(s, phase === 'revealed'))
-      .filter(Boolean)
-  }
   const speakOrder = stringIdList(src.speakOrder)
   const spokeSeatIds = stringIdList(src.spokeSeatIds)
   const speakerSeatId = seatIdOrNull(src.speakerSeatId)
   const eliminatedSeatIds = stringIdList(src.eliminatedSeatIds)
+  const eliminated = new Set(eliminatedSeatIds)
+  if (Array.isArray(src.seats)) {
+    stub.seats = src.seats
+      .map((s) => mapPublicSeat(s, phase === 'revealed', eliminated))
+      .filter(Boolean)
+  }
+  const voteNotice = asVoteNotice(src.voteNotice)
   if (phase === 'speaking' || phase === 'voting') {
     stub.speakOrder = speakOrder
     stub.spokeSeatIds = spokeSeatIds
     stub.speakerSeatId = speakerSeatId
     if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+    if (voteNotice) stub.voteNotice = voteNotice
     if (phase === 'voting') {
       stub.voteRound = src.voteRound === 1 ? 1 : 0
       stub.votes = publicVotes(src.votes)
@@ -746,6 +768,8 @@ export function createRoomStore() {
       party = connected
         ? applyRejoinSpeakTail(stub, seatId, members)
         : applyDisconnectSkip(stub, members)
+    } else if (stub.gameId === 'undercover' && stub.phase === 'voting' && !connected) {
+      party = finalizeUndercoverParty(existing, applyVotingDisconnect(stub, members, seatId), members)
     }
     return set({
       room: { ...existing.room, members, ...(party ? { party } : {}) },
@@ -831,6 +855,59 @@ export function createRoomStore() {
     return null
   }
 
+  function hydrateUndercoverReveal(existing, party, members) {
+    const list = members || existing.room.members
+    const privates = existing.partyPrivates || {}
+    const seats = list.map((m) => {
+      const priv = privates[m.seatId]
+      if (priv && typeof priv.word === 'string' && priv.word) {
+        return {
+          seatId: m.seatId,
+          hasWord: true,
+          word: priv.word,
+          role: priv.role === 'undercover' ? 'undercover' : 'civilian',
+        }
+      }
+      return { seatId: m.seatId, hasWord: false }
+    })
+    const eliminatedSeatIds = stringIdList(party.eliminatedSeatIds)
+    const elim = new Set(eliminatedSeatIds)
+    const aliveIds = seats
+      .filter((s) => s.hasWord && !elim.has(s.seatId))
+      .map((s) => s.seatId)
+    const winner =
+      party.winner === 'civilian' || party.winner === 'undercover'
+        ? party.winner
+        : checkUndercoverWinner(eliminatedSeatIds, privates, aliveIds)
+    const next = {
+      gameId: party.gameId || 'undercover',
+      phase: 'revealed',
+      pairId: party.pairId,
+      undercoverCount: party.undercoverCount,
+      round: party.round || 1,
+      seats,
+      eliminatedSeatIds,
+    }
+    if (winner) next.winner = winner
+    return next
+  }
+
+  function nextUndercoverParty(existing, party, members) {
+    const list = members || existing.room.members
+    let next = party
+    if (next.phase === 'voting' && canSettleVotes(next, list)) {
+      next = settleVoteParty(next, list, existing.partyPrivates)
+    }
+    if (next.phase === 'revealed') {
+      next = hydrateUndercoverReveal(existing, next, list)
+    }
+    return next
+  }
+
+  function finalizeUndercoverParty(existing, party, members) {
+    return nextUndercoverParty(existing, party, members)
+  }
+
   function applyUndercoverDeal(existing, party, round) {
     const seatIds = existing.room.members.map((m) => m.seatId)
     const dealt = dealRound(seatIds)
@@ -887,31 +964,12 @@ export function createRoomStore() {
     ) {
       return { error: ACK_REASONS.NOT_PLAYING }
     }
-    const privates = existing.partyPrivates || {}
-    const seats = existing.room.members.map((m) => {
-      const priv = privates[m.seatId]
-      if (priv && typeof priv.word === 'string' && priv.word) {
-        return {
-          seatId: m.seatId,
-          hasWord: true,
-          word: priv.word,
-          role: priv.role === 'undercover' ? 'undercover' : 'civilian',
-        }
-      }
-      return { seatId: m.seatId, hasWord: false }
-    })
+    const revealed = hydrateUndercoverReveal(existing, party, existing.room.members)
     const data = set({
       ...existing,
       room: {
         ...existing.room,
-        party: {
-          gameId: party.gameId || 'undercover',
-          phase: 'revealed',
-          pairId: party.pairId,
-          undercoverCount: party.undercoverCount,
-          round: party.round || 1,
-          seats,
-        },
+        party: revealed,
       },
       table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
       partyPrivates: existing.partyPrivates,
@@ -959,6 +1017,37 @@ export function createRoomStore() {
           ...party,
           ...ring,
         },
+      },
+      table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+    })
+    return { data }
+  }
+
+  function voteErrorAck(code) {
+    if (code === VOTE_ERR.NOT_VOTING) return ACK_REASONS.NOT_VOTING
+    if (code === VOTE_ERR.NOT_ALIVE) return ACK_REASONS.NOT_ALIVE_VOTER
+    return ACK_REASONS.BAD_VOTE_TARGET
+  }
+
+  function castVoteUndercover(roomCode, fromSeatId, seatToken, targetSeatId) {
+    const existing = get(roomCode)
+    const seatErr = partySeatError(existing, fromSeatId, seatToken)
+    if (seatErr) return { error: seatErr }
+    const party = partyStubOf(existing.room.party)
+    if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
+    const voted = castVoteOnParty(
+      party,
+      existing.room.members,
+      fromSeatId,
+      targetSeatId,
+    )
+    if (voted.error) return { error: voteErrorAck(voted.error) }
+    const next = nextUndercoverParty(existing, voted.party, existing.room.members)
+    const data = set({
+      ...existing,
+      room: {
+        ...existing.room,
+        party: next,
       },
       table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
     })
@@ -1592,6 +1681,7 @@ export function createRoomStore() {
     revealUndercover,
     nextRoundUndercover,
     speakDoneUndercover,
+    castVoteUndercover,
     getSeatPrivate,
     drawPrompt,
     redrawPrompt,

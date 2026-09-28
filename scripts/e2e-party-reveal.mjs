@@ -249,7 +249,17 @@ try {
     )
   }
   await host.page.waitForSelector('[data-party-phase="voting"]')
-  await clickText(host.page, '揭晓')
+  await guest1.page.waitForSelector('[data-party-phase="voting"]')
+  await guest2.page.waitForSelector('[data-party-phase="voting"]')
+  const voteSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
+  const seatC = voteSnap.data.room.members.find((m) => m.name === '玩家C')?.seatId
+  assert(seatC, 'seat C')
+  await host.page.waitForSelector(`[data-vote-target="${seatC}"]`)
+  await host.page.click(`[data-vote-target="${seatC}"]`)
+  await guest1.page.waitForSelector(`[data-vote-target="${seatC}"]`)
+  await guest1.page.click(`[data-vote-target="${seatC}"]`)
+  await guest2.page.waitForSelector('[data-vote-abstain]')
+  await guest2.page.click('[data-vote-abstain]')
   await host.page.waitForSelector('[data-party-phase="revealed"]')
   await guest1.page.waitForSelector('[data-party-phase="revealed"]')
   await guest2.page.waitForSelector('[data-party-phase="revealed"]')
@@ -288,6 +298,12 @@ try {
   const g1Text = await guest1.page.evaluate(() => document.body.innerText || '')
   assert(hostText.includes('平民') && hostText.includes('卧底'), 'host shows identities')
   assert(g1Text.includes('平民') && g1Text.includes('卧底'), 'guest shows identities')
+  assert(hostText.includes('平民词') && hostText.includes('卧底词'), 'host reveal pair')
+  assert(g1Text.includes('平民词') && g1Text.includes('卧底词'), 'guest reveal pair')
+  assert(hostText.includes('已出局') && g1Text.includes('已出局'), 'dual-end 已出局')
+  const ritualHost = await host.page.$('[data-reveal-ritual]')
+  const ritualGuest = await guest1.page.$('[data-reveal-ritual]')
+  assert(ritualHost && ritualGuest, 'dual-end reveal ritual')
   for (const w of [wHost, wG1, wG2]) {
     assert(hostText.includes(w), `host public list has ${w}`)
     assert(g1Text.includes(w), `guest public list has ${w}`)
@@ -298,6 +314,15 @@ try {
 
   const revSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
   assert(revSnap.data.room.party.phase === 'revealed', 'GET revealed')
+  assert(
+    revSnap.data.room.party.winner === 'civilian' ||
+      revSnap.data.room.party.winner === 'undercover',
+    'GET winner after unique vote',
+  )
+  assert(
+    (revSnap.data.room.party.eliminatedSeatIds || []).includes(seatC),
+    'GET C eliminated',
+  )
   const revSeats = revSnap.data.room.party.seats
   assert(
     revSeats.filter((s) => s.hasWord).every((s) => s.word && s.role),
@@ -307,7 +332,7 @@ try {
   await guest1.page.screenshot({ path: `${ART}/undercover-reveal-guest.png`, fullPage: true })
   console.log('PASS: dual-end revealed; public words+roles')
 
-  await clickText(host.page, '下一局')
+  await clickText(host.page, '再来一局')
   await host.page.waitForSelector('[data-party-phase="speaking"]')
   await guest1.page.waitForSelector('[data-party-phase="speaking"]')
   await guest2.page.waitForSelector('[data-party-phase="speaking"]')

@@ -354,6 +354,23 @@ async function handle(req, res) {
         return
       }
 
+      if (req.method === 'POST' && action === 'cast-vote') {
+        const body = await readBody(req)
+        const result = store.castVoteUndercover(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.targetSeatId,
+        )
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
       if (req.method === 'POST' && action === 'seat-private') {
         const body = await readBody(req)
         const result = store.getSeatPrivate(code, body.seatId, body.seatToken)
