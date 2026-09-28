@@ -1,7 +1,7 @@
 {
-  "version": 1,
+  "version": 2,
   "gameId": "undercover",
-  "note": "Self-authored Chinese pairs. Add categories/pairs here; do not scrape external banks.",
+  "note": "Self-authored Chinese pairs. Add categories/pairs here; do not scrape.",
   "categories": [
     {
       "id": "food",
@@ -12,7 +12,11 @@
         { "id": "p03", "civilian": "可乐", "undercover": "雪碧" },
         { "id": "p04", "civilian": "火锅", "undercover": "烧烤" },
         { "id": "p05", "civilian": "酸奶", "undercover": "奶酪" },
-        { "id": "p06", "civilian": "饺子", "undercover": "馄饨" }
+        { "id": "p06", "civilian": "饺子", "undercover": "馄饨" },
+        { "id": "p31", "civilian": "米饭", "undercover": "面条" },
+        { "id": "p32", "civilian": "西瓜", "undercover": "哈密瓜" },
+        { "id": "p33", "civilian": "咖啡", "undercover": "奶茶" },
+        { "id": "p34", "civilian": "草莓", "undercover": "樱桃" }
       ]
     },
     {
@@ -24,7 +28,11 @@
         { "id": "p09", "civilian": "被子", "undercover": "毯子" },
         { "id": "p10", "civilian": "牙膏", "undercover": "牙刷" },
         { "id": "p11", "civilian": "洗发水", "undercover": "沐浴露" },
-        { "id": "p12", "civilian": "毛巾", "undercover": "手帕" }
+        { "id": "p12", "civilian": "毛巾", "undercover": "手帕" },
+        { "id": "p35", "civilian": "电梯", "undercover": "扶梯" },
+        { "id": "p36", "civilian": "空调", "undercover": "风扇" },
+        { "id": "p37", "civilian": "冰箱", "undercover": "洗衣机" },
+        { "id": "p38", "civilian": "钥匙", "undercover": "门卡" }
       ]
     },
     {
@@ -36,7 +44,11 @@
         { "id": "p15", "civilian": "图书馆", "undercover": "书店" },
         { "id": "p16", "civilian": "超市", "undercover": "便利店" },
         { "id": "p17", "civilian": "电影院", "undercover": "剧院" },
-        { "id": "p18", "civilian": "海边", "undercover": "湖边" }
+        { "id": "p18", "civilian": "海边", "undercover": "湖边" },
+        { "id": "p39", "civilian": "机场", "undercover": "火车站" },
+        { "id": "p40", "civilian": "医院", "undercover": "诊所" },
+        { "id": "p41", "civilian": "学校", "undercover": "幼儿园" },
+        { "id": "p42", "civilian": "银行", "undercover": "邮局" }
       ]
     },
     {
@@ -48,7 +60,11 @@
         { "id": "p21", "civilian": "警察", "undercover": "保安" },
         { "id": "p22", "civilian": "厨师", "undercover": "服务员" },
         { "id": "p23", "civilian": "司机", "undercover": "导游" },
-        { "id": "p24", "civilian": "记者", "undercover": "作家" }
+        { "id": "p24", "civilian": "记者", "undercover": "作家" },
+        { "id": "p43", "civilian": "演员", "undercover": "导演" },
+        { "id": "p44", "civilian": "程序员", "undercover": "设计师" },
+        { "id": "p45", "civilian": "快递员", "undercover": "外卖员" },
+        { "id": "p46", "civilian": "律师", "undercover": "法官" }
       ]
     },
     {
@@ -60,7 +76,31 @@
         { "id": "p27", "civilian": "背包", "undercover": "手提包" },
         { "id": "p28", "civilian": "铅笔", "undercover": "钢笔" },
         { "id": "p29", "civilian": "闹钟", "undercover": "手表" },
-        { "id": "p30", "civilian": "月亮", "undercover": "星星" }
+        { "id": "p30", "civilian": "月亮", "undercover": "星星" },
+        { "id": "p47", "civilian": "耳机", "undercover": "音箱" },
+        { "id": "p48", "civilian": "相机", "undercover": "望远镜" },
+        { "id": "p49", "civilian": "手套", "undercover": "围巾" },
+        { "id": "p50", "civilian": "蜡烛", "undercover": "台灯" }
+      ]
+    },
+    {
+      "id": "animal",
+      "name": "动物",
+      "pairs": [
+        { "id": "p51", "civilian": "猫咪", "undercover": "小狗" },
+        { "id": "p52", "civilian": "熊猫", "undercover": "浣熊" },
+        { "id": "p53", "civilian": "金鱼", "undercover": "锦鲤" },
+        { "id": "p54", "civilian": "企鹅", "undercover": "海豹" }
+      ]
+    },
+    {
+      "id": "school",
+      "name": "校园",
+      "pairs": [
+        { "id": "p55", "civilian": "黑板", "undercover": "白板" },
+        { "id": "p56", "civilian": "作业", "undercover": "试卷" },
+        { "id": "p57", "civilian": "课间操", "undercover": "运动会" },
+        { "id": "p58", "civilian": "篮球", "undercover": "足球" }
       ]
     }
   ]

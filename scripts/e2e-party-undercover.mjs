@@ -245,6 +245,24 @@ try {
   const lateText = await pageText(late.page)
   assert(lateText.includes('本局已开始，本席未发词，请等下一局'), 'mid-join copy')
   assert(!lateText.includes('你的词'), 'mid-join no 你的词')
+  const latePhase = await late.page.evaluate(
+    () => document.querySelector('[data-party-phase]')?.getAttribute('data-party-phase') || '',
+  )
+  assert(latePhase === 'speaking', 'late sees speaking phase')
+  const lateSpeaker = await late.page.evaluate(
+    () => document.querySelector('[data-speaker-seat]')?.getAttribute('data-speaker-seat') || '',
+  )
+  assert(lateSpeaker === hostSpeaker, 'late sees same speaker')
+  const lateTurn = await late.page.evaluate(
+    () => document.querySelector('[data-turn-copy]')?.textContent || '',
+  )
+  assert(lateTurn.includes('轮到'), 'late sees 轮到谁')
+  assert(await late.page.$('[data-phase-bar]'), 'late sees phase bar')
+  const lateSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
+  assert(lateSnap.data.room.party.phase === 'speaking', 'late GET phase')
+  assert(lateSnap.data.room.party.speakerSeatId === hostSpeaker, 'late GET speaker')
+  assert(Array.isArray(lateSnap.data.room.party.eliminatedSeatIds), 'late GET elim')
+  assert(!publicPayloadLeaks(lateSnap, [wHost, wG1, wG2]), 'late GET public clean')
   for (const w of [wHost, wG1, wG2]) {
     assert(!lateText.includes(w), `mid-join must not show ${w}`)
   }

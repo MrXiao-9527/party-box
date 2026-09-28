@@ -28,6 +28,9 @@ export const PROMPT_TYPE_LABEL: Record<PromptDisplayType, string> = {
 /** Recent-K window for truth/dare draws (PRD Q2). */
 export const PROMPT_RECENT_K = 8
 
+/** Near-K window for undercover pair deals (PRD §7). */
+export const PAIR_RECENT_K = 48
+
 /** Public shared prompt — dual-end same screen. Never SeatPrivate. */
 export interface PartyPrompt {
   id: string
@@ -89,6 +92,8 @@ export interface PartyStub {
   voteNotice?: '平票，请再投一次' | '平票，无人出局'
   eliminatedSeatIds?: string[]
   winner?: 'civilian' | 'undercover' | null
+  /** undercover: last-K pair ids for deal dedupe (opaque, no word text). */
+  recentPairIds?: string[]
   /** truthDare: current public prompt (both ends). */
   prompt?: PartyPrompt
   /** truthDare: last-K prompt ids for draw dedupe. */
@@ -454,6 +459,15 @@ function recentPromptIdsOf(raw: unknown): string[] | undefined {
   return ids.slice(-PROMPT_RECENT_K)
 }
 
+function recentPairIdsOf(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const ids = raw
+    .filter((x): x is string => typeof x === 'string' && !!x.trim())
+    .map((x) => x.trim())
+  if (!ids.length) return undefined
+  return ids.slice(-PAIR_RECENT_K)
+}
+
 function truthDareStubOf(src: Record<string, unknown> | null): PartyStub {
   const prompt = publicPartyPrompt(src?.prompt)
   const recent = recentPromptIdsOf(src?.recentPromptIds)
@@ -495,11 +509,12 @@ export function partyStubOf(raw: unknown): PartyStub {
       .filter((s): s is PartyPublicSeat => !!s)
   }
   const voteNotice = asVoteNotice(src?.voteNotice)
+  const recentPairIds = recentPairIdsOf(src?.recentPairIds)
   if (phase === 'speaking' || phase === 'voting') {
     stub.speakOrder = speakOrder
     stub.spokeSeatIds = spokeSeatIds
     stub.speakerSeatId = speakerSeatId
-    if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+    stub.eliminatedSeatIds = eliminatedSeatIds
     if (voteNotice) stub.voteNotice = voteNotice
     if (phase === 'voting') {
       stub.voteRound = src?.voteRound === 1 ? 1 : 0
@@ -509,8 +524,11 @@ export function partyStubOf(raw: unknown): PartyStub {
     if (speakOrder.length) stub.speakOrder = speakOrder
     if (spokeSeatIds.length) stub.spokeSeatIds = spokeSeatIds
     if (speakerSeatId) stub.speakerSeatId = speakerSeatId
-    if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+    if (phase === 'revealed' || eliminatedSeatIds.length) {
+      stub.eliminatedSeatIds = eliminatedSeatIds
+    }
   }
+  if (recentPairIds) stub.recentPairIds = recentPairIds
   if (src?.winner === 'civilian' || src?.winner === 'undercover') {
     stub.winner = src.winner
   }

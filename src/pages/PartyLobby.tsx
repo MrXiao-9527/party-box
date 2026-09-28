@@ -124,33 +124,35 @@ export function PartyLobby({
         <p className="eyebrow">局桌 · 谁是卧底</p>
         <h1>房间 {room.roomCode.toUpperCase()}</h1>
         <p className="hint">{hint}</p>
-        <ol className="phase-bar" data-phase-bar="1" aria-label="阶段">
-          {PHASE_STEPS.map((step) => (
-            <li
-              key={step.id}
-              className={barId === step.id ? 'current' : ''}
-              data-phase-step={step.id}
-              aria-current={barId === step.id ? 'step' : undefined}
-            >
-              {step.label}
-            </li>
-          ))}
-        </ol>
-        {speaking && (
-          <p className="stage-copy" data-turn-copy="1">
-            {speakerNick ? `轮到 ${speakerNick} 描述` : '等待下一位发言'}
-          </p>
-        )}
-        {voting && (
-          <p className="stage-copy" data-vote-copy="1">
-            投票中
-          </p>
-        )}
-        {party.voteNotice && (voting || speaking) && (
-          <p className="stage-copy" data-vote-notice="1">
-            {party.voteNotice}
-          </p>
-        )}
+        <div className="play-stack" data-play-stack="1">
+          <ol className="phase-bar" data-phase-bar="1" aria-label="阶段">
+            {PHASE_STEPS.map((step) => (
+              <li
+                key={step.id}
+                className={barId === step.id ? 'current' : ''}
+                data-phase-step={step.id}
+                aria-current={barId === step.id ? 'step' : undefined}
+              >
+                {step.label}
+              </li>
+            ))}
+          </ol>
+          {speaking && (
+            <p className="stage-copy turn-copy" data-turn-copy="1">
+              {speakerNick ? `轮到 ${speakerNick} 描述` : '等待下一位发言'}
+            </p>
+          )}
+          {voting && (
+            <p className="stage-copy turn-copy" data-vote-copy="1">
+              投票中
+            </p>
+          )}
+          {party.voteNotice && (voting || speaking) && (
+            <p className="stage-copy" data-vote-notice="1">
+              {party.voteNotice}
+            </p>
+          )}
+        </div>
       </header>
 
       <JoinInvite room={room} />
@@ -169,28 +171,6 @@ export function PartyLobby({
               {MIDJOIN}
             </p>
           )}
-        </section>
-      )}
-
-      {revealed && !selfHasWord && (
-        <p className="midjoin-hint" data-midjoin="1">
-          {MIDJOIN}
-        </p>
-      )}
-
-      {revealed && civWord && ucWord && (
-        <section className="reveal-ritual" data-reveal-ritual="1" aria-label="揭晓">
-          <p className="reveal-pair" data-reveal-civilian={civWord}>
-            平民词 {civWord}
-          </p>
-          <p className="reveal-pair" data-reveal-undercover={ucWord}>
-            卧底词 {ucWord}
-          </p>
-          {party.winner ? (
-            <p className="reveal-winner" data-winner-copy="1">
-              {party.winner === 'civilian' ? '平民胜' : '卧底胜'}
-            </p>
-          ) : null}
         </section>
       )}
 
@@ -239,6 +219,28 @@ export function PartyLobby({
           ) : (
             <p className="hint">{selfOut ? '已出局' : '旁观投票'}</p>
           )}
+        </section>
+      )}
+
+      {revealed && !selfHasWord && (
+        <p className="midjoin-hint" data-midjoin="1">
+          {MIDJOIN}
+        </p>
+      )}
+
+      {revealed && civWord && ucWord && (
+        <section className="reveal-ritual" data-reveal-ritual="1" aria-label="揭晓">
+          <p className="reveal-pair" data-reveal-civilian={civWord}>
+            平民词 {civWord}
+          </p>
+          <p className="reveal-pair" data-reveal-undercover={ucWord}>
+            卧底词 {ucWord}
+          </p>
+          {party.winner ? (
+            <p className="reveal-winner" data-winner-copy="1">
+              {party.winner === 'civilian' ? '平民胜' : '卧底胜'}
+            </p>
+          ) : null}
         </section>
       )}
 

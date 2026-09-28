@@ -1,4 +1,4 @@
-import { dealRound, type SeatPrivate } from '../games/undercover/deal'
+import { dealRound, WORDBANK, type SeatPrivate } from '../games/undercover/deal'
 import {
   applyDisconnectSkip,
   applyRejoinSpeakTail,
@@ -1173,6 +1173,7 @@ function hydrateLocalReveal(
     round: party.round || 1,
     seats,
     eliminatedSeatIds,
+    ...(party.recentPairIds?.length ? { recentPairIds: party.recentPairIds } : {}),
     ...(winner ? { winner } : {}),
   }
 }
@@ -1235,7 +1236,12 @@ function applyLocalUndercoverDeal(
   fromSeatId: string,
 ): { data: PersistedRoom; private: SeatPrivate | null } {
   const seatIds = existing.room.members.map((m) => m.seatId)
-  const dealt = dealRound(seatIds)
+  const dealt = dealRound(
+    seatIds,
+    WORDBANK,
+    Math.random,
+    party.recentPairIds || [],
+  )
   const partyPrivates: Record<string, SeatPrivate> = {}
   for (const p of dealt.privates) partyPrivates[p.seatId] = { ...p, round }
   const ring = buildSpeakingRound(seatIds, existing.room.members)
@@ -1253,8 +1259,11 @@ function applyLocalUndercoverDeal(
         spokeSeatIds: ring.spokeSeatIds,
         speakOrder: ring.speakOrder,
         eliminatedSeatIds: [],
+        ...(dealt.recentPairIds?.length
+          ? { recentPairIds: dealt.recentPairIds }
+          : {}),
       },
-    },
+    },}
     table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
   }
   saveRoom(data)

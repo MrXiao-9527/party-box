@@ -9,6 +9,9 @@ export { WORDBANK }
 /** Q4: complete edition always 1 undercover. */
 export const UNDERCOVER_COUNT = 1
 
+/** Near-K window; grow with bank so evening play does not collide until exhausted. */
+export const PAIR_RECENT_K = 48
+
 export function undercoverCountFor(_n) {
   return UNDERCOVER_COUNT
 }
@@ -323,6 +326,7 @@ export function settleVoteParty(party, members, privates) {
     round: party?.round,
     seats: party?.seats,
     eliminatedSeatIds: seatIdList(party?.eliminatedSeatIds),
+    recentPairIds: seatIdList(party?.recentPairIds),
   }
 
   if (isTie) {
@@ -392,6 +396,23 @@ export function pairWords(pair) {
   return pair ? [pair.civilian, pair.undercover] : []
 }
 
+export function recentPairIdsOf(raw, pairCount = 0, k = PAIR_RECENT_K) {
+  if (!Array.isArray(raw)) return []
+  const window = Math.max(k, pairCount)
+  const ids = raw
+    .filter((x) => typeof x === 'string' && x.trim())
+    .map((x) => x.trim())
+  return ids.slice(-window)
+}
+
+export function pickPair(pairs, recentIds = [], rng = Math.random, k = PAIR_RECENT_K) {
+  if (!pairs.length) return null
+  const blocked = new Set(recentPairIdsOf(recentIds, pairs.length, k))
+  let pool = pairs.filter((p) => p && p.id && !blocked.has(p.id))
+  if (!pool.length) pool = pairs
+  return pool[Math.floor(rng() * pool.length)] || pool[0] || null
+}
+
 function fisherYates(items, rng) {
   const out = [...items]
   for (let i = out.length - 1; i > 0; i--) {
@@ -403,12 +424,13 @@ function fisherYates(items, rng) {
   return out
 }
 
-export function dealRound(seatIds, bank = WORDBANK, rng = Math.random) {
+export function dealRound(seatIds, bank = WORDBANK, rng = Math.random, recentPairIds = []) {
   const pairs = allPairs(bank)
+  const recent = recentPairIdsOf(recentPairIds, pairs.length)
   if (!pairs.length || !seatIds.length) {
-    return { pairId: '', undercoverCount: 0, privates: [] }
+    return { pairId: '', undercoverCount: 0, privates: [], recentPairIds: recent }
   }
-  const pair = pairs[Math.floor(rng() * pairs.length)] || pairs[0]
+  const pair = pickPair(pairs, recent, rng) || pairs[0]
   const undercoverCount = Math.min(
     UNDERCOVER_COUNT,
     Math.max(0, seatIds.length - 1),
@@ -424,5 +446,8 @@ export function dealRound(seatIds, bank = WORDBANK, rng = Math.random) {
       word: role === 'undercover' ? pair.undercover : pair.civilian,
     }
   })
-  return { pairId: pair.id, undercoverCount, privates }
+  const nextRecent = [...recent.filter((id) => id !== pair.id), pair.id].slice(
+    -Math.max(PAIR_RECENT_K, pairs.length),
+  )
+  return { pairId: pair.id, undercoverCount, privates, recentPairIds: nextRecent }
 }

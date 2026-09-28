@@ -8,6 +8,7 @@ import {
   allPairs,
   checkUndercoverWinner,
   dealRound,
+  pickPair,
   publicPayloadLeaks,
   settleVoteParty,
   undercoverCountFor,
@@ -24,7 +25,7 @@ function assert(cond, msg) {
   assert(undercoverCountFor(8) === 1, 'n=8 → 1')
   assert(undercoverCountFor(9) === 1, 'Q4 n=9 → 1')
   const pairs = allPairs(WORDBANK)
-  assert(pairs.length >= 24, `wordbank size ${pairs.length}`)
+  assert(pairs.length >= 40, `wordbank size ${pairs.length}`)
   assert(WORDBANK.categories.length >= 4, 'categories')
   const ids = new Set(pairs.map((p) => p.id))
   assert(ids.size === pairs.length, 'pair ids unique')
@@ -85,6 +86,8 @@ function assert(cond, msg) {
   assert(Array.isArray(party.speakOrder) && party.speakOrder.length === 3, 'speakOrder 3')
   assert(party.speakerSeatId && party.speakOrder.includes(party.speakerSeatId), 'speaker in order')
   assert(Array.isArray(party.spokeSeatIds) && party.spokeSeatIds.length === 0, 'nobody spoke yet')
+  assert(Array.isArray(party.eliminatedSeatIds), 'late-join elim list present')
+  assert(party.recentPairIds?.includes(party.pairId), 'deal writes recentPairIds')
 
   const hostWord = started.private.word
   const guestA = store.getSeatPrivate(code, j1.session.seatId, j1.session.seatToken)
@@ -105,10 +108,18 @@ function assert(cond, msg) {
   const midParty = partyStubOf(mid.data.room.party)
   const midSeat = midParty.seats?.find((s) => s.seatId === mid.session.seatId)
   assert(midSeat && midSeat.hasWord === false, 'mid-join hasWord false')
+  assert(midParty.phase === 'speaking', 'mid-join sees speaking')
+  assert(midParty.speakerSeatId === party.speakerSeatId, 'mid-join sees speaker')
+  assert(Array.isArray(midParty.eliminatedSeatIds), 'mid-join sees elim list')
   const midPriv = store.getSeatPrivate(code, mid.session.seatId, mid.session.seatToken)
   assert(midPriv.private === null && midPriv.hasWord === false, 'mid-join no private')
   const midPub = publicPersisted(mid.data)
   assert(!publicPayloadLeaks(midPub, words), 'mid-join public still clean')
+  assert(
+    !JSON.stringify(midPub).includes('"word":') &&
+      !JSON.stringify(midPub).includes('"role":'),
+    'mid-join public has no word/role keys',
+  )
 
   {
     const injected = partyStubOf({
@@ -636,6 +647,64 @@ function drainToVoting(store, code, hostSeat, hostTok) {
   } else {
     assert(p.phase === 'revealed', '4p unique that hits uc → reveal')
   }
+}
+
+{
+  const tiny = {
+    version: 1,
+    gameId: 'undercover',
+    categories: [
+      {
+        id: 't',
+        name: 't',
+        pairs: [
+          { id: 'a', civilian: '甲词', undercover: '乙词' },
+          { id: 'b', civilian: '丙词', undercover: '丁词' },
+          { id: 'c', civilian: '戊词', undercover: '己词' },
+          { id: 'd', civilian: '庚词', undercover: '辛词' },
+        ],
+      },
+    ],
+  }
+  let recent = []
+  const ids = []
+  for (let i = 0; i < 4; i++) {
+    const d = dealRound(['s1', 's2', 's3'], tiny, () => 0, recent)
+    ids.push(d.pairId)
+    recent = d.recentPairIds
+  }
+  assert(new Set(ids).size === 4, `near-K exhaust without repeat ${ids}`)
+  const wrap = dealRound(['s1', 's2', 's3'], tiny, () => 0, recent)
+  assert(ids.includes(wrap.pairId), 'wrap after bank exhausted')
+  const blocked = pickPair(tiny.categories[0].pairs, ['a', 'b', 'c'], () => 0)
+  assert(blocked.id === 'd', 'pickPair skips recent')
+}
+
+{
+  const store = createRoomStore()
+  const created = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 8,
+    gameId: 'undercover',
+  })
+  const code = created.data.room.roomCode
+  const hostTok = created.session.seatToken
+  const hostSeat = created.session.seatId
+  store.claimHostSeat(code, hostSeat, '桌主')
+  store.joinRoom(code, '甲')
+  store.joinRoom(code, '乙')
+  store.startUndercover(code, hostSeat, hostTok)
+  const seen = []
+  for (let i = 0; i < 8; i++) {
+    const p = partyStubOf(publicPersisted(store.get(code)).room.party)
+    seen.push(p.pairId)
+    assert(p.recentPairIds?.includes(p.pairId), `round ${i + 1} recent has pair`)
+    const rev = store.revealUndercover(code, hostSeat, hostTok)
+    assert(!('error' in rev), `reveal ${i + 1}`)
+    const next = store.nextRoundUndercover(code, hostSeat, hostTok)
+    assert(!('error' in next), `next ${i + 1}`)
+  }
+  assert(new Set(seen).size === seen.length, `store near-K unique ${seen}`)
 }
 
 console.log('OK test-undercover')
