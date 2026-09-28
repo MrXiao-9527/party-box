@@ -8,7 +8,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
-import { clickText, confirmCreateParty } from './e2e-lib.mjs'
+import { clickText, confirmCreateParty, liveVoteTallyLeak } from './e2e-lib.mjs'
 import { publicPayloadLeaks } from '../server/undercover.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -301,6 +301,7 @@ try {
   }
   await host.page.waitForSelector('[data-party-phase="voting"]')
   await guest1.page.waitForSelector('[data-party-phase="voting"]')
+  await guest2.page.waitForSelector('[data-party-phase="voting"]')
   await late.page.waitForSelector('[data-party-phase="voting"]')
   const voteHost = await host.page.evaluate(() => document.body.innerText || '')
   const voteGuest = await guest1.page.evaluate(() => document.body.innerText || '')
@@ -315,9 +316,38 @@ try {
   )
   const voteLeak = publicPayloadLeaks(voteSnap, [wHost, wG1, wG2])
   assert(!voteLeak, `voting public leak ${voteLeak}`)
+  assert(!(await liveVoteTallyLeak(host.page)), 'host empty box no · N票')
+  assert(!(await liveVoteTallyLeak(guest1.page)), 'guest empty box no · N票')
   await host.page.screenshot({ path: `${ART}/undercover-voting-host.png`, fullPage: true })
   await guest1.page.screenshot({ path: `${ART}/undercover-voting-guest.png`, fullPage: true })
   console.log('PASS: speak ring → dual-end voting')
+
+  const seatC = voteSnap.data.room.members.find((m) => m.name === '玩家C')?.seatId
+  assert(seatC, 'seat C for mid-vote hide')
+  await host.page.waitForSelector(`[data-vote-target="${seatC}"]`)
+  await host.page.click(`[data-vote-target="${seatC}"]`)
+  await host.page.waitForFunction(() =>
+    [...document.querySelectorAll('[data-vote-target]')].some((el) =>
+      (el.textContent || '').includes('已投'),
+    ),
+  )
+  await guest1.page.waitForSelector('[data-vote-pending="2"]')
+  await guest2.page.waitForSelector('[data-vote-pending="2"]')
+  const midHost = await pageText(host.page)
+  const midGuest = await pageText(guest1.page)
+  const midG2 = await pageText(guest2.page)
+  assert(midHost.includes('已投'), 'host own 已投')
+  assert(!midGuest.includes('已投') && !midG2.includes('已投'), 'others cannot see host 已投')
+  assert(
+    !(await liveVoteTallyLeak(host.page)) &&
+      !(await liveVoteTallyLeak(guest1.page)) &&
+      !(await liveVoteTallyLeak(guest2.page)),
+    'mid-vote dual-end no · N票',
+  )
+  assert(!(await guest1.page.$('[data-vote-target].picked')), 'guest1 no picked from host vote')
+  await host.page.screenshot({ path: `${ART}/undercover-voting-mid-host.png`, fullPage: true })
+  await guest1.page.screenshot({ path: `${ART}/undercover-voting-mid-guest.png`, fullPage: true })
+  console.log('PASS: mid-vote hide live tally')
 
   const lateHasVote = await late.page.$('[data-vote-abstain]')
   assert(!lateHasVote, 'late join has no vote controls')

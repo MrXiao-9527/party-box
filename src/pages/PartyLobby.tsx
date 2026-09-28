@@ -81,12 +81,13 @@ export function PartyLobby({
   const selfOut = eliminated.has(session.seatId)
   const canVote = voting && selfHasWord && !selfOut
   const myVote = party.votes?.[session.seatId]
-  const voteCounts: Record<string, number> = {}
-  for (const target of Object.values(party.votes || {})) {
-    if (target && target !== VOTE_ABSTAIN) {
-      voteCounts[target] = (voteCounts[target] || 0) + 1
-    }
-  }
+  const pendingAlive = room.members.filter(
+    (m) =>
+      partyHasWord(party, m.seatId) &&
+      !eliminated.has(m.seatId) &&
+      m.connected &&
+      !(m.seatId in (party.votes || {})),
+  ).length
   const voteTargets = room.members.filter(
     (m) =>
       partyHasWord(party, m.seatId) &&
@@ -182,11 +183,15 @@ export function PartyLobby({
               {party.voteNotice}
             </p>
           ) : null}
+          {pendingAlive > 0 ? (
+            <p className="hint" data-vote-pending={String(pendingAlive)}>
+              还剩{pendingAlive}人未表态
+            </p>
+          ) : null}
           {canVote ? (
             <>
               <ul className="vote-targets">
                 {voteTargets.map((m) => {
-                  const n = voteCounts[m.seatId] || 0
                   const picked = myVote === m.seatId
                   return (
                     <li key={m.seatId}>
@@ -194,12 +199,10 @@ export function PartyLobby({
                         type="button"
                         className={picked ? 'picked' : ''}
                         data-vote-target={m.seatId}
-                        data-vote-count={String(n)}
                         disabled={starting}
                         onClick={() => onCastVote(m.seatId)}
                       >
                         {m.name}
-                        {n ? ` · ${n}票` : ''}
                         {picked ? ' · 已投' : ''}
                       </button>
                     </li>
