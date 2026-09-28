@@ -21,6 +21,7 @@ import {
   startUndercover as localStartUndercover,
   revealUndercover as localRevealUndercover,
   nextRoundUndercover as localNextRoundUndercover,
+  speakDoneUndercover as localSpeakDoneUndercover,
   getSeatPrivate as localGetSeatPrivate,
   drawPrompt as localDrawPrompt,
   redrawPrompt as localRedrawPrompt,
@@ -56,6 +57,7 @@ import {
   relayStartUndercover,
   relayRevealUndercover,
   relayNextRoundUndercover,
+  relaySpeakDoneUndercover,
   relayGetSeatPrivate,
   relayDrawPrompt,
   relayRedrawPrompt,
@@ -286,6 +288,17 @@ export async function nextRoundUndercover(
     return localNextRoundUndercover(roomCode, fromSeatId, seatToken)
   }
   return relayNextRoundUndercover(roomCode, fromSeatId, seatToken)
+}
+
+export async function speakDoneUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localSpeakDoneUndercover(roomCode, fromSeatId, seatToken)
+  }
+  return relaySpeakDoneUndercover(roomCode, fromSeatId, seatToken)
 }
 
 export async function drawPrompt(

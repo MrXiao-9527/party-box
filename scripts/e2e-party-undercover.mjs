@@ -179,9 +179,9 @@ try {
   )
   assert(!startDisabled, 'start enabled at 3 online')
   await clickText(host.page, '开始游戏')
-  await host.page.waitForSelector('[data-party-phase="playing"]')
-  await guest1.page.waitForSelector('[data-party-phase="playing"]')
-  await guest2.page.waitForSelector('[data-party-phase="playing"]')
+  await host.page.waitForSelector('[data-party-phase="speaking"]')
+  await guest1.page.waitForSelector('[data-party-phase="speaking"]')
+  await guest2.page.waitForSelector('[data-party-phase="speaking"]')
   await host.page.waitForSelector('[data-private-word]')
   await guest1.page.waitForSelector('[data-private-word]')
   await guest2.page.waitForSelector('[data-private-word]')
@@ -212,7 +212,22 @@ try {
   const snap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
   const leak = publicPayloadLeaks(snap, [wHost, wG1, wG2])
   assert(!leak, `public GET leak ${leak}`)
-  assert(snap.data.room.party.phase === 'playing', 'public phase playing')
+  assert(snap.data.room.party.phase === 'speaking', 'public phase speaking')
+  assert(snap.data.room.party.undercoverCount === 1, 'public undercoverCount 1')
+  const hostSpeaker = await host.page.evaluate(
+    () => document.querySelector('[data-speaker-seat]')?.getAttribute('data-speaker-seat') || '',
+  )
+  const g1Speaker = await guest1.page.evaluate(
+    () => document.querySelector('[data-speaker-seat]')?.getAttribute('data-speaker-seat') || '',
+  )
+  const g2Speaker = await guest2.page.evaluate(
+    () => document.querySelector('[data-speaker-seat]')?.getAttribute('data-speaker-seat') || '',
+  )
+  assert(hostSpeaker && hostSpeaker === g1Speaker && hostSpeaker === g2Speaker, 'dual-end speakerSeatId')
+  assert(snap.data.room.party.speakerSeatId === hostSpeaker, 'GET speaker matches UI')
+  const hostTurn = await host.page.evaluate(() => document.querySelector('[data-turn-copy]')?.textContent || '')
+  const g1Turn = await guest1.page.evaluate(() => document.querySelector('[data-turn-copy]')?.textContent || '')
+  assert(hostTurn.includes('轮到') && hostTurn === g1Turn, 'dual-end 轮到谁')
   assert(snap.data.room.party.pairId, 'public pairId')
   assert(
     snap.data.room.party.seats.every((s) => typeof s.hasWord === 'boolean'),
@@ -237,6 +252,54 @@ try {
   assert(!lateWord, 'mid-join no private attr')
   await late.page.screenshot({ path: `${ART}/undercover-midjoin.png`, fullPage: true })
   console.log('PASS: mid-join this round has no word')
+
+  for (let i = 0; i < 6; i++) {
+    const phase = await host.page.evaluate(
+      () =>
+        document.querySelector('[data-party-phase]')?.getAttribute('data-party-phase') ||
+        '',
+    )
+    if (phase === 'voting') break
+    await host.page.waitForSelector('[data-speak-done]')
+    const prev = await host.page.evaluate(
+      () =>
+        document.querySelector('[data-speaker-seat]')?.getAttribute('data-speaker-seat') ||
+        '',
+    )
+    await host.page.click('[data-speak-done]')
+    await host.page.waitForFunction(
+      (was) => {
+        const p =
+          document.querySelector('[data-party-phase]')?.getAttribute('data-party-phase') ||
+          ''
+        const s =
+          document.querySelector('[data-speaker-seat]')?.getAttribute('data-speaker-seat') ||
+          ''
+        return p === 'voting' || (p === 'speaking' && s && s !== was)
+      },
+      {},
+      prev,
+    )
+  }
+  await host.page.waitForSelector('[data-party-phase="voting"]')
+  await guest1.page.waitForSelector('[data-party-phase="voting"]')
+  await late.page.waitForSelector('[data-party-phase="voting"]')
+  const voteHost = await host.page.evaluate(() => document.body.innerText || '')
+  const voteGuest = await guest1.page.evaluate(() => document.body.innerText || '')
+  assert(voteHost.includes('投票中') && voteGuest.includes('投票中'), 'dual-end 投票中')
+  const voteSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
+  assert(voteSnap.data.room.party.phase === 'voting', 'GET voting')
+  assert(voteSnap.data.room.party.voteRound === 0, 'GET voteRound 0')
+  assert(
+    voteSnap.data.room.party.votes &&
+      Object.keys(voteSnap.data.room.party.votes).length === 0,
+    'GET votes empty',
+  )
+  const voteLeak = publicPayloadLeaks(voteSnap, [wHost, wG1, wG2])
+  assert(!voteLeak, `voting public leak ${voteLeak}`)
+  await host.page.screenshot({ path: `${ART}/undercover-voting-host.png`, fullPage: true })
+  await guest1.page.screenshot({ path: `${ART}/undercover-voting-guest.png`, fullPage: true })
+  console.log('PASS: speak ring → dual-end voting')
 
   await late.ctx.close()
   await guest2.ctx.close()

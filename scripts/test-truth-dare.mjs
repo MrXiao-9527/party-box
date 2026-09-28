@@ -406,7 +406,7 @@ function partyOf(store, code) {
   )
   assert(!('error' in started), 'undercover start still works')
   const party = partyStubOf(started.data.room.party)
-  assert(party.gameId === 'undercover' && party.phase === 'playing', 'undercover playing')
+  assert(party.gameId === 'undercover' && party.phase === 'speaking', 'undercover speaking')
   assert(!party.prompt, 'undercover has no truthDare prompt')
   assert(party.drawerSeatId == null, 'undercover has no drawer')
 }

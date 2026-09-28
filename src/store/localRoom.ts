@@ -1,4 +1,12 @@
 import { dealRound, type SeatPrivate } from '../games/undercover/deal'
+import {
+  applyDisconnectSkip,
+  applyRejoinSpeakTail,
+  advanceSpeakRing,
+  buildSpeakingRound,
+  isUndercoverDealtPhase,
+  onlineAliveSeatIds,
+} from '../games/undercover/speak'
 import { pickPrompt, ensureTruthDareTurn, nextDrawerSeatId } from '../games/truthDare/draw'
 import {
   ACK_REASONS,
@@ -117,7 +125,7 @@ function appendLocalPartySeat(
   hasWord: boolean,
 ): RoomState['party'] {
   const party = partyStubOf(raw)
-  if (party.phase !== 'playing' && party.phase !== 'revealed') return raw
+  if (!isUndercoverDealtPhase(party.phase)) return raw
   const seats = [...(party.seats ?? [])]
   if (seats.some((s) => s.seatId === seatId)) return party
   seats.push({ seatId, hasWord })
@@ -531,7 +539,7 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
 
   let party = existing.room.party
   const partyPhase = partyStubOf(party).phase
-  if (partyPhase === 'playing' || partyPhase === 'revealed') {
+  if (isUndercoverDealtPhase(partyPhase)) {
     for (const s of seats) {
       party = appendLocalPartySeat(party, s.seatId, false) ?? party
     }
@@ -572,6 +580,14 @@ export function setMemberConnected(
     m.seatId === seatId ? { ...m, connected } : m,
   )
 
+  let party = existing.room.party
+  const stub = partyStubOf(party)
+  if (stub.gameId === 'undercover' && stub.phase === 'speaking') {
+    party = connected
+      ? applyRejoinSpeakTail(stub, seatId, members)
+      : applyDisconnectSkip(stub, members)
+  }
+
   // Connection flag only. Host-leave pause is explicit via setPhase('paused')
   // (DevPanel / signalHostDisconnect). Auto-pausing here would turn same-tab
   // refresh into「桌主已离开」and break silent 回席 while playing.
@@ -579,6 +595,7 @@ export function setMemberConnected(
     room: {
       ...existing.room,
       members,
+      ...(party ? { party } : {}),
     },
     table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
   }
@@ -1143,16 +1160,21 @@ function applyLocalUndercoverDeal(
   const dealt = dealRound(seatIds)
   const partyPrivates: Record<string, SeatPrivate> = {}
   for (const p of dealt.privates) partyPrivates[p.seatId] = { ...p, round }
+  const ring = buildSpeakingRound(seatIds, existing.room.members)
   const data: PersistedRoom = {
     room: {
       ...existing.room,
       party: {
         gameId: party.gameId || 'undercover',
-        phase: 'playing',
+        phase: ring.phase,
         pairId: dealt.pairId,
-        undercoverCount: dealt.undercoverCount,
+        undercoverCount: 1,
         round,
         seats: seatIds.map((seatId) => ({ seatId, hasWord: true })),
+        speakerSeatId: ring.speakerSeatId,
+        spokeSeatIds: ring.spokeSeatIds,
+        speakOrder: ring.speakOrder,
+        eliminatedSeatIds: [],
       },
     },
     table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
@@ -1177,7 +1199,13 @@ export function revealUndercover(
   }
   const party = partyStubOf(existing.room.party)
   if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
-  if (party.phase !== 'playing') return { error: ACK_REASONS.NOT_PLAYING }
+  if (
+    party.phase !== 'playing' &&
+    party.phase !== 'speaking' &&
+    party.phase !== 'voting'
+  ) {
+    return { error: ACK_REASONS.NOT_PLAYING }
+  }
   const seats = existing.room.members.map((m) => {
     const priv = secrets.partyPrivates[m.seatId]
     if (priv?.word) {
@@ -1237,6 +1265,48 @@ export function nextRoundUndercover(
     (party.round || 1) + 1,
     fromSeatId,
   )
+}
+
+export function speakDoneUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+  if (!isPartyGame(existing.room)) return { error: ACK_REASONS.INVALID }
+  const secrets = loadSecrets(roomCode)
+  if (!seatToken || secrets.seatTokens[fromSeatId] !== seatToken) {
+    return { error: ACK_REASONS.INVALID }
+  }
+  if (!existing.room.members.some((m) => m.seatId === fromSeatId)) {
+    return { error: ACK_REASONS.INVALID }
+  }
+  const party = partyStubOf(existing.room.party)
+  if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'speaking') return { error: ACK_REASONS.NOT_SPEAKING }
+  const isHost = fromSeatId === existing.room.hostSeatId
+  if (!isHost && fromSeatId !== party.speakerSeatId) {
+    return { error: ACK_REASONS.NOT_YOUR_TURN }
+  }
+  const ring = advanceSpeakRing({
+    speakOrder: party.speakOrder,
+    spokeSeatIds: party.spokeSeatIds,
+    speakerSeatId: party.speakerSeatId,
+    onlineAliveIds: onlineAliveSeatIds(party, existing.room.members),
+    markSpoke: true,
+  })
+  const data: PersistedRoom = {
+    room: {
+      ...existing.room,
+      party: {
+        ...party,
+        ...ring,
+      },
+    },
+    table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+  }
+  return { data: saveRoom(data) }
 }
 
 export function getSeatPrivate(

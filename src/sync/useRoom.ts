@@ -19,6 +19,7 @@ import {
   ACK_REASONS,
   findLastUndoable,
   ledgerEntrySummary,
+  isUndercoverPrivatePhase,
   partyHasWord,
   partyStubOf,
 } from '../types'
@@ -37,6 +38,7 @@ import {
   startUndercover as startUndercoverApi,
   revealUndercover as revealUndercoverApi,
   nextRoundUndercover as nextRoundUndercoverApi,
+  speakDoneUndercover as speakDoneUndercoverApi,
   drawPrompt as drawPromptApi,
   redrawPrompt as redrawPromptApi,
   setDrawer as setDrawerApi,
@@ -751,7 +753,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   useEffect(() => {
     if (!roomCode || !session?.seatId) return
     const party = partyStubOf(room?.party)
-    if (party.gameId !== 'undercover' || party.phase !== 'playing') {
+    if (party.gameId !== 'undercover' || !isUndercoverPrivatePhase(party.phase)) {
       privateRoundRef.current = null
       if (seatPrivate) setSeatPrivate(null)
       return
@@ -857,6 +859,39 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
       '开下一局失败，请重试',
     )
   }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const speakDoneUndercover = useCallback(() => {
+    if (!session || !roomCode) {
+      pushToast(ACK_REASONS.NOT_YOUR_TURN)
+      return
+    }
+    if (startingRef.current) return
+    startingRef.current = true
+    setStarting(true)
+    void (async () => {
+      try {
+        const result = await speakDoneUndercoverApi(
+          roomCode,
+          session.seatId,
+          session.seatToken,
+        )
+        if ('error' in result) {
+          pushToast(result.error)
+          return
+        }
+        applySyncedRoom(result.data, { force: true })
+      } catch (e) {
+        pushToast(
+          e instanceof RelayNetworkError
+            ? ACK_REASONS.RELAY_UNREACHABLE
+            : ACK_REASONS.NOT_YOUR_TURN,
+        )
+      } finally {
+        startingRef.current = false
+        setStarting(false)
+      }
+    })()
+  }, [roomCode, session, applySyncedRoom, pushToast])
 
   const drawPrompt = useCallback((mode: 'direct' | 'wheel' = 'direct') => {
     if (!session) {
@@ -1128,6 +1163,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     startUndercover,
     revealUndercover,
     nextRoundUndercover,
+    speakDoneUndercover,
     drawPrompt,
     redrawPrompt,
     setDrawer,

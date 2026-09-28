@@ -38,9 +38,11 @@ export interface DealResult {
 
 export const WORDBANK = wordbankJson as Wordbank
 
-/** PRD: n<=8 → 1 undercover; else 2. Seat cap is 8 so live rooms get 1. */
-export function undercoverCountFor(n: number): number {
-  return n <= 8 ? 1 : 2
+/** Q4: complete edition always 1 undercover. */
+export const UNDERCOVER_COUNT = 1
+
+export function undercoverCountFor(_n: number): number {
+  return UNDERCOVER_COUNT
 }
 
 export function allPairs(bank: Wordbank = WORDBANK): WordPair[] {
@@ -83,7 +85,7 @@ export function dealRound(
   }
   const pair = pairs[Math.floor(rng() * pairs.length)] ?? pairs[0]
   const undercoverCount = Math.min(
-    undercoverCountFor(seatIds.length),
+    UNDERCOVER_COUNT,
     Math.max(0, seatIds.length - 1),
   )
   const order = fisherYates(seatIds, rng)

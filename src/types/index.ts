@@ -5,8 +5,8 @@ export type Phase = 'lobby' | 'playing' | 'paused'
 /** Room product. Omitted / unknown → chip (legacy rooms). */
 export type RoomMode = 'chip' | 'partyGame'
 
-/** lobby → playing → revealed → playing (next-round). */
-export type PartyPhase = 'lobby' | 'playing' | 'revealed'
+/** lobby → speaking → voting → revealed. `playing` is first-knife persist only. */
+export type PartyPhase = 'lobby' | 'playing' | 'speaking' | 'voting' | 'revealed'
 
 /** truthDare room-level turn (replaces second-knife lobby-as-shell). */
 export type TruthDarePhase = 'idle' | 'drawing' | 'answering'
@@ -73,6 +73,18 @@ export interface PartyStub {
   undercoverCount?: number
   round?: number
   seats?: PartyPublicSeat[]
+  /** undercover: current speaker (speaking). Relay-authoritative. */
+  speakerSeatId?: string | null
+  /** undercover: seats that already spoke this ring. */
+  spokeSeatIds?: string[]
+  /** undercover: ring order (rejoin appends tail). */
+  speakOrder?: string[]
+  /** undercover: 0=first vote, 1=revote. */
+  voteRound?: 0 | 1
+  /** undercover: voterSeatId → target | abstain. Only while voting. */
+  votes?: Record<string, string>
+  eliminatedSeatIds?: string[]
+  winner?: 'civilian' | 'undercover' | null
   /** truthDare: current public prompt (both ends). */
   prompt?: PartyPrompt
   /** truthDare: last-K prompt ids for draw dedupe. */
@@ -305,8 +317,56 @@ export function isPartyGame(
 }
 
 function asPartyPhase(raw: unknown): PartyPhase {
-  if (raw === 'playing' || raw === 'revealed') return raw
+  if (
+    raw === 'playing' ||
+    raw === 'revealed' ||
+    raw === 'speaking' ||
+    raw === 'voting'
+  ) {
+    return raw
+  }
   return 'lobby'
+}
+
+export function isUndercoverDealtPhase(phase: string | undefined): boolean {
+  return (
+    phase === 'speaking' ||
+    phase === 'voting' ||
+    phase === 'playing' ||
+    phase === 'revealed'
+  )
+}
+
+export function isUndercoverPrivatePhase(phase: string | undefined): boolean {
+  return phase === 'speaking' || phase === 'voting' || phase === 'playing'
+}
+
+function stringIdList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const x of raw) {
+    if (typeof x !== 'string' || !x.trim()) continue
+    const id = x.trim()
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
+}
+
+function publicVotes(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof k !== 'string' || !k.trim()) continue
+    if (v === 'abstain') {
+      out[k.trim()] = 'abstain'
+    } else if (typeof v === 'string' && v.trim()) {
+      out[k.trim()] = v.trim()
+    }
+  }
+  return out
 }
 
 export function isTruthDarePhase(raw: unknown): raw is TruthDarePhase {
@@ -410,6 +470,28 @@ export function partyStubOf(raw: unknown): PartyStub {
       .map((s) => publicPartySeat(s, phase === 'revealed'))
       .filter((s): s is PartyPublicSeat => !!s)
   }
+  const speakOrder = stringIdList(src?.speakOrder)
+  const spokeSeatIds = stringIdList(src?.spokeSeatIds)
+  const speakerSeatId = seatIdOrNull(src?.speakerSeatId)
+  const eliminatedSeatIds = stringIdList(src?.eliminatedSeatIds)
+  if (phase === 'speaking' || phase === 'voting') {
+    stub.speakOrder = speakOrder
+    stub.spokeSeatIds = spokeSeatIds
+    stub.speakerSeatId = speakerSeatId
+    if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+    if (phase === 'voting') {
+      stub.voteRound = src?.voteRound === 1 ? 1 : 0
+      stub.votes = publicVotes(src?.votes)
+    }
+  } else {
+    if (speakOrder.length) stub.speakOrder = speakOrder
+    if (spokeSeatIds.length) stub.spokeSeatIds = spokeSeatIds
+    if (speakerSeatId) stub.speakerSeatId = speakerSeatId
+    if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+  }
+  if (src?.winner === 'civilian' || src?.winner === 'undercover') {
+    stub.winner = src.winner
+  }
   return stub
 }
 
@@ -423,7 +505,7 @@ export function partyHasWord(
   party: PartyStub | null | undefined,
   seatId: string,
 ): boolean {
-  if (!party || (party.phase !== 'playing' && party.phase !== 'revealed')) {
+  if (!party || !isUndercoverDealtPhase(party.phase)) {
     return false
   }
   return !!party.seats?.find((s) => s.seatId === seatId)?.hasWord
@@ -477,6 +559,7 @@ export const ACK_REASONS = {
   NEED_THREE_ONLINE: '至少 3 人在线才能开始',
   ALREADY_STARTED: '本局已开始',
   NOT_PLAYING: '进行中才能揭晓',
+  NOT_SPEAKING: '发言中才能操作',
   NOT_REVEALED: '揭晓后才能开下一局',
 } as const
 

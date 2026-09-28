@@ -18,7 +18,7 @@ function assert(cond, msg) {
 {
   assert(undercoverCountFor(3) === 1, 'n=3 → 1')
   assert(undercoverCountFor(8) === 1, 'n=8 → 1')
-  assert(undercoverCountFor(9) === 2, 'n=9 → 2')
+  assert(undercoverCountFor(9) === 1, 'Q4 n=9 → 1')
   const pairs = allPairs(WORDBANK)
   assert(pairs.length >= 24, `wordbank size ${pairs.length}`)
   assert(WORDBANK.categories.length >= 4, 'categories')
@@ -72,11 +72,15 @@ function assert(cond, msg) {
 
   const pub = publicPersisted(started.data)
   const party = partyStubOf(pub.room.party)
-  assert(party.phase === 'playing', 'playing')
+  assert(party.phase === 'speaking', 'speaking after deal')
   assert(party.round === 1, 'round 1 on deal')
+  assert(party.undercoverCount === 1, 'Q4 undercoverCount 1')
   assert(party.pairId && !party.pairId.match(/[\u4e00-\u9fff]/), 'opaque pairId')
   assert(party.seats?.every((s) => s.hasWord === true), 'dealt seats hasWord')
   assert(party.seats?.every((s) => !('word' in s) && !('role' in s)), 'public seats flags only')
+  assert(Array.isArray(party.speakOrder) && party.speakOrder.length === 3, 'speakOrder 3')
+  assert(party.speakerSeatId && party.speakOrder.includes(party.speakerSeatId), 'speaker in order')
+  assert(Array.isArray(party.spokeSeatIds) && party.spokeSeatIds.length === 0, 'nobody spoke yet')
 
   const hostWord = started.private.word
   const guestA = store.getSeatPrivate(code, j1.session.seatId, j1.session.seatToken)
@@ -168,7 +172,7 @@ function assert(cond, msg) {
   assert(!('error' in next), `next-round ${next.error || ''}`)
   const nextPub = publicPersisted(next.data)
   const nextParty = partyStubOf(nextPub.room.party)
-  assert(nextParty.phase === 'playing', 'next-round playing')
+  assert(nextParty.phase === 'speaking', 'next-round speaking')
   assert(nextParty.round === 2, 'round 2')
   assert(
     nextParty.seats?.every((s) => s.hasWord === true && !('word' in s) && !('role' in s)),
@@ -209,6 +213,141 @@ function assert(cond, msg) {
   const created = store.createEmptyHostRoom({
     mode: 'partyGame',
     maxSeats: 8,
+    gameId: 'undercover',
+  })
+  const code = created.data.room.roomCode
+  const hostTok = created.session.seatToken
+  const hostSeat = created.session.seatId
+  store.claimHostSeat(code, hostSeat, '桌主')
+  const j1 = store.joinRoom(code, '甲')
+  const j2 = store.joinRoom(code, '乙')
+  const started = store.startUndercover(code, hostSeat, hostTok)
+  assert(!('error' in started), 'ring start')
+  const p0 = partyStubOf(publicPersisted(started.data).room.party)
+  assert(p0.phase === 'speaking', 'ring speaking')
+  assert(p0.undercoverCount === 1, 'ring count 1')
+  const firstSpeaker = p0.speakerSeatId
+  assert(firstSpeaker === hostSeat, 'first speaker is first seated (host)')
+  assert(p0.speakOrder.join(',') === [hostSeat, j1.session.seatId, j2.session.seatId].join(','), 'order = seat order')
+
+  const guestPush = store.speakDoneUndercover(code, j1.session.seatId, j1.session.seatToken)
+  assert(guestPush.error === ACK_REASONS.NOT_YOUR_TURN, 'non-speaker guest cannot 说完了')
+  const still = partyStubOf(store.get(code).room.party)
+  assert(still.speakerSeatId === firstSpeaker, 'refused speak-done does not move')
+
+  const done1 = store.speakDoneUndercover(code, hostSeat, hostTok)
+  assert(!('error' in done1), 'host speak-done')
+  const p1 = partyStubOf(publicPersisted(done1.data).room.party)
+  assert(p1.phase === 'speaking', 'still speaking after first')
+  assert(p1.speakerSeatId === j1.session.seatId, 'advanced to 甲')
+  assert(p1.spokeSeatIds.includes(hostSeat), 'host marked spoke')
+  assert(p1.speakerSeatId !== firstSpeaker, 'speaker moved')
+
+  const hostProxy = store.speakDoneUndercover(code, hostSeat, hostTok)
+  assert(!('error' in hostProxy), 'host 代推')
+  const p2 = partyStubOf(publicPersisted(hostProxy.data).room.party)
+  assert(p2.speakerSeatId === j2.session.seatId, '代推 to 乙')
+  assert(p2.spokeSeatIds.includes(j1.session.seatId), '甲 marked spoke')
+
+  store.setMemberConnected(code, j2.session.seatId, false)
+  const skipped = partyStubOf(publicPersisted(store.get(code)).room.party)
+  assert(skipped.phase === 'voting', 'last online unspoken disconnect → voting')
+  assert(skipped.voteRound === 0, 'voteRound 0')
+  assert(skipped.votes && Object.keys(skipped.votes).length === 0, 'votes cleared')
+  assert(skipped.speakerSeatId == null, 'no speaker in voting')
+  const skipWords = [
+    started.private.word,
+    store.getSeatPrivate(code, j1.session.seatId, j1.session.seatToken).private.word,
+    store.getSeatPrivate(code, j2.session.seatId, j2.session.seatToken).private.word,
+  ]
+  assert(!publicPayloadLeaks(publicPersisted(store.get(code)), skipWords), 'voting public clean')
+}
+
+{
+  const store = createRoomStore()
+  const created = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 8,
+    gameId: 'undercover',
+  })
+  const code = created.data.room.roomCode
+  const hostTok = created.session.seatToken
+  const hostSeat = created.session.seatId
+  store.claimHostSeat(code, hostSeat, '桌主')
+  const j1 = store.joinRoom(code, '甲')
+  const j2 = store.joinRoom(code, '乙')
+  store.startUndercover(code, hostSeat, hostTok)
+  store.speakDoneUndercover(code, hostSeat, hostTok)
+  const before = partyStubOf(store.get(code).room.party)
+  assert(before.speakerSeatId === j1.session.seatId, '甲 is speaking')
+  const speakerBefore = before.speakerSeatId
+
+  store.setMemberConnected(code, j2.session.seatId, false)
+  const afterOff = partyStubOf(store.get(code).room.party)
+  assert(afterOff.speakerSeatId === speakerBefore, 'non-speaker disconnect does not steal')
+  assert(afterOff.phase === 'speaking', 'still speaking')
+  store.setMemberConnected(code, j2.session.seatId, true)
+  const etBack = partyStubOf(store.get(code).room.party)
+  assert(etBack.speakerSeatId === speakerBefore, '乙 rejoin while 甲 speaks does not steal')
+  assert(etBack.speakOrder[etBack.speakOrder.length - 1] === j2.session.seatId, '乙 rejoin goes to tail')
+
+  store.setMemberConnected(code, j1.session.seatId, false)
+  const afterSkip = partyStubOf(store.get(code).room.party)
+  assert(afterSkip.speakerSeatId === j2.session.seatId || afterSkip.phase === 'voting' || afterSkip.speakerSeatId === hostSeat, 'skip disconnected speaker')
+  assert(afterSkip.speakerSeatId !== j1.session.seatId, 'skipped 甲 is not speaker')
+  assert(!(afterSkip.spokeSeatIds || []).includes(j1.session.seatId), 'skip does not mark spoke')
+  const speakerWhileGone = afterSkip.speakerSeatId
+
+  store.setMemberConnected(code, j1.session.seatId, true)
+  const rejoined = partyStubOf(store.get(code).room.party)
+  assert(rejoined.phase === 'speaking', 'rejoin stays speaking')
+  assert(rejoined.speakerSeatId === speakerWhileGone, 'Q5 rejoin does not steal speaker')
+  assert(rejoined.speakOrder[rejoined.speakOrder.length - 1] === j1.session.seatId, 'Q5 rejoin appends tail')
+
+  const mid = store.joinRoom(code, '丁')
+  const midParty = partyStubOf(mid.data.room.party)
+  assert(!(midParty.speakOrder || []).includes(mid.session.seatId), 'late join without word stays off ring')
+  assert(midParty.speakerSeatId === rejoined.speakerSeatId, 'late join does not steal')
+
+  const leftover = [hostSeat, j1.session.seatId, j2.session.seatId].filter(
+    (id) => id === midParty.speakerSeatId || !(midParty.spokeSeatIds || []).includes(id),
+  )
+  let cur = partyStubOf(store.get(code).room.party)
+  let guard = 0
+  while (cur.phase === 'speaking' && guard++ < 8) {
+    const r = store.speakDoneUndercover(code, hostSeat, hostTok)
+    assert(!('error' in r), `drain ${guard}`)
+    cur = partyStubOf(r.data.room.party)
+  }
+  assert(cur.phase === 'voting', 'drain ring → voting')
+  assert(cur.voteRound === 0, 'auto voting voteRound=0')
+  assert(Object.keys(cur.votes || {}).length === 0, 'auto voting empty votes')
+  void leftover
+}
+
+{
+  const nine = dealRound(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'], WORDBANK, () => 0.2)
+  assert(nine.undercoverCount === 1, 'deal n=9 still 1')
+  assert(nine.privates.filter((p) => p.role === 'undercover').length === 1, 'one undercover at n=9')
+}
+
+{
+  const playing = partyStubOf({
+    gameId: 'undercover',
+    phase: 'playing',
+    pairId: 'x',
+    seats: [{ seatId: 'a', hasWord: true }],
+  })
+  assert(playing.phase === 'playing', 'old playing kept')
+  assert(playing.speakerSeatId == null, 'old playing does not invent speaker')
+  assert(!playing.speakOrder, 'old playing no empty speakOrder')
+}
+
+{
+  const store = createRoomStore()
+  const created = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 8,
     gameId: 'truthDare',
   })
   assert(!('error' in created), 'truthDare create')
@@ -222,6 +361,12 @@ function assert(cond, msg) {
     created.session.seatToken,
   )
   assert(started.error === ACK_REASONS.INVALID, 'truthDare cannot start-undercover')
+  const spoken = store.speakDoneUndercover(
+    code,
+    created.session.seatId,
+    created.session.seatToken,
+  )
+  assert(spoken.error === ACK_REASONS.INVALID, 'truthDare cannot speak-done')
   const party = partyStubOf(store.get(code).room.party)
   assert(party.gameId === 'truthDare' && party.phase === 'drawing', 'truthDare stays drawing')
 }
