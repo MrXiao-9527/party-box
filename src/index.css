@@ -499,10 +499,22 @@ input {
   gap: 0.65rem;
 }
 
+.play-stack {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
 .stage-copy {
-  margin: 0.15rem 0 0;
+  margin: 0;
   font-size: 1rem;
   color: var(--text);
+}
+
+.stage-copy.turn-copy {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
 }
 
 .phase-bar {
@@ -510,13 +522,13 @@ input {
   display: flex;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin: 0.65rem 0 0;
+  margin: 0;
   padding: 0;
 }
 
 .phase-bar li {
-  font-size: 0.72rem;
-  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+  padding: 0.28rem 0.65rem;
   border-radius: var(--radius);
   background: var(--card);
   color: var(--text-secondary);
@@ -525,6 +537,7 @@ input {
 .phase-bar li.current {
   background: var(--text);
   color: var(--bg);
+  font-weight: 600;
 }
 
 .vote-area {
@@ -538,6 +551,7 @@ input {
   justify-content: center;
   text-align: left;
   gap: 0.45rem;
+  box-shadow: inset 0 0 0 1px rgba(242, 244, 247, 0.08);
 }
 
 .vote-targets {

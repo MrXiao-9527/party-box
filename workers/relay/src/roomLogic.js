@@ -29,6 +29,7 @@ export const MIN_SEATS = 2
 export const MAX_SEATS = 8
 export const DEFAULT_DENOMS = [1, 5, 10, 25, 100]
 export const PROMPT_RECENT_K = 8
+export const PAIR_RECENT_K = 48
 
 export const ACK_REASONS = {
   SEAT_LOCKED: '席位已锁定',
@@ -172,6 +173,15 @@ function recentPromptIdsOf(raw) {
   return ids.slice(-PROMPT_RECENT_K)
 }
 
+function recentPairIdsOf(raw) {
+  if (!Array.isArray(raw)) return null
+  const ids = raw
+    .filter((x) => typeof x === 'string' && x.trim())
+    .map((x) => x.trim())
+  if (!ids.length) return null
+  return ids.slice(-PAIR_RECENT_K)
+}
+
 function truthDareStubOf(src) {
   const prompt = publicPartyPrompt(src?.prompt)
   const recent = recentPromptIdsOf(src?.recentPromptIds)
@@ -216,11 +226,12 @@ export function partyStubOf(raw) {
       .filter(Boolean)
   }
   const voteNotice = asVoteNotice(src.voteNotice)
+  const recentPairIds = recentPairIdsOf(src.recentPairIds)
   if (phase === 'speaking' || phase === 'voting') {
     stub.speakOrder = speakOrder
     stub.spokeSeatIds = spokeSeatIds
     stub.speakerSeatId = speakerSeatId
-    if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+    stub.eliminatedSeatIds = eliminatedSeatIds
     if (voteNotice) stub.voteNotice = voteNotice
     if (phase === 'voting') {
       stub.voteRound = src.voteRound === 1 ? 1 : 0
@@ -230,8 +241,11 @@ export function partyStubOf(raw) {
     if (speakOrder.length) stub.speakOrder = speakOrder
     if (spokeSeatIds.length) stub.spokeSeatIds = spokeSeatIds
     if (speakerSeatId) stub.speakerSeatId = speakerSeatId
-    if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+    if (phase === 'revealed' || eliminatedSeatIds.length) {
+      stub.eliminatedSeatIds = eliminatedSeatIds
+    }
   }
+  if (recentPairIds) stub.recentPairIds = recentPairIds
   if (src.winner === 'civilian' || src.winner === 'undercover') {
     stub.winner = src.winner
   }
@@ -889,6 +903,8 @@ export function createRoomStore() {
       eliminatedSeatIds,
     }
     if (winner) next.winner = winner
+    const recent = recentPairIdsOf(party.recentPairIds)
+    if (recent) next.recentPairIds = recent
     return next
   }
 
@@ -910,28 +926,30 @@ export function createRoomStore() {
 
   function applyUndercoverDeal(existing, party, round) {
     const seatIds = existing.room.members.map((m) => m.seatId)
-    const dealt = dealRound(seatIds)
+    const dealt = dealRound(seatIds, undefined, Math.random, party.recentPairIds || [])
     const partyPrivates = {}
     for (const p of dealt.privates) {
       partyPrivates[p.seatId] = { ...p, round }
     }
     const ring = buildSpeakingRound(seatIds, existing.room.members)
+    const nextParty = {
+      gameId: party.gameId || 'undercover',
+      phase: ring.phase,
+      pairId: dealt.pairId,
+      undercoverCount: 1,
+      round,
+      seats: seatIds.map((seatId) => ({ seatId, hasWord: true })),
+      speakerSeatId: ring.speakerSeatId,
+      spokeSeatIds: ring.spokeSeatIds,
+      speakOrder: ring.speakOrder,
+      eliminatedSeatIds: [],
+    }
+    if (dealt.recentPairIds?.length) nextParty.recentPairIds = dealt.recentPairIds
     return set({
       ...existing,
       room: {
         ...existing.room,
-        party: {
-          gameId: party.gameId || 'undercover',
-          phase: ring.phase,
-          pairId: dealt.pairId,
-          undercoverCount: 1,
-          round,
-          seats: seatIds.map((seatId) => ({ seatId, hasWord: true })),
-          speakerSeatId: ring.speakerSeatId,
-          spokeSeatIds: ring.spokeSeatIds,
-          speakOrder: ring.speakOrder,
-          eliminatedSeatIds: [],
-        },
+        party: nextParty,
       },
       table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
       partyPrivates,

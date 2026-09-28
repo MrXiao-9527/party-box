@@ -43,6 +43,7 @@ type RingParty = {
   voteRound?: 0 | 1
   voteNotice?: string
   winner?: 'civilian' | 'undercover' | null
+  recentPairIds?: string[]
 }
 
 type SeatPrivateLike = { role?: string } | null | undefined
@@ -380,6 +381,7 @@ export function settleVoteParty(
     round: party?.round,
     seats: party?.seats,
     eliminatedSeatIds: seatIdList(party?.eliminatedSeatIds),
+    recentPairIds: seatIdList(party?.recentPairIds),
   }
 
   if (isTie) {

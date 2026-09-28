@@ -34,12 +34,16 @@ export interface DealResult {
   pairId: string
   undercoverCount: number
   privates: SeatPrivate[]
+  recentPairIds: string[]
 }
 
 export const WORDBANK = wordbankJson as Wordbank
 
 /** Q4: complete edition always 1 undercover. */
 export const UNDERCOVER_COUNT = 1
+
+/** Near-K window; grow with bank so evening play does not collide until exhausted. */
+export const PAIR_RECENT_K = 48
 
 export function undercoverCountFor(_n: number): number {
   return UNDERCOVER_COUNT
@@ -63,6 +67,32 @@ export function pairWords(pair: WordPair): string[] {
   return [pair.civilian, pair.undercover]
 }
 
+export function recentPairIdsOf(
+  raw: unknown,
+  pairCount = 0,
+  k = PAIR_RECENT_K,
+): string[] {
+  if (!Array.isArray(raw)) return []
+  const window = Math.max(k, pairCount)
+  const ids = raw
+    .filter((x): x is string => typeof x === 'string' && !!x.trim())
+    .map((x) => x.trim())
+  return ids.slice(-window)
+}
+
+export function pickPair(
+  pairs: WordPair[],
+  recentIds: unknown = [],
+  rng: () => number = Math.random,
+  k = PAIR_RECENT_K,
+): WordPair | null {
+  if (!pairs.length) return null
+  const blocked = new Set(recentPairIdsOf(recentIds, pairs.length, k))
+  let pool = pairs.filter((p) => p && p.id && !blocked.has(p.id))
+  if (!pool.length) pool = pairs
+  return pool[Math.floor(rng() * pool.length)] ?? pool[0] ?? null
+}
+
 function fisherYates<T>(items: T[], rng: () => number): T[] {
   const out = [...items]
   for (let i = out.length - 1; i > 0; i--) {
@@ -78,12 +108,14 @@ export function dealRound(
   seatIds: string[],
   bank: Wordbank = WORDBANK,
   rng: () => number = Math.random,
+  recentPairIds: string[] = [],
 ): DealResult {
   const pairs = allPairs(bank)
+  const recent = recentPairIdsOf(recentPairIds, pairs.length)
   if (pairs.length === 0 || seatIds.length === 0) {
-    return { pairId: '', undercoverCount: 0, privates: [] }
+    return { pairId: '', undercoverCount: 0, privates: [], recentPairIds: recent }
   }
-  const pair = pairs[Math.floor(rng() * pairs.length)] ?? pairs[0]
+  const pair = pickPair(pairs, recent, rng) ?? pairs[0]
   const undercoverCount = Math.min(
     UNDERCOVER_COUNT,
     Math.max(0, seatIds.length - 1),
@@ -101,7 +133,10 @@ export function dealRound(
       word: role === 'undercover' ? pair.undercover : pair.civilian,
     }
   })
-  return { pairId: pair.id, undercoverCount, privates }
+  const nextRecent = [...recent.filter((id) => id !== pair.id), pair.id].slice(
+    -Math.max(PAIR_RECENT_K, pairs.length),
+  )
+  return { pairId: pair.id, undercoverCount, privates, recentPairIds: nextRecent }
 }
 
 const SECRET_KEYS = [
