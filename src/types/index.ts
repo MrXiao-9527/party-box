@@ -61,6 +61,8 @@ export interface SeatPrivate {
 export interface PartyPublicSeat {
   seatId: string
   hasWord: boolean
+  /** !eliminatedSeatIds. Derived on public stub. */
+  alive?: boolean
   word?: string
   role?: UndercoverRole
 }
@@ -83,6 +85,8 @@ export interface PartyStub {
   voteRound?: 0 | 1
   /** undercover: voterSeatId → target | abstain. Only while voting. */
   votes?: Record<string, string>
+  /** undercover: Q1 copy — 平票，请再投一次 / 平票，无人出局 */
+  voteNotice?: '平票，请再投一次' | '平票，无人出局'
   eliminatedSeatIds?: string[]
   winner?: 'civilian' | 'undercover' | null
   /** truthDare: current public prompt (both ends). */
@@ -386,13 +390,28 @@ function asUndercoverRole(raw: unknown): UndercoverRole | undefined {
   return undefined
 }
 
-function publicPartySeat(raw: unknown, revealed: boolean): PartyPublicSeat | null {
+function asVoteNotice(
+  raw: unknown,
+): '平票，请再投一次' | '平票，无人出局' | undefined {
+  if (raw === '平票，请再投一次' || raw === '平票，无人出局') return raw
+  return undefined
+}
+
+function publicPartySeat(
+  raw: unknown,
+  revealed: boolean,
+  eliminated: Set<string>,
+): PartyPublicSeat | null {
   if (!raw || typeof raw !== 'object') return null
   const s = raw as { seatId?: unknown; hasWord?: unknown; word?: unknown; role?: unknown }
   const seatId = typeof s.seatId === 'string' ? s.seatId : ''
   if (!seatId) return null
   const hasWord = !!s.hasWord
-  const seat: PartyPublicSeat = { seatId, hasWord }
+  const seat: PartyPublicSeat = {
+    seatId,
+    hasWord,
+    alive: !eliminated.has(seatId),
+  }
   if (revealed && hasWord) {
     const word = typeof s.word === 'string' ? s.word.trim() : ''
     const role = asUndercoverRole(s.role)
@@ -465,20 +484,23 @@ export function partyStubOf(raw: unknown): PartyStub {
   if (Number.isInteger(n) && n > 0) stub.undercoverCount = n
   const round = typeof src?.round === 'number' ? src.round : Number(src?.round)
   if (Number.isInteger(round) && round > 0) stub.round = round
-  if (Array.isArray(src?.seats)) {
-    stub.seats = src.seats
-      .map((s) => publicPartySeat(s, phase === 'revealed'))
-      .filter((s): s is PartyPublicSeat => !!s)
-  }
   const speakOrder = stringIdList(src?.speakOrder)
   const spokeSeatIds = stringIdList(src?.spokeSeatIds)
   const speakerSeatId = seatIdOrNull(src?.speakerSeatId)
   const eliminatedSeatIds = stringIdList(src?.eliminatedSeatIds)
+  const eliminated = new Set(eliminatedSeatIds)
+  if (Array.isArray(src?.seats)) {
+    stub.seats = src.seats
+      .map((s) => publicPartySeat(s, phase === 'revealed', eliminated))
+      .filter((s): s is PartyPublicSeat => !!s)
+  }
+  const voteNotice = asVoteNotice(src?.voteNotice)
   if (phase === 'speaking' || phase === 'voting') {
     stub.speakOrder = speakOrder
     stub.spokeSeatIds = spokeSeatIds
     stub.speakerSeatId = speakerSeatId
     if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+    if (voteNotice) stub.voteNotice = voteNotice
     if (phase === 'voting') {
       stub.voteRound = src?.voteRound === 1 ? 1 : 0
       stub.votes = publicVotes(src?.votes)
@@ -560,6 +582,9 @@ export const ACK_REASONS = {
   ALREADY_STARTED: '本局已开始',
   NOT_PLAYING: '进行中才能揭晓',
   NOT_SPEAKING: '发言中才能操作',
+  NOT_VOTING: '投票中才能投票',
+  NOT_ALIVE_VOTER: '已出局或未发词，无法投票',
+  BAD_VOTE_TARGET: '只能投其他存活席',
   NOT_REVEALED: '揭晓后才能开下一局',
 } as const
 

@@ -301,6 +301,64 @@ try {
   await guest1.page.screenshot({ path: `${ART}/undercover-voting-guest.png`, fullPage: true })
   console.log('PASS: speak ring → dual-end voting')
 
+  const lateHasVote = await late.page.$('[data-vote-abstain]')
+  assert(!lateHasVote, 'late join has no vote controls')
+  const lateVoteText = await pageText(late.page)
+  assert(lateVoteText.includes('旁观投票') || lateVoteText.includes('投票中'), 'late watches vote')
+
+  async function abstainAll() {
+    for (const p of [host.page, guest1.page, guest2.page]) {
+      await p.waitForSelector('[data-vote-abstain]')
+      await p.click('[data-vote-abstain]')
+    }
+  }
+
+  await abstainAll()
+  await host.page.waitForFunction(() =>
+    (document.body.innerText || '').includes('平票，请再投一次'),
+  )
+  await guest1.page.waitForFunction(() =>
+    (document.body.innerText || '').includes('平票，请再投一次'),
+  )
+  await guest2.page.waitForFunction(() =>
+    (document.body.innerText || '').includes('平票，请再投一次'),
+  )
+  const revoteHost = await pageText(host.page)
+  const revoteGuest = await pageText(guest1.page)
+  assert(revoteHost.includes('平票，请再投一次'), 'host revote copy')
+  assert(revoteGuest.includes('平票，请再投一次'), 'guest revote copy')
+  const revoteSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
+  assert(revoteSnap.data.room.party.phase === 'voting', 'GET still voting')
+  assert(revoteSnap.data.room.party.voteRound === 1, 'GET voteRound 1')
+  assert(
+    Object.keys(revoteSnap.data.room.party.votes || {}).length === 0,
+    'GET votes cleared on revote',
+  )
+  assert(!publicPayloadLeaks(revoteSnap, [wHost, wG1, wG2]), 'revote public clean')
+  await host.page.screenshot({ path: `${ART}/undercover-revote-host.png`, fullPage: true })
+  console.log('PASS: dual-end 平票，请再投一次')
+
+  await abstainAll()
+  await host.page.waitForFunction(() =>
+    (document.body.innerText || '').includes('平票，无人出局'),
+  )
+  await guest1.page.waitForFunction(() =>
+    (document.body.innerText || '').includes('平票，无人出局'),
+  )
+  await host.page.waitForSelector('[data-party-phase="speaking"]')
+  await guest1.page.waitForSelector('[data-party-phase="speaking"]')
+  await guest2.page.waitForSelector('[data-party-phase="speaking"]')
+  const tieHost = await pageText(host.page)
+  const tieGuest = await pageText(guest1.page)
+  assert(tieHost.includes('平票，无人出局') && tieGuest.includes('平票，无人出局'), 'dual-end 无人出局')
+  assert(!tieHost.includes('已出局'), 'nobody greyed after second tie')
+  const tieSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
+  assert(tieSnap.data.room.party.phase === 'speaking', 'GET speaking after second tie')
+  assert(!(tieSnap.data.room.party.eliminatedSeatIds || []).length, 'GET nobody out')
+  assert(!publicPayloadLeaks(tieSnap, [wHost, wG1, wG2]), 'tie-none public clean')
+  await host.page.screenshot({ path: `${ART}/undercover-tie-none-host.png`, fullPage: true })
+  console.log('PASS: dual-end 平票，无人出局')
+
   await late.ctx.close()
   await guest2.ctx.close()
   await guest1.ctx.close()

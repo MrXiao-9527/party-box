@@ -1,5 +1,6 @@
 import { JoinInvite } from '../components/JoinInvite'
 import type { SeatPrivate } from '../games/undercover/deal'
+import { VOTE_ABSTAIN } from '../games/undercover/speak'
 import type { RoomMember, RoomState } from '../types'
 import {
   UNDERCOVER_ROLE_LABEL,
@@ -21,6 +22,7 @@ interface PartyLobbyProps {
   onReveal: () => void
   onNextRound: () => void
   onSpeakDone: () => void
+  onCastVote: (targetSeatId: string) => void
 }
 
 const MIDJOIN = '本局已开始，本席未发词，请等下一局'
@@ -53,6 +55,7 @@ export function PartyLobby({
   onReveal,
   onNextRound,
   onSpeakDone,
+  onCastVote,
 }: PartyLobbyProps) {
   const cap = normalizeMaxSeats(room.maxSeats)
   const full = room.members.length >= cap
@@ -74,6 +77,26 @@ export function PartyLobby({
   const speakerNick = nickOf(room.members, party.speakerSeatId)
   const canSpeakDone =
     speaking && (isHost || session.seatId === party.speakerSeatId)
+  const eliminated = new Set(party.eliminatedSeatIds || [])
+  const selfOut = eliminated.has(session.seatId)
+  const canVote = voting && selfHasWord && !selfOut
+  const myVote = party.votes?.[session.seatId]
+  const voteCounts: Record<string, number> = {}
+  for (const target of Object.values(party.votes || {})) {
+    if (target && target !== VOTE_ABSTAIN) {
+      voteCounts[target] = (voteCounts[target] || 0) + 1
+    }
+  }
+  const voteTargets = room.members.filter(
+    (m) =>
+      partyHasWord(party, m.seatId) &&
+      !eliminated.has(m.seatId) &&
+      m.seatId !== session.seatId,
+  )
+  const civWord =
+    party.seats?.find((s) => s.role === 'civilian' && s.word)?.word || ''
+  const ucWord =
+    party.seats?.find((s) => s.role === 'undercover' && s.word)?.word || ''
   const barId = phaseBarId(party.phase)
   const hint = revealed
     ? `已揭晓 · 第${round}局`
@@ -94,6 +117,8 @@ export function PartyLobby({
       data-has-word={selfHasWord ? 'true' : 'false'}
       data-party-round={inPrivate || revealed ? String(round) : ''}
       data-speaker-seat={party.speakerSeatId || ''}
+      data-vote-round={voting ? String(party.voteRound ?? 0) : ''}
+      data-winner={revealed && party.winner ? party.winner : ''}
     >
       <header className="lobby-header">
         <p className="eyebrow">局桌 · 谁是卧底</p>
@@ -119,6 +144,11 @@ export function PartyLobby({
         {voting && (
           <p className="stage-copy" data-vote-copy="1">
             投票中
+          </p>
+        )}
+        {party.voteNotice && (voting || speaking) && (
+          <p className="stage-copy" data-vote-notice="1">
+            {party.voteNotice}
           </p>
         )}
       </header>
@@ -148,10 +178,67 @@ export function PartyLobby({
         </p>
       )}
 
+      {revealed && civWord && ucWord && (
+        <section className="reveal-ritual" data-reveal-ritual="1" aria-label="揭晓">
+          <p className="reveal-pair" data-reveal-civilian={civWord}>
+            平民词 {civWord}
+          </p>
+          <p className="reveal-pair" data-reveal-undercover={ucWord}>
+            卧底词 {ucWord}
+          </p>
+          {party.winner ? (
+            <p className="reveal-winner" data-winner-copy="1">
+              {party.winner === 'civilian' ? '平民胜' : '卧底胜'}
+            </p>
+          ) : null}
+        </section>
+      )}
+
       {voting && (
         <section className="vote-area" data-vote-area="1" aria-label="投票">
           <p className="prompt-placeholder">投票中</p>
-          <p className="hint">票箱将在下一刀开放</p>
+          {party.voteNotice ? (
+            <p className="hint" data-vote-notice="1">
+              {party.voteNotice}
+            </p>
+          ) : null}
+          {canVote ? (
+            <>
+              <ul className="vote-targets">
+                {voteTargets.map((m) => {
+                  const n = voteCounts[m.seatId] || 0
+                  const picked = myVote === m.seatId
+                  return (
+                    <li key={m.seatId}>
+                      <button
+                        type="button"
+                        className={picked ? 'picked' : ''}
+                        data-vote-target={m.seatId}
+                        data-vote-count={String(n)}
+                        disabled={starting}
+                        onClick={() => onCastVote(m.seatId)}
+                      >
+                        {m.name}
+                        {n ? ` · ${n}票` : ''}
+                        {picked ? ' · 已投' : ''}
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+              <button
+                type="button"
+                className={myVote === VOTE_ABSTAIN ? 'picked wide' : 'wide'}
+                data-vote-abstain="1"
+                disabled={starting}
+                onClick={() => onCastVote(VOTE_ABSTAIN)}
+              >
+                {myVote === VOTE_ABSTAIN ? '已弃权' : '弃权'}
+              </button>
+            </>
+          ) : (
+            <p className="hint">{selfOut ? '已出局' : '旁观投票'}</p>
+          )}
         </section>
       )}
 
@@ -168,7 +255,8 @@ export function PartyLobby({
           {room.members.map((m) => {
             const flagged = partyHasWord(party, m.seatId)
             const seat = party.seats?.find((s) => s.seatId === m.seatId)
-            const isSpeaker = speaking && m.seatId === party.speakerSeatId
+            const isOut = eliminated.has(m.seatId) || seat?.alive === false
+            const isSpeaker = speaking && !isOut && m.seatId === party.speakerSeatId
             const spoke = speaking && (party.spokeSeatIds || []).includes(m.seatId)
             return (
               <li
@@ -176,12 +264,14 @@ export function PartyLobby({
                 className={[
                   m.seatId === session.seatId ? 'self' : '',
                   isSpeaker ? 'turn-speaker' : '',
+                  isOut ? 'eliminated' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
                 data-seat-has-word={flagged ? 'true' : 'false'}
                 data-speaking={isSpeaker ? '1' : undefined}
                 data-spoke={spoke ? '1' : undefined}
+                data-elim={isOut ? '1' : undefined}
                 data-reveal-seat={revealed ? m.seatId : undefined}
                 data-reveal-word={revealed ? seat?.word || '' : undefined}
                 data-reveal-role={revealed ? seat?.role || '' : undefined}
@@ -192,6 +282,11 @@ export function PartyLobby({
                 </span>
                 {m.isHost && <span className="host-badge">桌主</span>}
                 {isSpeaker && <span className="turn-badge">发言</span>}
+                {isOut && (
+                  <span className="out-badge" data-out-badge="1">
+                    已出局
+                  </span>
+                )}
                 {m.connected ? (
                   <span className="online-dot">在线</span>
                 ) : (
@@ -230,10 +325,10 @@ export function PartyLobby({
               aria-busy={starting}
               onClick={onNextRound}
             >
-              {starting ? '发词中…' : '下一局'}
+              {starting ? '发词中…' : '再来一局'}
             </button>
           ) : (
-            <p className="waiting">等待桌主开下一局</p>
+            <p className="waiting">等待桌主再来一局</p>
           )
         ) : speaking ? (
           canSpeakDone ? (
@@ -253,20 +348,9 @@ export function PartyLobby({
             </p>
           )
         ) : voting ? (
-          isHost ? (
-            <button
-              type="button"
-              className="btn primary wide"
-              data-reveal="1"
-              disabled={starting}
-              aria-busy={starting}
-              onClick={onReveal}
-            >
-              {starting ? '揭晓中…' : '揭晓'}
-            </button>
-          ) : (
-            <p className="waiting">投票中</p>
-          )
+          <p className="waiting">
+            {canVote ? '点选一名存活席或弃权' : selfOut ? '已出局' : '投票中'}
+          </p>
         ) : legacyPlaying ? (
           isHost ? (
             <button

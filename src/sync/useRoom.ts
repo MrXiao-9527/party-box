@@ -39,6 +39,7 @@ import {
   revealUndercover as revealUndercoverApi,
   nextRoundUndercover as nextRoundUndercoverApi,
   speakDoneUndercover as speakDoneUndercoverApi,
+  castVoteUndercover as castVoteUndercoverApi,
   drawPrompt as drawPromptApi,
   redrawPrompt as redrawPromptApi,
   setDrawer as setDrawerApi,
@@ -893,6 +894,43 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     })()
   }, [roomCode, session, applySyncedRoom, pushToast])
 
+  const castVoteUndercover = useCallback(
+    (targetSeatId: string) => {
+      if (!session || !roomCode) {
+        pushToast(ACK_REASONS.NOT_VOTING)
+        return
+      }
+      if (startingRef.current) return
+      startingRef.current = true
+      setStarting(true)
+      void (async () => {
+        try {
+          const result = await castVoteUndercoverApi(
+            roomCode,
+            session.seatId,
+            session.seatToken,
+            targetSeatId,
+          )
+          if ('error' in result) {
+            pushToast(result.error)
+            return
+          }
+          applySyncedRoom(result.data, { force: true })
+        } catch (e) {
+          pushToast(
+            e instanceof RelayNetworkError
+              ? ACK_REASONS.RELAY_UNREACHABLE
+              : ACK_REASONS.NOT_VOTING,
+          )
+        } finally {
+          startingRef.current = false
+          setStarting(false)
+        }
+      })()
+    },
+    [roomCode, session, applySyncedRoom, pushToast],
+  )
+
   const drawPrompt = useCallback((mode: 'direct' | 'wheel' = 'direct') => {
     if (!session) {
       pushToast('抽题失败，请重试')
@@ -1164,6 +1202,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     revealUndercover,
     nextRoundUndercover,
     speakDoneUndercover,
+    castVoteUndercover,
     drawPrompt,
     redrawPrompt,
     setDrawer,

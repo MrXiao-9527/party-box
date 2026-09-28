@@ -6,9 +6,13 @@ import { createRoomStore, ACK_REASONS, publicPersisted, partyStubOf } from '../s
 import {
   WORDBANK,
   allPairs,
+  checkUndercoverWinner,
   dealRound,
   publicPayloadLeaks,
+  settleVoteParty,
   undercoverCountFor,
+  VOTE_NOTICE_REVOTE,
+  VOTE_NOTICE_TIE_NONE,
 } from '../server/undercover.mjs'
 
 function assert(cond, msg) {
@@ -367,8 +371,271 @@ function assert(cond, msg) {
     created.session.seatToken,
   )
   assert(spoken.error === ACK_REASONS.INVALID, 'truthDare cannot speak-done')
+  const voted = store.castVoteUndercover(
+    code,
+    created.session.seatId,
+    created.session.seatToken,
+    'abstain',
+  )
+  assert(voted.error === ACK_REASONS.INVALID, 'truthDare cannot cast-vote')
   const party = partyStubOf(store.get(code).room.party)
   assert(party.gameId === 'truthDare' && party.phase === 'drawing', 'truthDare stays drawing')
+}
+
+{
+  const priv3 = {
+    u: { role: 'undercover' },
+    a: { role: 'civilian' },
+    b: { role: 'civilian' },
+  }
+  assert(checkUndercoverWinner(['u'], priv3, ['a', 'b']) === 'civilian', '3p u out → civ')
+  assert(checkUndercoverWinner(['a'], priv3, ['u', 'b']) === 'undercover', '3p c out → uc')
+  assert(checkUndercoverWinner([], priv3, ['u', 'a', 'b']) === null, '3p none')
+
+  const priv4 = {
+    u: { role: 'undercover' },
+    a: { role: 'civilian' },
+    b: { role: 'civilian' },
+    c: { role: 'civilian' },
+  }
+  assert(checkUndercoverWinner(['a'], priv4, ['u', 'b', 'c']) === null, '4p first c')
+  assert(checkUndercoverWinner(['a', 'b'], priv4, ['u', 'c']) === 'undercover', '4p two c')
+  assert(checkUndercoverWinner(['u'], priv4, ['a', 'b', 'c']) === 'civilian', '4p u out')
+
+  const priv5 = {
+    u: { role: 'undercover' },
+    a: { role: 'civilian' },
+    b: { role: 'civilian' },
+    c: { role: 'civilian' },
+    d: { role: 'civilian' },
+  }
+  assert(checkUndercoverWinner(['a', 'b'], priv5, ['u', 'c', 'd']) === null, '5p two c')
+  assert(checkUndercoverWinner(['a', 'b', 'c'], priv5, ['u', 'd']) === 'undercover', '5p three c')
+
+  const members = ['a', 'b', 'c'].map((seatId) => ({
+    seatId,
+    connected: true,
+  }))
+  const voting = {
+    phase: 'voting',
+    gameId: 'undercover',
+    seats: ['a', 'b', 'c'].map((seatId) => ({ seatId, hasWord: true })),
+    speakOrder: ['a', 'b', 'c'],
+    voteRound: 0,
+    votes: { a: 'abstain', b: 'abstain', c: 'abstain' },
+    eliminatedSeatIds: [],
+  }
+  const revote = settleVoteParty(voting, members, priv3)
+  assert(revote.phase === 'voting' && revote.voteRound === 1, 'all abstain → revote')
+  assert(revote.voteNotice === VOTE_NOTICE_REVOTE, 'revote copy')
+  assert(Object.keys(revote.votes || {}).length === 0, 'revote clears votes')
+  const second = settleVoteParty(
+    { ...revote, votes: { a: 'b', b: 'c', c: 'a' } },
+    members,
+    priv3,
+  )
+  assert(second.phase === 'speaking', 'second tie → speaking')
+  assert(second.voteNotice === VOTE_NOTICE_TIE_NONE, 'tie-none copy')
+  assert(!(second.eliminatedSeatIds || []).length, 'second tie nobody out')
+}
+
+{
+  const notice = partyStubOf({
+    gameId: 'undercover',
+    phase: 'voting',
+    voteRound: 1,
+    voteNotice: VOTE_NOTICE_REVOTE,
+    eliminatedSeatIds: ['x'],
+    votes: { a: 'abstain', b: 'c' },
+    seats: [
+      { seatId: 'x', hasWord: true, word: '机密词', role: 'civilian' },
+      { seatId: 'a', hasWord: true },
+    ],
+  })
+  assert(notice.voteNotice === VOTE_NOTICE_REVOTE, 'stub keeps revote copy')
+  assert(notice.seats.find((s) => s.seatId === 'x').alive === false, 'elim alive false')
+  assert(notice.seats.find((s) => s.seatId === 'a').alive === true, 'alive true')
+  assert(
+    notice.seats.every((s) => !('word' in s) && !('role' in s)),
+    'voting stub strips word/role',
+  )
+}
+
+function drainToVoting(store, code, hostSeat, hostTok) {
+  let cur = partyStubOf(store.get(code).room.party)
+  let guard = 0
+  while (cur.phase === 'speaking' && guard++ < 16) {
+    const r = store.speakDoneUndercover(code, hostSeat, hostTok)
+    assert(!('error' in r), `drain ${guard} ${r.error || ''}`)
+    cur = partyStubOf(r.data.room.party)
+  }
+  assert(cur.phase === 'voting', 'drain → voting')
+  return cur
+}
+
+{
+  const store = createRoomStore()
+  const created = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 8,
+    gameId: 'undercover',
+  })
+  const code = created.data.room.roomCode
+  const hostTok = created.session.seatToken
+  const hostSeat = created.session.seatId
+  store.claimHostSeat(code, hostSeat, '桌主')
+  const j1 = store.joinRoom(code, '甲')
+  const j2 = store.joinRoom(code, '乙')
+  store.startUndercover(code, hostSeat, hostTok)
+  drainToVoting(store, code, hostSeat, hostTok)
+
+  const mid = store.joinRoom(code, '丁')
+  const midVote = store.castVoteUndercover(
+    code,
+    mid.session.seatId,
+    mid.session.seatToken,
+    'abstain',
+  )
+  assert(midVote.error === ACK_REASONS.NOT_ALIVE_VOTER, 'late join cannot vote')
+
+  const selfVote = store.castVoteUndercover(code, hostSeat, hostTok, hostSeat)
+  assert(selfVote.error === ACK_REASONS.BAD_VOTE_TARGET, 'no self vote')
+
+  const first = store.castVoteUndercover(code, hostSeat, hostTok, j1.session.seatId)
+  assert(!('error' in first), 'host vote')
+  const overwrite = store.castVoteUndercover(code, hostSeat, hostTok, 'abstain')
+  assert(!('error' in overwrite), 'overwrite own vote')
+  let p = partyStubOf(publicPersisted(overwrite.data).room.party)
+  assert(p.phase === 'voting', 'not settled after one vote')
+  assert(p.votes[hostSeat] === 'abstain', 'overwrite to abstain')
+
+  store.castVoteUndercover(code, j1.session.seatId, j1.session.seatToken, 'abstain')
+  const last = store.castVoteUndercover(
+    code,
+    j2.session.seatId,
+    j2.session.seatToken,
+    'abstain',
+  )
+  assert(!('error' in last), 'third abstain')
+  p = partyStubOf(publicPersisted(last.data).room.party)
+  assert(p.phase === 'voting' && p.voteRound === 1, 'Q1 first tie → revote')
+  assert(p.voteNotice === VOTE_NOTICE_REVOTE, 'revote notice public')
+  assert(Object.keys(p.votes || {}).length === 0, 'revote empty box')
+  const words = [
+    store.getSeatPrivate(code, hostSeat, hostTok).private.word,
+    store.getSeatPrivate(code, j1.session.seatId, j1.session.seatToken).private.word,
+    store.getSeatPrivate(code, j2.session.seatId, j2.session.seatToken).private.word,
+  ]
+  assert(!publicPayloadLeaks(publicPersisted(last.data), words), 'revote public clean')
+
+  store.castVoteUndercover(code, hostSeat, hostTok, j1.session.seatId)
+  store.castVoteUndercover(code, j1.session.seatId, j1.session.seatToken, j2.session.seatId)
+  const tie2 = store.castVoteUndercover(
+    code,
+    j2.session.seatId,
+    j2.session.seatToken,
+    hostSeat,
+  )
+  p = partyStubOf(publicPersisted(tie2.data).room.party)
+  assert(p.phase === 'speaking', 'second tie → speaking')
+  assert(p.voteNotice === VOTE_NOTICE_TIE_NONE, '无人出局 copy')
+  assert(!(p.eliminatedSeatIds || []).length, 'nobody out')
+  assert(p.speakerSeatId, 'next ring has speaker')
+}
+
+{
+  const store = createRoomStore()
+  const created = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 8,
+    gameId: 'undercover',
+  })
+  const code = created.data.room.roomCode
+  const hostTok = created.session.seatToken
+  const hostSeat = created.session.seatId
+  store.claimHostSeat(code, hostSeat, '桌主')
+  const j1 = store.joinRoom(code, '甲')
+  const j2 = store.joinRoom(code, '乙')
+  store.startUndercover(code, hostSeat, hostTok)
+  drainToVoting(store, code, hostSeat, hostTok)
+
+  store.castVoteUndercover(code, hostSeat, hostTok, j1.session.seatId)
+  store.castVoteUndercover(code, j1.session.seatId, j1.session.seatToken, 'abstain')
+  store.setMemberConnected(code, j2.session.seatId, false)
+  const settled = partyStubOf(publicPersisted(store.get(code)).room.party)
+  assert(settled.phase === 'revealed', 'offline last voter abstains → settle')
+  assert(settled.eliminatedSeatIds.includes(j1.session.seatId), 'unique top out')
+  assert(settled.winner === 'civilian' || settled.winner === 'undercover', '3p unique → win')
+  const outSeat = settled.seats.find((s) => s.seatId === j1.session.seatId)
+  assert(outSeat && outSeat.alive === false, 'out seat alive false')
+  assert(outSeat.word && outSeat.role, 'reveal writes word+role')
+  const words = settled.seats.filter((s) => s.word).map((s) => s.word)
+  const pub = publicPersisted(store.get(code))
+  assert(pub.room.party.phase === 'revealed', 'persisted reveal')
+  assert(settled.seats.filter((s) => s.role === 'undercover').length === 1, 'one uc public')
+  void words
+
+  store.setMemberConnected(code, j2.session.seatId, true)
+  const guestNext = store.nextRoundUndercover(code, j1.session.seatId, j1.session.seatToken)
+  assert(guestNext.error === ACK_REASONS.NOT_HOST, 'guest cannot 再来一局')
+  const next = store.nextRoundUndercover(code, hostSeat, hostTok)
+  assert(!('error' in next), 'host 再来一局')
+  const np = partyStubOf(publicPersisted(next.data).room.party)
+  assert(np.phase === 'speaking', '再来一局 speaking')
+  assert(np.round === 2, 'round++')
+  assert(!(np.eliminatedSeatIds || []).length, 'clears elim')
+  assert(!np.winner, 'clears winner')
+  assert(np.seats.every((s) => s.alive !== false && !('word' in s)), 'new deal public clean flags')
+}
+
+{
+  const store = createRoomStore()
+  const created = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 8,
+    gameId: 'undercover',
+  })
+  const code = created.data.room.roomCode
+  const hostTok = created.session.seatToken
+  const hostSeat = created.session.seatId
+  store.claimHostSeat(code, hostSeat, '桌主')
+  const j1 = store.joinRoom(code, '甲')
+  const j2 = store.joinRoom(code, '乙')
+  const j3 = store.joinRoom(code, '丙')
+  store.startUndercover(code, hostSeat, hostTok)
+  drainToVoting(store, code, hostSeat, hostTok)
+  const privates = store.get(code).partyPrivates
+  const civId = Object.values(privates).find((p) => p.role === 'civilian').seatId
+  const voters = [created.session, j1.session, j2.session, j3.session]
+  for (const sess of voters) {
+    const target = sess.seatId === civId
+      ? voters.find((s) => s.seatId !== civId).seatId
+      : civId
+    const r = store.castVoteUndercover(code, sess.seatId, sess.seatToken, target)
+    assert(!('error' in r), `4p vote ${sess.seatId}`)
+  }
+  const p = partyStubOf(publicPersisted(store.get(code)).room.party)
+  const ucStillIn = Object.values(privates).some(
+    (x) => x.role === 'undercover' && x.seatId !== civId,
+  )
+  if (ucStillIn && p.phase === 'speaking') {
+    assert((p.eliminatedSeatIds || []).includes(civId), '4p civ out stays speaking')
+    assert(!p.winner, 'no winner yet')
+    assert(!p.seats.some((s) => 'word' in s || 'role' in s), 'continue public no words')
+    assert(p.speakerSeatId !== civId, 'elim not speaker')
+    assert(!(p.speakOrder || []).includes(civId), 'elim off ring')
+    drainToVoting(store, code, hostSeat, hostTok)
+    const outSess = voters.find((s) => s.seatId === civId)
+    const outVote = store.castVoteUndercover(
+      code,
+      civId,
+      outSess.seatToken,
+      'abstain',
+    )
+    assert(outVote.error === ACK_REASONS.NOT_ALIVE_VOTER, 'eliminated cannot vote')
+  } else {
+    assert(p.phase === 'revealed', '4p unique that hits uc → reveal')
+  }
 }
 
 console.log('OK test-undercover')

@@ -88,6 +88,15 @@ export function nextUnspokenOnline(
   return null
 }
 
+export const VOTE_ABSTAIN = 'abstain'
+export const VOTE_NOTICE_REVOTE = '平票，请再投一次'
+export const VOTE_NOTICE_TIE_NONE = '平票，无人出局'
+export const VOTE_ERR = {
+  NOT_VOTING: 'NOT_VOTING',
+  NOT_ALIVE: 'NOT_ALIVE',
+  BAD_TARGET: 'BAD_TARGET',
+}
+
 export function enterVotingRound(party) {
   return {
     phase: 'voting',
@@ -191,6 +200,190 @@ export function applyRejoinSpeakTail(party, seatId, members) {
   return {
     ...party,
     speakOrder: appendSpeakTail(party.speakOrder, seatId, party.speakerSeatId),
+  }
+}
+
+export function aliveSpeakOrder(speakOrder, aliveIds) {
+  const alive = seatIdList(aliveIds)
+  const aliveSet = new Set(alive)
+  const prev = seatIdList(speakOrder).filter((id) => aliveSet.has(id))
+  for (const id of alive) {
+    if (!prev.includes(id)) prev.push(id)
+  }
+  return prev
+}
+
+export function normalizeVoteTarget(raw) {
+  if (raw === true) return VOTE_ABSTAIN
+  if (typeof raw !== 'string') return null
+  const v = raw.trim()
+  if (!v) return null
+  if (v === VOTE_ABSTAIN) return VOTE_ABSTAIN
+  return v
+}
+
+export function tallyVoteCounts(votes, aliveIds) {
+  const alive = new Set(seatIdList(aliveIds))
+  const counts = {}
+  for (const [voter, target] of Object.entries(votes || {})) {
+    if (!alive.has(voter)) continue
+    if (target === VOTE_ABSTAIN || !target) continue
+    if (!alive.has(target)) continue
+    counts[target] = (counts[target] || 0) + 1
+  }
+  return counts
+}
+
+export function highestVoteTargets(counts) {
+  let max = 0
+  const tops = []
+  for (const [id, n] of Object.entries(counts || {})) {
+    const score = Number(n) || 0
+    if (score > max) {
+      max = score
+      tops.length = 0
+      tops.push(id)
+    } else if (score === max && score > 0) {
+      tops.push(id)
+    }
+  }
+  return { max, tops }
+}
+
+export function fillOfflineAbstain(party, members) {
+  const alive = aliveWordSeatIds(party, members)
+  const online = new Set(onlineAliveSeatIds(party, members))
+  const votes = { ...(party?.votes || {}) }
+  for (const id of alive) {
+    if (!(id in votes) && !online.has(id)) votes[id] = VOTE_ABSTAIN
+  }
+  return votes
+}
+
+export function canSettleVotes(party, members) {
+  if (!party || party.phase !== 'voting') return false
+  const alive = aliveWordSeatIds(party, members)
+  if (!alive.length) return false
+  const votes = party.votes || {}
+  const online = new Set(onlineAliveSeatIds(party, members))
+  return alive.every((id) => id in votes || !online.has(id))
+}
+
+export function castVoteOnParty(party, members, voterSeatId, rawTarget) {
+  if (!party || party.phase !== 'voting') return { error: VOTE_ERR.NOT_VOTING }
+  const target = normalizeVoteTarget(rawTarget)
+  if (!target) return { error: VOTE_ERR.BAD_TARGET }
+  const alive = aliveWordSeatIds(party, members)
+  if (!voterSeatId || !alive.includes(voterSeatId)) {
+    return { error: VOTE_ERR.NOT_ALIVE }
+  }
+  if (target !== VOTE_ABSTAIN && (target === voterSeatId || !alive.includes(target))) {
+    return { error: VOTE_ERR.BAD_TARGET }
+  }
+  return {
+    party: {
+      ...party,
+      votes: { ...(party.votes || {}), [voterSeatId]: target },
+    },
+  }
+}
+
+export function applyVotingDisconnect(party, members, seatId) {
+  if (!party || party.phase !== 'voting' || !seatId) return party
+  const alive = aliveWordSeatIds(party, members)
+  if (!alive.includes(seatId)) return party
+  const votes = { ...(party.votes || {}) }
+  if (!(seatId in votes)) votes[seatId] = VOTE_ABSTAIN
+  return { ...party, votes }
+}
+
+export function checkUndercoverWinner(eliminatedSeatIds, privates, aliveSeatIds) {
+  const elim = new Set(seatIdList(eliminatedSeatIds))
+  const underIds = []
+  for (const [id, p] of Object.entries(privates || {})) {
+    if (p && p.role === 'undercover') underIds.push(id)
+  }
+  if (underIds.some((id) => elim.has(id))) return 'civilian'
+  const alive = new Set(seatIdList(aliveSeatIds))
+  let aliveUnder = 0
+  let aliveCiv = 0
+  for (const id of alive) {
+    const role = privates?.[id]?.role
+    if (role === 'undercover') aliveUnder += 1
+    else if (role === 'civilian') aliveCiv += 1
+  }
+  if (aliveUnder > 0 && aliveUnder >= aliveCiv) return 'undercover'
+  return null
+}
+
+export function settleVoteParty(party, members, privates) {
+  const votes = fillOfflineAbstain(party, members)
+  const alive = aliveWordSeatIds(party, members)
+  const counts = tallyVoteCounts(votes, alive)
+  const { max, tops } = highestVoteTargets(counts)
+  const voteRound = party?.voteRound === 1 ? 1 : 0
+  const isTie = max <= 0 || tops.length !== 1
+  const base = {
+    gameId: party?.gameId || 'undercover',
+    pairId: party?.pairId,
+    undercoverCount: party?.undercoverCount || 1,
+    round: party?.round,
+    seats: party?.seats,
+    eliminatedSeatIds: seatIdList(party?.eliminatedSeatIds),
+  }
+
+  if (isTie) {
+    if (voteRound === 0) {
+      return {
+        ...base,
+        phase: 'voting',
+        speakerSeatId: null,
+        spokeSeatIds: seatIdList(party?.spokeSeatIds),
+        speakOrder: seatIdList(party?.speakOrder),
+        voteRound: 1,
+        votes: {},
+        voteNotice: VOTE_NOTICE_REVOTE,
+        winner: null,
+      }
+    }
+    const ring = buildSpeakingRound(aliveSpeakOrder(party?.speakOrder, alive), members)
+    return {
+      ...base,
+      ...ring,
+      voteNotice: VOTE_NOTICE_TIE_NONE,
+      winner: null,
+    }
+  }
+
+  const outId = tops[0]
+  const eliminatedSeatIds = [
+    ...base.eliminatedSeatIds.filter((id) => id !== outId),
+    outId,
+  ]
+  const nextAlive = alive.filter((id) => id !== outId)
+  const winner = checkUndercoverWinner(eliminatedSeatIds, privates, nextAlive)
+  if (winner) {
+    return {
+      ...base,
+      phase: 'revealed',
+      speakerSeatId: null,
+      spokeSeatIds: [],
+      speakOrder: seatIdList(party?.speakOrder),
+      voteRound: 0,
+      votes: {},
+      eliminatedSeatIds,
+      winner,
+    }
+  }
+  const ring = buildSpeakingRound(
+    aliveSpeakOrder(party?.speakOrder, nextAlive),
+    members,
+  )
+  return {
+    ...base,
+    ...ring,
+    eliminatedSeatIds,
+    winner: null,
   }
 }
 
