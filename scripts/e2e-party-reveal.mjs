@@ -348,7 +348,7 @@ try {
 
   await host.page.screenshot({ path: `${ART}/undercover-next-round-host.png`, fullPage: true })
   await late.page.screenshot({ path: `${ART}/undercover-next-round-late.png`, fullPage: true })
-  console.log('PASS: dual-end next-round playing with new private words')
+  console.log('PASS: dual-end next-round speaking with new private words')
 
   await late.ctx.close()
   await guest2.ctx.close()
