@@ -287,6 +287,21 @@ export class RoomDurableObject {
         })
       }
 
+      if (request.method === 'POST' && action === 'speak-done') {
+        const body = await request.json()
+        const result = this.store.speakDoneUndercover(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
       if (request.method === 'POST' && action === 'seat-private') {
         const body = await request.json()
         const result = this.store.getSeatPrivate(code, body.seatId, body.seatToken)

@@ -706,6 +706,7 @@ export function RoomPage() {
             onStart={denyIfReadOnly(roomApi.startUndercover)}
             onReveal={denyIfReadOnly(roomApi.revealUndercover)}
             onNextRound={denyIfReadOnly(roomApi.nextRoundUndercover)}
+            onSpeakDone={denyIfReadOnly(roomApi.speakDoneUndercover)}
           />
         )
       ) : party ? (

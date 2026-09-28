@@ -3,7 +3,15 @@
  * Mirrors src/store/localRoom.ts + src/types (keep in sync).
  */
 
-import { dealRound } from './undercover.mjs'
+import {
+  dealRound,
+  buildSpeakingRound,
+  advanceSpeakRing,
+  applyDisconnectSkip,
+  applyRejoinSpeakTail,
+  onlineAliveSeatIds,
+  isUndercoverDealtPhase,
+} from './undercover.mjs'
 import {
   pickPrompt,
   ensureTruthDareTurn,
@@ -39,6 +47,7 @@ export const ACK_REASONS = {
   NEED_THREE_ONLINE: '至少 3 人在线才能开始',
   ALREADY_STARTED: '本局已开始',
   NOT_PLAYING: '进行中才能揭晓',
+  NOT_SPEAKING: '发言中才能操作',
   NOT_REVEALED: '揭晓后才能开下一局',
 }
 
@@ -62,8 +71,40 @@ export function parsePartyGameId(raw) {
 }
 
 function asPartyPhase(raw) {
-  if (raw === 'playing' || raw === 'revealed') return raw
+  if (
+    raw === 'playing' ||
+    raw === 'revealed' ||
+    raw === 'speaking' ||
+    raw === 'voting'
+  ) {
+    return raw
+  }
   return 'lobby'
+}
+
+function stringIdList(raw) {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set()
+  const out = []
+  for (const x of raw) {
+    if (typeof x !== 'string' || !x.trim()) continue
+    const id = x.trim()
+    if (seen.has(id)) continue
+    seen.add(id)
+    out.push(id)
+  }
+  return out
+}
+
+function publicVotes(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out = {}
+  for (const [k, v] of Object.entries(raw)) {
+    if (typeof k !== 'string' || !k.trim()) continue
+    if (v === 'abstain') out[k.trim()] = 'abstain'
+    else if (typeof v === 'string' && v.trim()) out[k.trim()] = v.trim()
+  }
+  return out
 }
 
 function asTruthDarePhase(raw) {
@@ -150,11 +191,33 @@ export function partyStubOf(raw) {
       .map((s) => mapPublicSeat(s, phase === 'revealed'))
       .filter(Boolean)
   }
+  const speakOrder = stringIdList(src.speakOrder)
+  const spokeSeatIds = stringIdList(src.spokeSeatIds)
+  const speakerSeatId = seatIdOrNull(src.speakerSeatId)
+  const eliminatedSeatIds = stringIdList(src.eliminatedSeatIds)
+  if (phase === 'speaking' || phase === 'voting') {
+    stub.speakOrder = speakOrder
+    stub.spokeSeatIds = spokeSeatIds
+    stub.speakerSeatId = speakerSeatId
+    if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+    if (phase === 'voting') {
+      stub.voteRound = src.voteRound === 1 ? 1 : 0
+      stub.votes = publicVotes(src.votes)
+    }
+  } else {
+    if (speakOrder.length) stub.speakOrder = speakOrder
+    if (spokeSeatIds.length) stub.spokeSeatIds = spokeSeatIds
+    if (speakerSeatId) stub.speakerSeatId = speakerSeatId
+    if (eliminatedSeatIds.length) stub.eliminatedSeatIds = eliminatedSeatIds
+  }
+  if (src.winner === 'civilian' || src.winner === 'undercover') {
+    stub.winner = src.winner
+  }
   return stub
 }
 
 export function partyHasWord(party, seatId) {
-  if (!party || (party.phase !== 'playing' && party.phase !== 'revealed')) {
+  if (!party || !isUndercoverDealtPhase(party.phase)) {
     return false
   }
   return !!party.seats?.find((s) => s.seatId === seatId)?.hasWord
@@ -162,7 +225,7 @@ export function partyHasWord(party, seatId) {
 
 function appendPartySeat(raw, seatId, hasWord) {
   const party = partyStubOf(raw)
-  if (party.phase !== 'playing' && party.phase !== 'revealed') return raw
+  if (!isUndercoverDealtPhase(party.phase)) return raw
   const seats = [...(party.seats || [])]
   if (seats.some((s) => s.seatId === seatId)) return party
   seats.push({ seatId, hasWord: !!hasWord })
@@ -647,7 +710,7 @@ export function createRoomStore() {
     }
     let party = existing.room.party
     const partyPhase = partyStubOf(party).phase
-    if (partyPhase === 'playing' || partyPhase === 'revealed') {
+    if (isUndercoverDealtPhase(partyPhase)) {
       for (const s of seats) {
         if (!party.seats?.some((p) => p.seatId === s.seatId)) {
           party = appendPartySeat(party, s.seatId, false)
@@ -677,8 +740,15 @@ export function createRoomStore() {
     const members = existing.room.members.map((m) =>
       m.seatId === seatId ? { ...m, connected } : m,
     )
+    let party = existing.room.party
+    const stub = partyStubOf(party)
+    if (stub.gameId === 'undercover' && stub.phase === 'speaking') {
+      party = connected
+        ? applyRejoinSpeakTail(stub, seatId, members)
+        : applyDisconnectSkip(stub, members)
+    }
     return set({
-      room: { ...existing.room, members },
+      room: { ...existing.room, members, ...(party ? { party } : {}) },
       table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
     })
   }
@@ -768,17 +838,22 @@ export function createRoomStore() {
     for (const p of dealt.privates) {
       partyPrivates[p.seatId] = { ...p, round }
     }
+    const ring = buildSpeakingRound(seatIds, existing.room.members)
     return set({
       ...existing,
       room: {
         ...existing.room,
         party: {
           gameId: party.gameId || 'undercover',
-          phase: 'playing',
+          phase: ring.phase,
           pairId: dealt.pairId,
-          undercoverCount: dealt.undercoverCount,
+          undercoverCount: 1,
           round,
           seats: seatIds.map((seatId) => ({ seatId, hasWord: true })),
+          speakerSeatId: ring.speakerSeatId,
+          spokeSeatIds: ring.spokeSeatIds,
+          speakOrder: ring.speakOrder,
+          eliminatedSeatIds: [],
         },
       },
       table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
@@ -805,7 +880,13 @@ export function createRoomStore() {
     if (hostErr) return { error: hostErr }
     const party = partyStubOf(existing.room.party)
     if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
-    if (party.phase !== 'playing') return { error: ACK_REASONS.NOT_PLAYING }
+    if (
+      party.phase !== 'playing' &&
+      party.phase !== 'speaking' &&
+      party.phase !== 'voting'
+    ) {
+      return { error: ACK_REASONS.NOT_PLAYING }
+    }
     const privates = existing.partyPrivates || {}
     const seats = existing.room.members.map((m) => {
       const priv = privates[m.seatId]
@@ -850,6 +931,38 @@ export function createRoomStore() {
     const round = (party.round || 1) + 1
     const data = applyUndercoverDeal(existing, party, round)
     return { data, private: data.partyPrivates?.[fromSeatId] || null }
+  }
+
+  function speakDoneUndercover(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const seatErr = partySeatError(existing, fromSeatId, seatToken)
+    if (seatErr) return { error: seatErr }
+    const party = partyStubOf(existing.room.party)
+    if (party.gameId !== 'undercover') return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'speaking') return { error: ACK_REASONS.NOT_SPEAKING }
+    const isHost = fromSeatId === existing.room.hostSeatId
+    if (!isHost && fromSeatId !== party.speakerSeatId) {
+      return { error: ACK_REASONS.NOT_YOUR_TURN }
+    }
+    const ring = advanceSpeakRing({
+      speakOrder: party.speakOrder,
+      spokeSeatIds: party.spokeSeatIds,
+      speakerSeatId: party.speakerSeatId,
+      onlineAliveIds: onlineAliveSeatIds(party, existing.room.members),
+      markSpoke: true,
+    })
+    const data = set({
+      ...existing,
+      room: {
+        ...existing.room,
+        party: {
+          ...party,
+          ...ring,
+        },
+      },
+      table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+    })
+    return { data }
   }
 
   function getSeatPrivate(roomCode, seatId, seatToken) {
@@ -1478,6 +1591,7 @@ export function createRoomStore() {
     startUndercover,
     revealUndercover,
     nextRoundUndercover,
+    speakDoneUndercover,
     getSeatPrivate,
     drawPrompt,
     redrawPrompt,

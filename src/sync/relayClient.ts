@@ -465,6 +465,27 @@ export async function relayNextRoundUndercover(
   }
 }
 
+export async function relaySpeakDoneUndercover(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  const result = await api<{ data: PersistedRoom }>(
+    `/rooms/${encodeURIComponent(roomCode)}/speak-done`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ fromSeatId, seatToken }),
+    },
+  )
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return { error: errorFromBody(result.body, ACK_REASONS.INVALID) }
+  }
+  return { data: cache(result.body.data) ?? result.body.data }
+}
+
 async function relayTruthDareAction(
   roomCode: string,
   action: 'draw' | 'redraw' | 'set-drawer' | 'set-answerer' | 'advance',

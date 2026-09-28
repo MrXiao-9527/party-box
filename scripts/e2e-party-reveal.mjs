@@ -196,9 +196,9 @@ try {
   )
 
   await clickText(host.page, '开始游戏')
-  await host.page.waitForSelector('[data-party-phase="playing"]')
-  await guest1.page.waitForSelector('[data-party-phase="playing"]')
-  await guest2.page.waitForSelector('[data-party-phase="playing"]')
+  await host.page.waitForSelector('[data-party-phase="speaking"]')
+  await guest1.page.waitForSelector('[data-party-phase="speaking"]')
+  await guest2.page.waitForSelector('[data-party-phase="speaking"]')
   await host.page.waitForSelector('[data-private-word]')
   await guest1.page.waitForSelector('[data-private-word]')
   await guest2.page.waitForSelector('[data-private-word]')
@@ -210,13 +210,13 @@ try {
 
   const playingSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
   const playingLeak = publicPayloadLeaks(playingSnap, [wHost, wG1, wG2])
-  assert(!playingLeak, `playing public leak ${playingLeak}`)
-  assert(playingSnap.data.room.party.phase === 'playing', 'GET playing')
+  assert(!playingLeak, `speaking public leak ${playingLeak}`)
+  assert(playingSnap.data.room.party.phase === 'speaking', 'GET speaking')
   assert(
     playingSnap.data.room.party.seats.every(
       (s) => !('word' in s) && !('role' in s),
     ),
-    'playing public has no word/role',
+    'speaking public has no word/role',
   )
 
   const late = await newDevice(browser)
@@ -224,6 +224,31 @@ try {
   await nickEnter(late.page, '玩家D')
   await late.page.waitForSelector('[data-midjoin]')
 
+  for (let i = 0; i < 6; i++) {
+    const phase = await pagePhase(host.page)
+    if (phase === 'voting') break
+    await host.page.waitForSelector('[data-speak-done]')
+    const prev = await host.page.evaluate(
+      () =>
+        document.querySelector('[data-speaker-seat]')?.getAttribute('data-speaker-seat') ||
+        '',
+    )
+    await host.page.click('[data-speak-done]')
+    await host.page.waitForFunction(
+      (was) => {
+        const p =
+          document.querySelector('[data-party-phase]')?.getAttribute('data-party-phase') ||
+          ''
+        const s =
+          document.querySelector('[data-speaker-seat]')?.getAttribute('data-speaker-seat') ||
+          ''
+        return p === 'voting' || (p === 'speaking' && s && s !== was)
+      },
+      {},
+      prev,
+    )
+  }
+  await host.page.waitForSelector('[data-party-phase="voting"]')
   await clickText(host.page, '揭晓')
   await host.page.waitForSelector('[data-party-phase="revealed"]')
   await guest1.page.waitForSelector('[data-party-phase="revealed"]')
@@ -283,10 +308,10 @@ try {
   console.log('PASS: dual-end revealed; public words+roles')
 
   await clickText(host.page, '下一局')
-  await host.page.waitForSelector('[data-party-phase="playing"]')
-  await guest1.page.waitForSelector('[data-party-phase="playing"]')
-  await guest2.page.waitForSelector('[data-party-phase="playing"]')
-  await late.page.waitForSelector('[data-party-phase="playing"]')
+  await host.page.waitForSelector('[data-party-phase="speaking"]')
+  await guest1.page.waitForSelector('[data-party-phase="speaking"]')
+  await guest2.page.waitForSelector('[data-party-phase="speaking"]')
+  await late.page.waitForSelector('[data-party-phase="speaking"]')
 
   const nextPhases = await Promise.all([
     pagePhase(host.page),
@@ -295,7 +320,7 @@ try {
     pagePhase(late.page),
   ])
   assert(
-    nextPhases.every((p) => p === 'playing'),
+    nextPhases.every((p) => p === 'speaking'),
     `dual-end next-round phases ${nextPhases.join(',')}`,
   )
 
@@ -312,7 +337,7 @@ try {
   assert(new Set([nHost, nG1, nG2, nLate]).size === 2, 'two words after re-deal')
 
   const nextSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
-  assert(nextSnap.data.room.party.phase === 'playing', 'GET playing after next-round')
+  assert(nextSnap.data.room.party.phase === 'speaking', 'GET speaking after next-round')
   assert(nextSnap.data.room.party.round === 2, 'GET round 2')
   const nextLeak = publicPayloadLeaks(nextSnap, [nHost, nG1, nG2, nLate])
   assert(!nextLeak, `next-round public leak ${nextLeak}`)
@@ -323,7 +348,7 @@ try {
 
   await host.page.screenshot({ path: `${ART}/undercover-next-round-host.png`, fullPage: true })
   await late.page.screenshot({ path: `${ART}/undercover-next-round-late.png`, fullPage: true })
-  console.log('PASS: dual-end next-round playing with new private words')
+  console.log('PASS: dual-end next-round speaking with new private words')
 
   await late.ctx.close()
   await guest2.ctx.close()
