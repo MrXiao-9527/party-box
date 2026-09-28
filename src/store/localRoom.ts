@@ -1263,7 +1263,7 @@ function applyLocalUndercoverDeal(
           ? { recentPairIds: dealt.recentPairIds }
           : {}),
       },
-    },}
+    },
     table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
   }
   saveRoom(data)
