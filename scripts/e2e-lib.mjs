@@ -101,6 +101,20 @@ export async function confirmCreateRoom(page, opts) {
   await clickText(page, '确认')
 }
 
+/** Mid-vote live tally leak: 「· N票」 or data-vote-count. 「投票中」 is not a tally. */
+export async function liveVoteTallyLeak(page) {
+  return page.evaluate(() => {
+    const re = /·\s*\d+票/
+    if (document.querySelector('[data-vote-count]')) return 'data-vote-count'
+    const text = document.body.innerText || ''
+    if (re.test(text)) return 'body · N票'
+    const hit = [...document.querySelectorAll('[data-vote-target], [data-vote-abstain]')].find(
+      (el) => re.test(el.textContent || ''),
+    )
+    return hit ? `control ${(hit.textContent || '').trim()}` : ''
+  })
+}
+
 export async function confirmCreateParty(page, { maxSeats, gameId } = {}) {
   await openPartyCreate(page, gameId)
   if (maxSeats != null) {

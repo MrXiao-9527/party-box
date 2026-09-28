@@ -9,7 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import puppeteer from 'puppeteer-core'
-import { clickText, confirmCreateParty } from './e2e-lib.mjs'
+import { clickText, confirmCreateParty, liveVoteTallyLeak } from './e2e-lib.mjs'
 import { publicPayloadLeaks } from '../server/undercover.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -256,6 +256,13 @@ try {
   assert(seatC, 'seat C')
   await host.page.waitForSelector(`[data-vote-target="${seatC}"]`)
   await host.page.click(`[data-vote-target="${seatC}"]`)
+  await host.page.waitForFunction(() =>
+    [...document.querySelectorAll('[data-vote-target]')].some((el) =>
+      (el.textContent || '').includes('已投'),
+    ),
+  )
+  assert(!(await liveVoteTallyLeak(host.page)), 'reveal-e2e host mid-vote no · N票')
+  assert(!(await liveVoteTallyLeak(guest1.page)), 'reveal-e2e guest mid-vote no · N票')
   await guest1.page.waitForSelector(`[data-vote-target="${seatC}"]`)
   await guest1.page.click(`[data-vote-target="${seatC}"]`)
   await guest2.page.waitForSelector('[data-vote-abstain]')
