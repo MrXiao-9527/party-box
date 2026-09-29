@@ -1,6 +1,8 @@
 /**
  * Tab-close / WS drop: truth-dare 8s grace then offline + skip ghosts.
  * Same-seat reauth within grace reclaims drawer/answerer. Host skip works in grace.
+ * Miss-card: immediate offline (ghost cannot draw) then 8s skip turn.
+ * Undercover/chips: last-auth-WS-close still immediate offline.
  * Spawns a Node relay. Run: npm run test:ws-disconnect
  */
 import { spawn } from 'node:child_process'
@@ -396,6 +398,96 @@ try {
   await closeWs(ucHostWs.ws)
 
   console.log('OK test-ws-disconnect', code)
+
+  const mcCreated = await json('/rooms', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'partyGame',
+      gameId: 'miss-card',
+      maxSeats: 8,
+    }),
+  })
+  assert(mcCreated.status === 201, 'miss-card create')
+  const mcCode = mcCreated.body.data.room.roomCode
+  const mcHost = mcCreated.body.session.seatId
+  const mcHostTok = mcCreated.body.session.seatToken
+  await json(`/rooms/${mcCode}/claim-host`, {
+    method: 'POST',
+    body: JSON.stringify({ seatId: mcHost, name: '桌主' }),
+  })
+  const mcGuest = await json(`/rooms/${mcCode}/join`, {
+    method: 'POST',
+    body: JSON.stringify({ name: '甲' }),
+  })
+  assert(mcGuest.status === 200, 'miss-card join')
+  const mcGuestSeat = mcGuest.body.session.seatId
+  const mcGuestTok = mcGuest.body.session.seatToken
+
+  const mcHostWs = openSeatWs(mcCode, mcHost, mcHostTok)
+  const mcGuestWs = openSeatWs(mcCode, mcGuestSeat, mcGuestTok)
+  await Promise.all([mcHostWs.ready, mcGuestWs.ready])
+
+  const started = await json(`/rooms/${mcCode}/start-miss-card`, {
+    method: 'POST',
+    body: JSON.stringify({ fromSeatId: mcHost, seatToken: mcHostTok }),
+  })
+  assert(started.status === 200, 'start miss-card')
+  assert(started.body.data.room.party.phase === 'playing', 'mc playing')
+  assert(started.body.data.room.party.turnSeatId === mcHost, 'host draws first')
+  assert(started.body.data.room.party.deck.length === 52, 'mc 52')
+
+  await closeWs(mcHostWs.ws)
+  const mcOff = await waitMember(mcCode, mcHost, false)
+  assert(member(mcOff, mcHost).connected === false, 'mc host offline immediately')
+  assert(mcOff.room.party.turnSeatId === mcHost, 'grace keeps turn pointer')
+
+  const ghostDraw = await json(`/rooms/${mcCode}/draw-card`, {
+    method: 'POST',
+    body: JSON.stringify({ fromSeatId: mcHost, seatToken: mcHostTok }),
+  })
+  assert(ghostDraw.status === 400, 'ghost cannot draw')
+  const afterGhost = await json(`/rooms/${mcCode}`)
+  assert(
+    afterGhost.body.data.room.party.deckIndex === 0,
+    'ghost draw does not steal index',
+  )
+
+  const mcHostWs2 = openSeatWs(mcCode, mcHost, mcHostTok)
+  await mcHostWs2.ready
+  const mcBack = await waitMember(mcCode, mcHost, true)
+  assert(member(mcBack, mcHost).connected === true, 'mc reconnect in grace')
+  await new Promise((r) => setTimeout(r, DISCONNECT_GRACE_MS + 400))
+  const kept = await json(`/rooms/${mcCode}`)
+  assert(
+    kept.body.data.room.party.turnSeatId === mcHost,
+    'reconnect within 8s keeps turn',
+  )
+
+  await closeWs(mcHostWs2.ws)
+  await waitMember(mcCode, mcHost, false)
+  await new Promise((r) => setTimeout(r, DISCONNECT_GRACE_MS + 400))
+  const skipped = await json(`/rooms/${mcCode}`)
+  assert(
+    skipped.body.data.room.party.turnSeatId === mcGuestSeat,
+    '8s grace skip to 甲',
+  )
+  assert(
+    String(skipped.body.data.room.party.skipNotice?.text || '').includes('离线'),
+    'offline skip notice',
+  )
+
+  const guestDraw = await json(`/rooms/${mcCode}/draw-card`, {
+    method: 'POST',
+    body: JSON.stringify({
+      fromSeatId: mcGuestSeat,
+      seatToken: mcGuestTok,
+    }),
+  })
+  assert(guestDraw.status === 200, '甲 draws after skip')
+  assert(guestDraw.body.data.room.party.phase === 'awaitComplete', 'mc await')
+  await closeWs(mcGuestWs.ws)
+
+  console.log('OK test-ws-disconnect miss-card', mcCode)
 } finally {
   await stopRelay(relay)
   fs.rmSync(DATA, { recursive: true, force: true })

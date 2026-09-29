@@ -185,6 +185,11 @@ export function MissCardRoom({
             {nickOf(room.members, seatId) || '席'} · {MISS_CARD_COPY.toilet(n)}
           </span>
         ))}
+        {party.kPending?.cups ? (
+          <span className="miss-badge on" data-k-pending={String(party.kPending.cups)}>
+            下个K · {party.kPending.cups}杯
+          </span>
+        ) : null}
       </section>
 
       <section
@@ -235,6 +240,11 @@ export function MissCardRoom({
             {card.rank === '8' && (
               <p className="hint" data-toilet-now="1">
                 {MISS_CARD_COPY.toilet(party.toiletRemaining?.[party.turnSeatId || ''] || 0)}
+              </p>
+            )}
+            {card.rank === 'K' && party.kPending && !kFirst && !kAgain && (
+              <p className="hint" data-k-set={String(party.kPending.cups)}>
+                下个 K 喝 {party.kPending.cups} 杯
               </p>
             )}
             {kFirst && (
