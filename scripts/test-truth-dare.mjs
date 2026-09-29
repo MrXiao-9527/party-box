@@ -286,14 +286,15 @@ function partyOf(store, code) {
   const store = createRoomStore()
   const { code, hostSeat, hostTok } = openTruthDare(store)
   const a = store.joinRoom(code, '甲')
+  const b = store.joinRoom(code, '乙')
   assert(!('error' in store.drawPrompt(code, hostSeat, hostTok)), 'draw for advance')
   const promptId = partyOf(store, code).prompt.id
   const recent = partyOf(store, code).recentPromptIds
 
   const denied = store.advancePrompt(
     code,
-    a.session.seatId,
-    a.session.seatToken,
+    b.session.seatId,
+    b.session.seatToken,
   )
   assert(denied.error === ACK_REASONS.INVALID, 'non answerer/host cannot advance')
   assert(partyOf(store, code).prompt?.id === promptId, 'advance reject keeps prompt')
@@ -558,7 +559,7 @@ function partyOf(store, code) {
 {
   const store = createRoomStore()
   const { code, hostSeat, hostTok } = openTruthDare(store)
-  const a = store.joinRoom(code, '甲')
+  store.joinRoom(code, '甲')
   for (let i = 0; i < 6; i++) {
     assert(!('error' in store.drawPrompt(code, hostSeat, hostTok)), `draw ${i}`)
     const adv = store.advancePrompt(code, hostSeat, hostTok)

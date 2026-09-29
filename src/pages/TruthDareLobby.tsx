@@ -78,19 +78,22 @@ export function TruthDareLobby({
   const answererOffline = phase === 'answering' && !!answerer && !answerer.connected
   const [picking, setPicking] = useState<'drawer' | 'answerer' | null>(null)
   const [wheelSpin, setWheelSpin] = useState(false)
-  const [redrawType, setRedrawType] = useState<PromptTypeChoice>('truth')
+  const defaultRedrawType: PromptTypeChoice =
+    prompt?.typeChoice === 'truth' ||
+    prompt?.typeChoice === 'dare' ||
+    prompt?.typeChoice === 'random'
+      ? prompt.typeChoice
+      : prompt?.displayType || 'truth'
+  const [redrawPick, setRedrawPick] = useState<{
+    promptId: string
+    type: PromptTypeChoice
+  } | null>(null)
+  const redrawType =
+    redrawPick && prompt && redrawPick.promptId === prompt.id
+      ? redrawPick.type
+      : defaultRedrawType
   const awaitingWheel = useRef(false)
   const wheelAt = useRef(0)
-
-  useEffect(() => {
-    if (!prompt) return
-    const choice = prompt.typeChoice
-    setRedrawType(
-      choice === 'truth' || choice === 'dare' || choice === 'random'
-        ? choice
-        : prompt.displayType,
-    )
-  }, [prompt?.id, prompt?.typeChoice, prompt?.displayType])
 
   const stage =
     phase === 'answering'
@@ -361,7 +364,9 @@ export function TruthDareLobby({
                   }
                   data-redraw-type={opt.id}
                   disabled={drawing || redrawUsed}
-                  onClick={() => setRedrawType(opt.id)}
+                  onClick={() =>
+                    prompt && setRedrawPick({ promptId: prompt.id, type: opt.id })
+                  }
                 >
                   {opt.label}
                 </button>
