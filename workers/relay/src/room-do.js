@@ -88,11 +88,12 @@ export class RoomDurableObject {
       const [client, server] = Object.values(pair)
       this.state.acceptWebSocket(server)
       const code = (url.searchParams.get('room') || '').toUpperCase()
-      const room = code ? this.store.get(code) : null
+      let room = code ? this.store.get(code) : null
       const seatId = url.searchParams.get('seatId') || ''
       const seatToken = url.searchParams.get('seatToken') || ''
       if (seatId && seatToken && room?.seatTokens?.[seatId] === seatToken) {
-        server.serializeAttachment({ seatId, seatToken })
+        server.serializeAttachment({ seatId, seatToken, roomCode: code })
+        room = (await this.onlineFromSocket(code, seatId)) || room
       }
       server.send(JSON.stringify({ type: 'room', data: publicPersisted(room) }))
       this.sendPrivate(server, room)
@@ -438,11 +439,61 @@ export class RoomDurableObject {
     return []
   }
 
-  webSocketClose() {
-    /* hibernation: sessions tracked via state.getWebSockets() */
+  seatAttachment(ws) {
+    try {
+      return ws.deserializeAttachment() || {}
+    } catch {
+      return {}
+    }
   }
 
-  webSocketError() {
-    /* ignore */
+  seatHasOtherSocket(seatId, exceptWs) {
+    if (!seatId) return false
+    for (const ws of this.state.getWebSockets()) {
+      if (exceptWs && ws === exceptWs) continue
+      if (this.seatAttachment(ws).seatId === seatId) return true
+    }
+    return false
+  }
+
+  async persistPresence(data) {
+    if (!data) return data
+    await this.persist(data)
+    this.broadcast(data)
+    return data
+  }
+
+  /** Rejoin after WS drop. restoreSeat keeps paused host disconnected. */
+  async onlineFromSocket(code, seatId) {
+    const room = this.store.get(code)
+    const member = room?.room.members.find((m) => m.seatId === seatId)
+    if (!member || member.connected) return room
+    return this.persistPresence(this.store.restoreSeat(code, seatId))
+  }
+
+  async offlineIfUnsocketed(code, seatId, exceptWs) {
+    if (!code || !seatId) return
+    if (this.seatHasOtherSocket(seatId, exceptWs)) return
+    const room = this.store.get(code)
+    const member = room?.room.members.find((m) => m.seatId === seatId)
+    if (!member?.connected) return
+    await this.persistPresence(this.store.setMemberConnected(code, seatId, false))
+  }
+
+  // Tab close / navigate sends WS close (browser 1001). That is the
+  // presence signal — pagehide HTTP is best-effort and often cancelled.
+  async webSocketClose(ws) {
+    await this.ensureLoaded()
+    const att = this.seatAttachment(ws)
+    await this.offlineIfUnsocketed(att.roomCode, att.seatId, ws)
+  }
+
+  async webSocketError(ws) {
+    try {
+      ws.close(1011, 'error')
+    } catch {
+      /* ignore */
+    }
+    await this.webSocketClose(ws)
   }
 }
