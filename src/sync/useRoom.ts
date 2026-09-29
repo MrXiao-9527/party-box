@@ -1154,9 +1154,10 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   useEffect(() => {
     if (!roomCode || !session?.name) return
     if (session.roomCode.toUpperCase() !== roomCode.toUpperCase()) return
+    // Relay: last auth WS close + 8s grace is presence authority.
+    // pagehide HTTP races with refresh reconnect and must not skip the drawer.
+    if (isRelayEnabled()) return
     const onPageHide = () => {
-      // Best-effort: tab close often cancels this fetch. Relay WS close
-      // is the authority that marks the seat offline.
       void setMemberConnected(roomCode, session.seatId, false)
     }
     window.addEventListener('pagehide', onPageHide)

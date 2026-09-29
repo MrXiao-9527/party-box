@@ -36,6 +36,8 @@ export const DEFAULT_DENOMS = [1, 5, 10, 25, 100]
 export const PROMPT_RECENT_K = 8
 export const PROMPT_HISTORY_N = 5
 export const PAIR_RECENT_K = 48
+/** Authenticated WS close grace before offline + truth-dare pointer skip. */
+export const DISCONNECT_GRACE_MS = 8000
 
 export const ACK_REASONS = {
   SEAT_LOCKED: '席位已锁定',
