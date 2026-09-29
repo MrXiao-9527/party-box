@@ -466,13 +466,13 @@ try {
   await closeWs(mcHostWs2.ws)
   await waitMember(mcCode, mcHost, false)
   await new Promise((r) => setTimeout(r, DISCONNECT_GRACE_MS + 400))
-  const skipped = await json(`/rooms/${mcCode}`)
+  const mcSkipped = await json(`/rooms/${mcCode}`)
   assert(
-    skipped.body.data.room.party.turnSeatId === mcGuestSeat,
+    mcSkipped.body.data.room.party.turnSeatId === mcGuestSeat,
     '8s grace skip to 甲',
   )
   assert(
-    String(skipped.body.data.room.party.skipNotice?.text || '').includes('离线'),
+    String(mcSkipped.body.data.room.party.skipNotice?.text || '').includes('离线'),
     'offline skip notice',
   )
 
