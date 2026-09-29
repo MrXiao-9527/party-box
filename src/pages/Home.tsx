@@ -26,6 +26,12 @@ const TOOLS = [
     title: PARTY_GAME_LABEL.truthDare,
     subtitle: '轮流抽题，公屏同题',
   },
+  {
+    id: 'miss-card',
+    path: '/tools/miss-card',
+    title: PARTY_GAME_LABEL['miss-card'],
+    subtitle: '十三钗 · 轮流抽牌出令',
+  },
 ] as const
 
 export function HomePage() {

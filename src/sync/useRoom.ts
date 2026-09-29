@@ -46,6 +46,15 @@ import {
   setDrawer as setDrawerApi,
   setAnswerer as setAnswererApi,
   advancePrompt as advancePromptApi,
+  startMissCard as startMissCardApi,
+  drawMissCard as drawMissCardApi,
+  pickMissTarget as pickMissTargetApi,
+  completeMissTurn as completeMissTurnApi,
+  setMissKCups as setMissKCupsApi,
+  applyMissK as applyMissKApi,
+  spendMissToilet as spendMissToiletApi,
+  reshuffleMissCard as reshuffleMissCardApi,
+  endMissCard as endMissCardApi,
   syncRoomFromRelay,
   wasInRoomLocally,
 } from './roomApi'
@@ -1012,6 +1021,118 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     )
   }, [roomCode, session, runPartyHostAction, pushToast])
 
+  const startMissCard = useCallback(() => {
+    if (!session) {
+      pushToast('开局失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => startMissCardApi(roomCode!, session.seatId, session.seatToken),
+      '开局失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const drawMissCard = useCallback(() => {
+    if (!session) {
+      pushToast('抽牌失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => drawMissCardApi(roomCode!, session.seatId, session.seatToken),
+      '抽牌失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const pickMissTarget = useCallback(
+    (targetSeatId: string) => {
+      if (!session) {
+        pushToast(ACK_REASONS.NEED_PICK_TARGET)
+        return
+      }
+      runPartyHostAction(
+        () =>
+          pickMissTargetApi(
+            roomCode!,
+            session.seatId,
+            session.seatToken,
+            targetSeatId,
+          ),
+        ACK_REASONS.NEED_PICK_TARGET,
+      )
+    },
+    [roomCode, session, runPartyHostAction, pushToast],
+  )
+
+  const completeMissTurn = useCallback(() => {
+    if (!session) {
+      pushToast('完成失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => completeMissTurnApi(roomCode!, session.seatId, session.seatToken),
+      '完成失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const setMissKCups = useCallback(
+    (cups: number) => {
+      if (!session) {
+        pushToast(ACK_REASONS.NEED_SET_K)
+        return
+      }
+      runPartyHostAction(
+        () =>
+          setMissKCupsApi(roomCode!, session.seatId, session.seatToken, cups),
+        ACK_REASONS.NEED_SET_K,
+      )
+    },
+    [roomCode, session, runPartyHostAction, pushToast],
+  )
+
+  const applyMissK = useCallback(() => {
+    if (!session) {
+      pushToast('操作无效')
+      return
+    }
+    runPartyHostAction(
+      () => applyMissKApi(roomCode!, session.seatId, session.seatToken),
+      '操作无效',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const spendMissToilet = useCallback(() => {
+    if (!session) {
+      pushToast('操作无效')
+      return
+    }
+    runPartyHostAction(
+      () => spendMissToiletApi(roomCode!, session.seatId, session.seatToken),
+      '操作无效',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const reshuffleMissCard = useCallback(() => {
+    if (!session) {
+      pushToast('洗切失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => reshuffleMissCardApi(roomCode!, session.seatId, session.seatToken),
+      '洗切失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
+  const endMissCard = useCallback(() => {
+    if (!session) {
+      pushToast('收局失败，请重试')
+      return
+    }
+    runPartyHostAction(
+      () => endMissCardApi(roomCode!, session.seatId, session.seatToken),
+      '收局失败，请重试',
+    )
+  }, [roomCode, session, runPartyHostAction, pushToast])
+
   const startPlaying = useCallback(() => {
     if (!roomCode || !session) {
       pushToast('开桌失败，请重开一桌或检查网络')
@@ -1231,6 +1352,15 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     setDrawer,
     setAnswerer,
     advancePrompt,
+    startMissCard,
+    drawMissCard,
+    pickMissTarget,
+    completeMissTurn,
+    setMissKCups,
+    applyMissK,
+    spendMissToilet,
+    reshuffleMissCard,
+    endMissCard,
     signalHostDisconnect,
     resumeTable,
     claimHost,

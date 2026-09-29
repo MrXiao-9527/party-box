@@ -1507,6 +1507,156 @@ button.seat {
   }
 }
 
+}
+
+.miss-card-room .miss-roles {
+  margin-top: 0.85rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.miss-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: var(--card);
+}
+
+.miss-badge.on {
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px rgba(242, 244, 247, 0.16);
+}
+
+.miss-badge.psycho.on {
+  box-shadow: inset 0 0 0 1px var(--denom-100);
+}
+
+.miss-badge.toilet.on {
+  box-shadow: inset 0 0 0 1px var(--denom-10);
+}
+
+.miss-card-face {
+  margin-top: 1.1rem;
+  min-height: 10.5rem;
+  padding: 1.2rem 1.1rem 1.3rem;
+  border-radius: var(--radius);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.3rem;
+}
+
+.miss-suit {
+  margin: 0;
+  font-size: 1.4rem;
+  line-height: 1;
+}
+
+.miss-rank {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 3.1rem;
+  line-height: 1;
+}
+
+.miss-suit.red,
+.miss-rank.red {
+  color: #f87171;
+}
+
+.miss-suit.black,
+.miss-rank.black {
+  color: var(--text);
+}
+
+.miss-cmd-name {
+  margin: 0.35rem 0 0;
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+}
+
+.miss-cmd-copy {
+  margin: 0.15rem 0 0;
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  max-width: 22em;
+}
+
+.miss-k {
+  margin-top: 0.65rem;
+  width: 100%;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.miss-k label {
+  display: grid;
+  gap: 0.3rem;
+  text-align: left;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.miss-rules-preview,
+.miss-rules-box ul,
+.miss-history-list {
+  list-style: none;
+  margin: 0.55rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.miss-rules-preview {
+  margin-top: 1rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: var(--radius);
+  background: var(--card);
+}
+
+.miss-rules-preview h2,
+.miss-rules-box h2 {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.miss-rules-preview li,
+.miss-rules-box li,
+.miss-history-list li {
+  display: grid;
+  gap: 0.15rem;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.miss-rules-preview li strong,
+.miss-rules-box li strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.miss-rules-box {
+  max-height: min(78dvh, 560px);
+  overflow: auto;
+}
+
+.miss-rules-box ul {
+  margin: 0.7rem 0 1rem;
+}
+
 @media (min-width: 720px) {
   .page {
     padding-top: 2rem;

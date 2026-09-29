@@ -43,7 +43,7 @@ function pageOrigin(page) {
   }
 }
 
-/** Tool landing: /tools/chip | /tools/undercover | /tools/truthDare */
+/** Tool landing: /tools/chip | /tools/undercover | /tools/truthDare | /tools/miss-card */
 export async function gotoTool(page, tool) {
   const origin = pageOrigin(page)
   const path =
@@ -51,7 +51,9 @@ export async function gotoTool(page, tool) {
       ? '/tools/truthDare'
       : tool === 'undercover'
         ? '/tools/undercover'
-        : '/tools/chip'
+        : tool === 'miss-card'
+          ? '/tools/miss-card'
+          : '/tools/chip'
   let here = ''
   try {
     here = new URL(page.url()).pathname
@@ -72,7 +74,12 @@ export async function openChipCreate(page) {
 }
 
 export async function openPartyCreate(page, gameId) {
-  const tool = gameId === 'truthDare' ? 'truthDare' : 'undercover'
+  const tool =
+    gameId === 'truthDare'
+      ? 'truthDare'
+      : gameId === 'miss-card'
+        ? 'miss-card'
+        : 'undercover'
   await gotoTool(page, tool)
   if (!(await page.$(`[data-create-party][data-game-id="${tool}"] [name="maxSeats"]`))) {
     await clickText(page, '开一桌')

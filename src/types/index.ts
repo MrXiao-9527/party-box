@@ -11,14 +11,56 @@ export type PartyPhase = 'lobby' | 'playing' | 'speaking' | 'voting' | 'revealed
 /** truthDare room-level turn (replaces second-knife lobby-as-shell). */
 export type TruthDarePhase = 'idle' | 'drawing' | 'answering'
 
-export type PartyGameId = 'undercover' | 'truthDare'
+/** miss-card room-level turn (independent of truthDare / undercover). */
+export type MissCardPhase =
+  | 'lobby'
+  | 'playing'
+  | 'awaitComplete'
+  | 'deckEmpty'
+  | 'ended'
+
+export type PartyGameId = 'undercover' | 'truthDare' | 'miss-card'
+
+export type MissCardRank =
+  | 'A'
+  | '2'
+  | '3'
+  | '4'
+  | '5'
+  | '6'
+  | '7'
+  | '8'
+  | '9'
+  | '10'
+  | 'J'
+  | 'Q'
+  | 'K'
+
+export type MissCardSuit = 'spade' | 'heart' | 'club' | 'diamond'
+
+export interface MissCardFace {
+  rank: MissCardRank
+  suit: MissCardSuit
+}
+
+export interface MissCardHistoryEntry {
+  seatId: string
+  rank: string
+  suit: string
+  commandName: string
+  targetSeatId?: string | null
+  at: number
+}
 
 export type PromptDisplayType = 'truth' | 'dare'
 
 export const PARTY_GAME_LABEL: Record<PartyGameId, string> = {
   undercover: '谁是卧底',
   truthDare: '真心话大冒险',
+  'miss-card': '小姐牌',
 }
+
+export const MISS_CARD_HISTORY_N = 5
 
 export const PROMPT_TYPE_LABEL: Record<PromptDisplayType, string> = {
   truth: '真心话',
@@ -58,7 +100,9 @@ export interface PromptHistoryEntry {
 
 /** Omitted / unknown → undercover (first-knife index path). */
 export function parsePartyGameId(raw: unknown): PartyGameId {
-  return raw === 'truthDare' ? 'truthDare' : 'undercover'
+  if (raw === 'truthDare') return 'truthDare'
+  if (raw === 'miss-card') return 'miss-card'
+  return 'undercover'
 }
 
 export type UndercoverRole = 'civilian' | 'undercover'
@@ -90,7 +134,7 @@ export interface PartyPublicSeat {
 /** Public party fields. Word/role text only when phase is revealed. */
 export interface PartyStub {
   gameId: PartyGameId
-  phase: PartyPhase | TruthDarePhase
+  phase: PartyPhase | TruthDarePhase | MissCardPhase
   pairId?: string
   undercoverCount?: number
   round?: number
@@ -123,6 +167,42 @@ export interface PartyStub {
   redrawUsedThisTurn?: boolean
   /** truthDare: closed prompts, newest first, max 5. */
   promptHistory?: PromptHistoryEntry[]
+  /** miss-card: shuffled 52, relay-authoritative order. */
+  deck?: MissCardFace[]
+  /** miss-card: next draw index; remaining = deck.length - deckIndex. */
+  deckIndex?: number
+  /** miss-card: public current face (Q6 shows suit). */
+  currentCard?: MissCardFace | null
+  /** miss-card: current draw seat; online only. */
+  turnSeatId?: string | null
+  /** miss-card: persistent 小姐 / 神经病 holders. */
+  roles?: {
+    missSeatId: string | null
+    psychoSeatId: string | null
+  }
+  /** miss-card: 厕所(8) remaining uses; 0/missing = no badge. */
+  toiletRemaining?: Record<string, number>
+  /** miss-card: next-K cups; null until first K sets it. */
+  kPending?: { cups: number } | null
+  /** miss-card: recent draws, newest first, max 5. */
+  history?: MissCardHistoryEntry[]
+  /** miss-card: A must pick before 完成. */
+  needPickTarget?: boolean
+  /** miss-card: A locked target (self allowed). */
+  targetSeatId?: string | null
+  /** miss-card: J/Q neighbor result; seatId null → self-drink. */
+  resolvedNeighbor?: {
+    side: 'left' | 'right'
+    seatId: string | null
+  } | null
+  /** miss-card: first K must set cups before 完成. */
+  needSetK?: boolean
+  /** miss-card: repeat K cups to execute this turn. */
+  kExecuteCups?: number | null
+  /** miss-card: this K turn already set/apply. */
+  kSetThisTurn?: boolean
+  /** miss-card: skip toast payload, dual-end. */
+  skipNotice?: { text: string; at: number } | null
 }
 
 export type ChipOpType =
@@ -367,6 +447,40 @@ export function isUndercoverDealtPhase(phase: string | undefined): boolean {
   )
 }
 
+export function isMissCardPhase(raw: unknown): raw is MissCardPhase {
+  return (
+    raw === 'lobby' ||
+    raw === 'playing' ||
+    raw === 'awaitComplete' ||
+    raw === 'deckEmpty' ||
+    raw === 'ended'
+  )
+}
+
+export function isMissCardRank(raw: unknown): raw is MissCardRank {
+  return (
+    raw === 'A' ||
+    raw === '2' ||
+    raw === '3' ||
+    raw === '4' ||
+    raw === '5' ||
+    raw === '6' ||
+    raw === '7' ||
+    raw === '8' ||
+    raw === '9' ||
+    raw === '10' ||
+    raw === 'J' ||
+    raw === 'Q' ||
+    raw === 'K'
+  )
+}
+
+export function isMissCardSuit(raw: unknown): raw is MissCardSuit {
+  return (
+    raw === 'spade' || raw === 'heart' || raw === 'club' || raw === 'diamond'
+  )
+}
+
 export function isUndercoverPrivatePhase(phase: string | undefined): boolean {
   return phase === 'speaking' || phase === 'voting' || phase === 'playing'
 }
@@ -527,6 +641,121 @@ function recentPairIdsOf(raw: unknown): string[] | undefined {
   return ids.slice(-PAIR_RECENT_K)
 }
 
+function missCardFaceOf(raw: unknown): MissCardFace | null {
+  if (!raw || typeof raw !== 'object') return null
+  const src = raw as { rank?: unknown; suit?: unknown }
+  if (!isMissCardRank(src.rank) || !isMissCardSuit(src.suit)) return null
+  return { rank: src.rank, suit: src.suit }
+}
+
+function missCardHistoryOf(raw: unknown): MissCardHistoryEntry[] {
+  if (!Array.isArray(raw)) return []
+  const out: MissCardHistoryEntry[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    const face = missCardFaceOf(row)
+    const seatId = typeof row.seatId === 'string' ? row.seatId.trim() : ''
+    const commandName =
+      typeof row.commandName === 'string' ? row.commandName.trim() : ''
+    if (!seatId || !face || !commandName) continue
+    const at = typeof row.at === 'number' ? row.at : Number(row.at)
+    const entry: MissCardHistoryEntry = {
+      seatId,
+      rank: face.rank,
+      suit: face.suit,
+      commandName,
+      at: Number.isFinite(at) && at > 0 ? at : 0,
+    }
+    if (typeof row.targetSeatId === 'string' && row.targetSeatId.trim()) {
+      entry.targetSeatId = row.targetSeatId.trim()
+    }
+    out.push(entry)
+    if (out.length >= MISS_CARD_HISTORY_N) break
+  }
+  return out
+}
+
+function missToiletOf(raw: unknown): Record<string, number> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const out: Record<string, number> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (!k.trim()) continue
+    const n = typeof v === 'number' ? v : Number(v)
+    if (!Number.isInteger(n) || n <= 0) continue
+    out[k.trim()] = n
+  }
+  return out
+}
+
+function missCardStubOf(src: Record<string, unknown> | null): PartyStub {
+  const phase: MissCardPhase = isMissCardPhase(src?.phase) ? src.phase : 'lobby'
+  const deck = Array.isArray(src?.deck)
+    ? src.deck.map(missCardFaceOf).filter((c): c is MissCardFace => !!c)
+    : []
+  const idxRaw =
+    typeof src?.deckIndex === 'number' ? src.deckIndex : Number(src?.deckIndex)
+  const deckIndex =
+    Number.isInteger(idxRaw) && idxRaw >= 0 ? Math.min(idxRaw, deck.length) : 0
+  const rolesRaw =
+    src?.roles && typeof src.roles === 'object'
+      ? (src.roles as Record<string, unknown>)
+      : src
+  const kRaw = src?.kPending
+  let kPending: { cups: number } | null = null
+  if (kRaw && typeof kRaw === 'object') {
+    const cups =
+      typeof (kRaw as { cups?: unknown }).cups === 'number'
+        ? (kRaw as { cups: number }).cups
+        : Number((kRaw as { cups?: unknown }).cups)
+    if (Number.isInteger(cups) && cups > 0) kPending = { cups }
+  }
+  const kExecRaw =
+    typeof src?.kExecuteCups === 'number'
+      ? src.kExecuteCups
+      : Number(src?.kExecuteCups)
+  const neighborRaw = src?.resolvedNeighbor
+  let resolvedNeighbor: PartyStub['resolvedNeighbor'] = null
+  if (neighborRaw && typeof neighborRaw === 'object') {
+    const n = neighborRaw as { side?: unknown; seatId?: unknown }
+    resolvedNeighbor = {
+      side: n.side === 'right' ? 'right' : 'left',
+      seatId: typeof n.seatId === 'string' && n.seatId.trim() ? n.seatId.trim() : null,
+    }
+  }
+  const noticeRaw = src?.skipNotice
+  let skipNotice: PartyStub['skipNotice'] = null
+  if (noticeRaw && typeof noticeRaw === 'object') {
+    const n = noticeRaw as { text?: unknown; at?: unknown }
+    const text = typeof n.text === 'string' ? n.text.trim() : ''
+    const at = typeof n.at === 'number' ? n.at : Number(n.at)
+    if (text) skipNotice = { text, at: Number.isFinite(at) && at > 0 ? at : 0 }
+  }
+  return {
+    gameId: 'miss-card',
+    phase,
+    deck,
+    deckIndex,
+    currentCard: missCardFaceOf(src?.currentCard),
+    turnSeatId: seatIdOrNull(src?.turnSeatId),
+    roles: {
+      missSeatId: seatIdOrNull(rolesRaw?.missSeatId),
+      psychoSeatId: seatIdOrNull(rolesRaw?.psychoSeatId),
+    },
+    toiletRemaining: missToiletOf(src?.toiletRemaining),
+    kPending,
+    history: missCardHistoryOf(src?.history),
+    needPickTarget: !!src?.needPickTarget,
+    targetSeatId: seatIdOrNull(src?.targetSeatId),
+    resolvedNeighbor,
+    needSetK: !!src?.needSetK,
+    kExecuteCups:
+      Number.isInteger(kExecRaw) && kExecRaw > 0 ? kExecRaw : null,
+    kSetThisTurn: !!src?.kSetThisTurn,
+    skipNotice,
+  }
+}
+
 function truthDareStubOf(src: Record<string, unknown> | null): PartyStub {
   const prompt = publicPartyPrompt(src?.prompt)
   const recent = recentPromptIdsOf(src?.recentPromptIds)
@@ -550,6 +779,7 @@ export function partyStubOf(raw: unknown): PartyStub {
   const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : null
   const gameId = parsePartyGameId(src?.gameId)
   if (gameId === 'truthDare') return truthDareStubOf(src)
+  if (gameId === 'miss-card') return missCardStubOf(src)
   const phase = asPartyPhase(src?.phase)
   const stub: PartyStub = { gameId, phase }
   if (phase === 'lobby') return stub
@@ -597,6 +827,12 @@ export function partyStubOf(raw: unknown): PartyStub {
   return stub
 }
 
+export function isMissCardGame(
+  room: { mode?: unknown; party?: unknown } | null | undefined,
+): boolean {
+  return isPartyGame(room) && partyStubOf(room?.party).gameId === 'miss-card'
+}
+
 export function isTruthDareGame(
   room: { mode?: unknown; party?: unknown } | null | undefined,
 ): boolean {
@@ -607,7 +843,11 @@ export function partyHasWord(
   party: PartyStub | null | undefined,
   seatId: string,
 ): boolean {
-  if (!party || !isUndercoverDealtPhase(party.phase)) {
+  if (
+    !party ||
+    party.gameId !== 'undercover' ||
+    !isUndercoverDealtPhase(party.phase)
+  ) {
     return false
   }
   return !!party.seats?.find((s) => s.seatId === seatId)?.hasWord
@@ -668,6 +908,11 @@ export const ACK_REASONS = {
   NOT_REVEALED: '揭晓后才能开下一局',
   REDRAW_USED: '本轮不能再换了',
   WAIT_ONLINE: '等人',
+  NEED_TWO_ONLINE: '至少 2 人在线才能开始',
+  NEED_PICK_TARGET: '请先指定一人',
+  NEED_SET_K: '请先设定杯数',
+  DECK_EMPTY: '牌已抽完',
+  PICK_ONLINE: '只能指定在线的人',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */

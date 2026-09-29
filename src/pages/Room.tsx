@@ -7,6 +7,7 @@ import { NicknameGate } from './Nickname'
 import { Lobby } from './Lobby'
 import { PartyLobby } from './PartyLobby'
 import { TruthDareLobby } from './TruthDareLobby'
+import { MissCardRoom } from './MissCardRoom'
 import { ChipTable } from './ChipTable'
 import { PausedTable } from './PausedTable'
 import { Settlement } from './Settlement'
@@ -33,6 +34,7 @@ import {
   MAX_SEATS,
   isPartyGame,
   isTruthDareGame,
+  isMissCardGame,
   normalizeMaxSeats,
   parseRoomCode,
   tableFullReason,
@@ -668,6 +670,7 @@ export function RoomPage() {
   const phase = roomApi.room.phase
   const party = isPartyGame(roomApi.room)
   const truthDare = isTruthDareGame(roomApi.room)
+  const missCard = isMissCardGame(roomApi.room)
 
   return (
     <>
@@ -682,7 +685,28 @@ export function RoomPage() {
       )}
       {debug}
       {party && roomApi.session ? (
-        truthDare ? (
+        missCard ? (
+          <MissCardRoom
+            room={roomApi.room}
+            session={roomApi.session}
+            isHost={roomApi.isHost}
+            busy={roomApi.starting}
+            onStart={denyIfReadOnly(roomApi.startMissCard)}
+            onDraw={denyIfReadOnly(roomApi.drawMissCard)}
+            onComplete={denyIfReadOnly(roomApi.completeMissTurn)}
+            onPickTarget={denyIfReadOnly(roomApi.pickMissTarget)}
+            onSkipDrawer={denyIfReadOnly(roomApi.skipDrawer)}
+            onSetKCups={denyIfReadOnly(roomApi.setMissKCups)}
+            onApplyK={denyIfReadOnly(roomApi.applyMissK)}
+            onUseToilet={denyIfReadOnly(roomApi.spendMissToilet)}
+            onReshuffle={denyIfReadOnly(roomApi.reshuffleMissCard)}
+            onEndGame={denyIfReadOnly(roomApi.endMissCard)}
+            onDeniedDraw={denyIfReadOnly(() =>
+              roomApi.pushToast(ACK_REASONS.NOT_YOUR_TURN),
+            )}
+            onToast={roomApi.pushToast}
+          />
+        ) : truthDare ? (
           <TruthDareLobby
             room={roomApi.room}
             session={roomApi.session}

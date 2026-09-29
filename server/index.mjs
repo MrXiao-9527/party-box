@@ -21,6 +21,7 @@ import {
   publicPersisted,
   partyStubOf,
   DISCONNECT_GRACE_MS,
+  parsePartyGameId,
 } from './roomLogic.mjs'
 import { dataDir, loadSnapshot, saveSnapshot, snapshotPath } from './persist.mjs'
 
@@ -35,6 +36,32 @@ console.log(
 
 /** @type {Map<string, Set<import('ws').WebSocket>>} */
 const subscribers = new Map()
+
+/** room:seat → timeout. Miss-card 8s reconnect grace before skip. */
+const missCardGrace = new Map()
+
+function clearMissCardGrace(roomCode, seatId) {
+  const key = graceKey(roomCode, seatId)
+  const t = missCardGrace.get(key)
+  if (t) {
+    clearTimeout(t)
+    missCardGrace.delete(key)
+  }
+}
+
+function scheduleMissCardGrace(roomCode, seatId) {
+  if (!roomCode || !seatId) return
+  const room = store.get(roomCode)
+  if (parsePartyGameId(room?.room?.party?.gameId) !== 'miss-card') return
+  clearMissCardGrace(roomCode, seatId)
+  const key = graceKey(roomCode, seatId)
+  const t = setTimeout(() => {
+    missCardGrace.delete(key)
+    const next = store.skipMissCardIfOffline(roomCode, seatId)
+    if (next) afterMutation(next)
+  }, DISCONNECT_GRACE_MS)
+  missCardGrace.set(key, t)
+}
 
 let persistTimer = 0
 function schedulePersist() {
@@ -149,7 +176,7 @@ function socketsForSeat(roomCode, seatId, exceptWs) {
 const disconnectGraceTimers = new Map()
 
 function graceKey(roomCode, seatId) {
-  return `${String(roomCode || '').toUpperCase()}:${seatId}`
+  return `${String(roomCode || '').toUpperCase()}:${seatId || ''}`
 }
 
 function isTruthDareRoom(data) {
@@ -199,6 +226,7 @@ function onlineFromSocket(roomCode, seatId) {
   const room = store.get(roomCode)
   const member = room?.room.members.find((m) => m.seatId === seatId)
   if (!member || member.connected) return room
+  clearMissCardGrace(roomCode, seatId)
   const data = store.restoreSeat(roomCode, seatId)
   if (data) afterMutation(data)
   return data || room
@@ -217,6 +245,7 @@ function offlineIfUnsocketed(roomCode, seatId, exceptWs) {
     return
   }
   markOfflineIfUnsocketed(roomCode, seatId)
+  scheduleMissCardGrace(roomCode, seatId)
 }
 
 async function handle(req, res) {
@@ -276,6 +305,11 @@ async function handle(req, res) {
       if (req.method === 'DELETE' && !action) {
         store.del(code)
         clearRoomDisconnectGrace(code)
+        for (const [key, t] of missCardGrace) {
+          if (!key.startsWith(`${code}:`)) continue
+          clearTimeout(t)
+          missCardGrace.delete(key)
+        }
         schedulePersist()
         broadcast(code, null)
         sendJson(res, 200, { ok: true })
@@ -329,6 +363,8 @@ async function handle(req, res) {
           sendJson(res, 404, { error: ACK_REASONS.ROOM_MISSING })
           return
         }
+        if (body.connected) clearMissCardGrace(code, body.seatId)
+        else scheduleMissCardGrace(code, body.seatId)
         afterMutation(data)
         sendJson(res, 200, { data: publicPersisted(data) })
         return
@@ -380,6 +416,7 @@ async function handle(req, res) {
           sendJson(res, 404, { error: ACK_REASONS.ROOM_MISSING })
           return
         }
+        clearMissCardGrace(code, body.seatId)
         afterMutation(data)
         sendJson(res, 200, { data: publicPersisted(data) })
         return
@@ -516,6 +553,8 @@ async function handle(req, res) {
           sendJson(res, 400, result)
           return
         }
+        const turn = result.data?.room?.party?.turnSeatId
+        if (turn) clearMissCardGrace(code, body.fromSeatId)
         afterMutation(result.data)
         sendJson(res, 200, { data: publicPersisted(result.data) })
         return
@@ -558,6 +597,128 @@ async function handle(req, res) {
       if (req.method === 'POST' && action === 'advance') {
         const body = await readBody(req)
         const result = store.advancePrompt(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'start-miss-card') {
+        const body = await readBody(req)
+        const result = store.startMissCard(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'draw-card') {
+        const body = await readBody(req)
+        const result = store.drawCard(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'pick-target') {
+        const body = await readBody(req)
+        const result = store.pickTarget(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.targetSeatId,
+        )
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'complete-turn') {
+        const body = await readBody(req)
+        const result = store.completeTurn(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'set-k-cups') {
+        const body = await readBody(req)
+        const result = store.setMissKCups(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.cups,
+        )
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'apply-k') {
+        const body = await readBody(req)
+        const result = store.applyMissK(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'use-toilet') {
+        const body = await readBody(req)
+        const result = store.spendMissToilet(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'reshuffle') {
+        const body = await readBody(req)
+        const result = store.reshuffleMissCard(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+        )
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'end-game') {
+        const body = await readBody(req)
+        const result = store.endMissCard(code, body.fromSeatId, body.seatToken)
         if ('error' in result) {
           sendJson(res, 400, result)
           return

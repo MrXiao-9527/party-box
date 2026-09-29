@@ -29,6 +29,21 @@ import {
   appendPromptHistory,
   nicknameOf,
 } from './truthDare.js'
+import {
+  missCardStubOf,
+  createPlayingMissCard,
+  drawCard as drawMissCard,
+  pickTarget as pickMissTarget,
+  completeTurn as completeMissTurn,
+  skipDrawerTurn as skipMissDrawerTurn,
+  skipIfTurnOffline,
+  setKCups,
+  applyK,
+  spendToilet,
+  endGame as endMissGame,
+  assignTurnIfVacant,
+  MISS_ACK,
+} from './missCard.js'
 
 export const MIN_SEATS = 2
 export const MAX_SEATS = 8
@@ -38,6 +53,7 @@ export const PROMPT_HISTORY_N = 5
 export const PAIR_RECENT_K = 48
 /** Authenticated WS close grace before offline + truth-dare pointer skip. */
 export const DISCONNECT_GRACE_MS = 8000
+export { MISS_ACK }
 
 export const ACK_REASONS = {
   SEAT_LOCKED: '席位已锁定',
@@ -69,6 +85,11 @@ export const ACK_REASONS = {
   NOT_REVEALED: '揭晓后才能开下一局',
   REDRAW_USED: '本轮不能再换了',
   WAIT_ONLINE: '等人',
+  NEED_TWO_ONLINE: '至少 2 人在线才能开始',
+  NEED_PICK_TARGET: '请先指定一人',
+  NEED_SET_K: '请先设定杯数',
+  DECK_EMPTY: '牌已抽完',
+  PICK_ONLINE: '只能指定在线的人',
 }
 
 export function normalizeMaxSeats(raw) {
@@ -87,7 +108,9 @@ export function parseRoomMode(raw) {
 
 /** Omitted / unknown → undercover (first-knife index path). */
 export function parsePartyGameId(raw) {
-  return raw === 'truthDare' ? 'truthDare' : 'undercover'
+  if (raw === 'truthDare') return 'truthDare'
+  if (raw === 'miss-card') return 'miss-card'
+  return 'undercover'
 }
 
 function asPartyPhase(raw) {
@@ -217,6 +240,7 @@ export function partyStubOf(raw) {
   const src = raw && typeof raw === 'object' ? raw : null
   const gameId = parsePartyGameId(src?.gameId)
   if (gameId === 'truthDare') return truthDareStubOf(src)
+  if (gameId === 'miss-card') return missCardStubOf(src)
   const phase = asPartyPhase(src?.phase)
   const stub = { gameId, phase }
   if (phase === 'lobby') return stub
@@ -268,7 +292,11 @@ export function partyStubOf(raw) {
 }
 
 export function partyHasWord(party, seatId) {
-  if (!party || !isUndercoverDealtPhase(party.phase)) {
+  if (
+    !party ||
+    party.gameId !== 'undercover' ||
+    !isUndercoverDealtPhase(party.phase)
+  ) {
     return false
   }
   return !!party.seats?.find((s) => s.seatId === seatId)?.hasWord
@@ -276,7 +304,9 @@ export function partyHasWord(party, seatId) {
 
 function appendPartySeat(raw, seatId, hasWord) {
   const party = partyStubOf(raw)
-  if (!isUndercoverDealtPhase(party.phase)) return raw
+  if (party.gameId !== 'undercover' || !isUndercoverDealtPhase(party.phase)) {
+    return raw
+  }
   const seats = [...(party.seats || [])]
   if (seats.some((s) => s.seatId === seatId)) return party
   seats.push({ seatId, hasWord: !!hasWord })
@@ -760,8 +790,8 @@ export function createRoomStore() {
       })
     }
     let party = existing.room.party
-    const partyPhase = partyStubOf(party).phase
-    if (isUndercoverDealtPhase(partyPhase)) {
+    const stub = partyStubOf(party)
+    if (stub.gameId === 'undercover' && isUndercoverDealtPhase(stub.phase)) {
       for (const s of seats) {
         if (!party.seats?.some((p) => p.seatId === s.seatId)) {
           party = appendPartySeat(party, s.seatId, false)
@@ -799,6 +829,8 @@ export function createRoomStore() {
         : applyDisconnectSkip(stub, members)
     } else if (stub.gameId === 'undercover' && stub.phase === 'voting' && !connected) {
       party = finalizeUndercoverParty(existing, applyVotingDisconnect(stub, members, seatId), members)
+    } else if (stub.gameId === 'miss-card' && connected) {
+      party = assignTurnIfVacant(missCardStubOf(party), members, seatId)
     }
     return set({
       room: { ...existing.room, members, ...(party ? { party } : {}) },
@@ -1214,6 +1246,9 @@ export function createRoomStore() {
     const existing = get(roomCode)
     const hostErr = partyHostError(existing, fromSeatId, seatToken)
     if (hostErr) return { error: hostErr }
+    if (parsePartyGameId(existing.room.party?.gameId) === 'miss-card') {
+      return applyMissCardSkip(existing)
+    }
     const party = truthDareParty(existing)
     if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
     if (party.phase !== 'drawing') return { error: ACK_REASONS.INVALID }
@@ -1300,6 +1335,171 @@ export function createRoomStore() {
       promptHistory: history,
       redrawUsedThisTurn: false,
     })
+  }
+
+  function writeMissCard(existing, party) {
+    const data = set({
+      ...existing,
+      room: {
+        ...existing.room,
+        party: missCardStubOf(party),
+      },
+      table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+    })
+    return { data }
+  }
+
+  function missCardParty(existing) {
+    return missCardStubOf(existing.room.party)
+  }
+
+  function missCardDrawerError(existing, fromSeatId, seatToken) {
+    const seatErr = partySeatError(existing, fromSeatId, seatToken)
+    if (seatErr) return seatErr
+    const m = existing.room.members.find((x) => x.seatId === fromSeatId)
+    if (!m || !m.connected) return ACK_REASONS.NOT_YOUR_TURN
+    return null
+  }
+
+  function startMissCard(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    if (
+      party.phase !== 'lobby' &&
+      party.phase !== 'ended' &&
+      party.phase !== 'deckEmpty'
+    ) {
+      return { error: ACK_REASONS.ALREADY_STARTED }
+    }
+    const online = existing.room.members.filter((m) => m.connected)
+    if (online.length < 2) return { error: ACK_REASONS.NEED_TWO_ONLINE }
+    return writeMissCard(
+      existing,
+      createPlayingMissCard(existing.room.members),
+    )
+  }
+
+  function drawCard(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const seatErr = missCardDrawerError(existing, fromSeatId, seatToken)
+    if (seatErr) return { error: seatErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    const result = drawMissCard(party, existing.room.members, fromSeatId)
+    if (result.error) return { error: result.error }
+    return writeMissCard(existing, result.party)
+  }
+
+  function pickTarget(roomCode, fromSeatId, seatToken, targetSeatId) {
+    const existing = get(roomCode)
+    const seatErr = missCardDrawerError(existing, fromSeatId, seatToken)
+    if (seatErr) return { error: seatErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    const result = pickMissTarget(
+      party,
+      existing.room.members,
+      fromSeatId,
+      targetSeatId,
+    )
+    if (result.error) return { error: result.error }
+    return writeMissCard(existing, result.party)
+  }
+
+  function completeTurn(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const seatErr = missCardDrawerError(existing, fromSeatId, seatToken)
+    if (seatErr) return { error: seatErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    if (fromSeatId !== party.turnSeatId) return { error: ACK_REASONS.NOT_YOUR_TURN }
+    const result = completeMissTurn(party, existing.room.members)
+    if (result.error) return { error: result.error }
+    return writeMissCard(existing, result.party)
+  }
+
+  function applyMissCardSkip(existing) {
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    const result = skipMissDrawerTurn(party, existing.room.members, {
+      reason: 'host',
+    })
+    if (result.error) return { error: result.error }
+    return writeMissCard(existing, result.party)
+  }
+
+  function skipMissCardIfOffline(roomCode, seatId) {
+    const existing = get(roomCode)
+    if (!existing) return null
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return null
+    const result = skipIfTurnOffline(party, existing.room.members, seatId)
+    if (!result || result.error) return null
+    return writeMissCard(existing, result.party).data
+  }
+
+  function setMissKCups(roomCode, fromSeatId, seatToken, cups) {
+    const existing = get(roomCode)
+    const seatErr = missCardDrawerError(existing, fromSeatId, seatToken)
+    if (seatErr) return { error: seatErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    const result = setKCups(party, fromSeatId, cups)
+    if (result.error) return { error: result.error }
+    return writeMissCard(existing, result.party)
+  }
+
+  function applyMissK(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const seatErr = missCardDrawerError(existing, fromSeatId, seatToken)
+    if (seatErr) return { error: seatErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    const result = applyK(party, fromSeatId)
+    if (result.error) return { error: result.error }
+    return writeMissCard(existing, result.party)
+  }
+
+  function spendMissToilet(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const seatErr = partySeatError(existing, fromSeatId, seatToken)
+    if (seatErr) return { error: seatErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    const result = spendToilet(party, fromSeatId)
+    if (result.error) return { error: result.error }
+    return writeMissCard(existing, result.party)
+  }
+
+  function reshuffleMissCard(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'deckEmpty' && party.phase !== 'ended') {
+      return { error: ACK_REASONS.INVALID }
+    }
+    const online = existing.room.members.filter((m) => m.connected)
+    if (online.length < 2) return { error: ACK_REASONS.NEED_TWO_ONLINE }
+    return writeMissCard(
+      existing,
+      createPlayingMissCard(existing.room.members),
+    )
+  }
+
+  function endMissCard(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = missCardParty(existing)
+    if (party.gameId !== 'miss-card') return { error: ACK_REASONS.INVALID }
+    const result = endMissGame(party)
+    if (result.error) return { error: result.error }
+    return writeMissCard(existing, result.party)
   }
 
   function applyChipOp(op) {
@@ -1793,6 +1993,16 @@ export function createRoomStore() {
     setDrawer,
     setAnswerer,
     advancePrompt,
+    startMissCard,
+    drawCard,
+    pickTarget,
+    completeTurn,
+    skipMissCardIfOffline,
+    setMissKCups,
+    applyMissK,
+    spendMissToilet,
+    reshuffleMissCard,
+    endMissCard,
     sweep,
     exportAll,
     importAll,
