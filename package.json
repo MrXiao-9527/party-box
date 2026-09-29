@@ -26,6 +26,7 @@
     "test:e2e-party-truth-dare": "node scripts/e2e-party-truth-dare.mjs",
     "test:e2e-truth-dare-offline": "node scripts/e2e-truth-dare-offline.mjs",
     "test:miss-card": "node scripts/test-miss-card.mjs",
+    "test:truth-dare": "node scripts/test-truth-dare.mjs",
     "test:e2e-party-miss-card": "node scripts/e2e-party-miss-card.mjs",
     "test:undercover": "node scripts/test-undercover.mjs",
     "test:e2e-party-undercover": "node scripts/e2e-party-undercover.mjs",
