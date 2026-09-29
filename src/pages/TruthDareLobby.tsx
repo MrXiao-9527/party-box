@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { JoinInvite } from '../components/JoinInvite'
-import type { RoomMember, RoomState } from '../types'
+import type { PromptTypeChoice, RoomMember, RoomState } from '../types'
 import {
+  ACK_REASONS,
   PARTY_GAME_LABEL,
   PROMPT_TYPE_LABEL,
   isTruthDarePhase,
@@ -14,16 +15,25 @@ import { TruthDareWheel } from './TruthDareWheel'
 
 const WHEEL_SKIP_MS = 2000
 
+const REDRAW_TYPES: { id: PromptTypeChoice; label: string }[] = [
+  { id: 'truth', label: '真心话' },
+  { id: 'dare', label: '大冒险' },
+  { id: 'random', label: '随机' },
+]
+
 interface TruthDareLobbyProps {
   room: RoomState
   session: Session
   isHost: boolean
   drawing?: boolean
   onDraw: (mode?: 'direct' | 'wheel') => void
+  onRedraw: (type?: PromptTypeChoice) => void
   onAdvance: () => void
   onSetDrawer: (seatId: string) => void
   onSetAnswerer: (seatId: string) => void
+  onSkipDrawer: () => void
   onDeniedDraw: () => void
+  onDeniedRedraw: () => void
 }
 
 function nickOf(members: RoomMember[], seatId: string | null | undefined) {
@@ -37,28 +47,51 @@ export function TruthDareLobby({
   isHost,
   drawing = false,
   onDraw,
+  onRedraw,
   onAdvance,
   onSetDrawer,
   onSetAnswerer,
+  onSkipDrawer,
   onDeniedDraw,
+  onDeniedRedraw,
 }: TruthDareLobbyProps) {
   const cap = normalizeMaxSeats(room.maxSeats)
   const full = room.members.length >= cap
   const party = partyStubOf(room.party)
   const phase = isTruthDarePhase(party.phase) ? party.phase : 'idle'
   const prompt = party.prompt
+  const history = party.promptHistory || []
   const drawerNick = nickOf(room.members, party.drawerSeatId)
   const answererNick = nickOf(room.members, party.answererSeatId)
   const isDrawer = session.seatId === party.drawerSeatId
   const isAnswerer = session.seatId === party.answererSeatId
   const canAdvance = isHost || isAnswerer
   const canSetDrawer = isHost && phase === 'drawing'
+  const canSkipDrawer = isHost && phase === 'drawing'
   const canSetAnswerer = (isHost || isDrawer) && phase === 'answering'
+  const canRedraw = (isHost || isDrawer) && phase === 'answering'
+  const redrawUsed = !!party.redrawUsedThisTurn
   const online = room.members.filter((m) => m.connected)
+  const drawer = room.members.find((m) => m.seatId === party.drawerSeatId)
   const answerer = room.members.find((m) => m.seatId === party.answererSeatId)
+  const drawerOffline = phase === 'answering' && (!drawer || !drawer.connected)
   const answererOffline = phase === 'answering' && !!answerer && !answerer.connected
   const [picking, setPicking] = useState<'drawer' | 'answerer' | null>(null)
   const [wheelSpin, setWheelSpin] = useState(false)
+  const defaultRedrawType: PromptTypeChoice =
+    prompt?.typeChoice === 'truth' ||
+    prompt?.typeChoice === 'dare' ||
+    prompt?.typeChoice === 'random'
+      ? prompt.typeChoice
+      : prompt?.displayType || 'truth'
+  const [redrawPick, setRedrawPick] = useState<{
+    promptId: string
+    type: PromptTypeChoice
+  } | null>(null)
+  const redrawType =
+    redrawPick && prompt && redrawPick.promptId === prompt.id
+      ? redrawPick.type
+      : defaultRedrawType
   const awaitingWheel = useRef(false)
   const wheelAt = useRef(0)
 
@@ -88,6 +121,15 @@ export function TruthDareLobby({
     awaitingWheel.current = true
     wheelAt.current = Date.now()
     onDraw('wheel')
+  }
+
+  function handleRedraw() {
+    if (!canRedraw) return
+    if (redrawUsed) {
+      onDeniedRedraw()
+      return
+    }
+    onRedraw(redrawType)
   }
 
   useEffect(() => {
@@ -127,6 +169,7 @@ export function TruthDareLobby({
       data-has-prompt={prompt ? 'true' : 'false'}
       data-drawer-seat={party.drawerSeatId || ''}
       data-answerer-seat={party.answererSeatId || ''}
+      data-redraw-used={redrawUsed ? 'true' : 'false'}
     >
       <header className="lobby-header">
         <p className="eyebrow">局桌 · {PARTY_GAME_LABEL.truthDare}</p>
@@ -152,6 +195,11 @@ export function TruthDareLobby({
             <p className="prompt-text" data-prompt-text={prompt.text}>
               {prompt.text}
             </p>
+            {drawerOffline && (
+              <p className="hint" data-drawer-offline="1">
+                抽题人已离线，桌主可处理
+              </p>
+            )}
             {answererOffline && (
               <p className="hint" data-answerer-offline="1">
                 答题人已离线，桌主可过题
@@ -166,6 +214,28 @@ export function TruthDareLobby({
         )}
       </section>
 
+      {history.length > 0 && (
+        <section
+          className="prompt-history"
+          data-prompt-history="1"
+          aria-label="近史"
+        >
+          <h2>近史</h2>
+          <ul>
+            {history.map((item, i) => (
+              <li
+                key={`${item.id}-${item.closedAt}-${i}`}
+                data-history-item={item.id}
+                data-history-latest={i === 0 ? 'true' : 'false'}
+              >
+                {PROMPT_TYPE_LABEL[item.displayType]} · {item.text} ·{' '}
+                {item.answererNickname || '…'}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section className="member-list" aria-label="成员">
         <h2>
           成员 · {room.members.length}/{cap}
@@ -173,19 +243,19 @@ export function TruthDareLobby({
         {full && <p className="hint">{tableFullReason(cap)}</p>}
         <ul>
           {room.members.map((m) => {
-            const drawer = m.seatId === party.drawerSeatId
+            const drawerSeat = m.seatId === party.drawerSeatId
             const answererSeat = m.seatId === party.answererSeatId
             return (
               <li
                 key={m.seatId}
                 className={[
                   m.seatId === session.seatId ? 'self' : '',
-                  drawer ? 'turn-drawer' : '',
+                  drawerSeat ? 'turn-drawer' : '',
                   answererSeat ? 'turn-answerer' : '',
                 ]
                   .filter(Boolean)
                   .join(' ')}
-                data-is-drawer={drawer ? 'true' : 'false'}
+                data-is-drawer={drawerSeat ? 'true' : 'false'}
                 data-is-answerer={answererSeat ? 'true' : 'false'}
               >
                 <span className="member-name">
@@ -193,7 +263,7 @@ export function TruthDareLobby({
                   {m.seatId === session.seatId ? '（我）' : ''}
                 </span>
                 {m.isHost && <span className="host-badge">桌主</span>}
-                {drawer && <span className="turn-badge">抽题人</span>}
+                {drawerSeat && <span className="turn-badge">抽题人</span>}
                 {answererSeat && phase === 'answering' && (
                   <span className="turn-badge">答题人</span>
                 )}
@@ -256,6 +326,20 @@ export function TruthDareLobby({
             指定抽题人
           </button>
         )}
+        {canSkipDrawer && (
+          <button
+            type="button"
+            className="btn ghost wide"
+            data-skip-drawer="1"
+            disabled={drawing || online.length === 0}
+            onClick={() => {
+              if (online.length === 0) return
+              onSkipDrawer()
+            }}
+          >
+            跳过当前抽题人
+          </button>
+        )}
         {phase === 'answering' && canAdvance && (
           <button
             type="button"
@@ -267,6 +351,37 @@ export function TruthDareLobby({
           >
             {drawing ? '过题中…' : '过题'}
           </button>
+        )}
+        {canRedraw && (
+          <>
+            <div className="redraw-types" data-redraw-types="1">
+              {REDRAW_TYPES.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  className={
+                    redrawType === opt.id ? 'btn secondary compact' : 'btn ghost compact'
+                  }
+                  data-redraw-type={opt.id}
+                  disabled={drawing || redrawUsed}
+                  onClick={() =>
+                    prompt && setRedrawPick({ promptId: prompt.id, type: opt.id })
+                  }
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              className="btn secondary wide"
+              data-redraw="1"
+              disabled={drawing}
+              onClick={handleRedraw}
+            >
+              换一题
+            </button>
+          </>
         )}
         {canSetAnswerer && (
           <button
@@ -315,6 +430,11 @@ export function TruthDareLobby({
         )}
         {phase === 'drawing' && !isDrawer && (
           <p className="waiting">{`等待 ${drawerNick || '…'} 抽题`}</p>
+        )}
+        {phase === 'drawing' && online.length === 0 && (
+          <p className="hint" data-wait-online="1">
+            {ACK_REASONS.WAIT_ONLINE}
+          </p>
         )}
       </footer>
     </div>

@@ -28,6 +28,10 @@ function targetDeg(id: string, type: PromptDisplayType) {
   return EXTRA_TURNS * 360 + (360 - center)
 }
 
+/**
+ * Local ritual only. Room authority is the relay-settled prompt + phase.
+ * Animation progress / desync is not a half-success; assert snapshot, not spin.
+ */
 interface TruthDareWheelProps {
   promptId: string
   displayType: PromptDisplayType

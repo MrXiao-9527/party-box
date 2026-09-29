@@ -251,6 +251,7 @@ try {
       drawLabel: (draw?.textContent || '').trim(),
       drawDisabled: draw?.disabled === true,
       hasRedraw: !!document.querySelector('[data-redraw]'),
+      hasSkipDrawer: !!document.querySelector('[data-skip-drawer]'),
       hasSetDrawer: !!document.querySelector('[data-set-drawer]'),
       hasStart: [...document.querySelectorAll('button')].some(
         (b) => (b.textContent || '').trim() === '开始游戏',
@@ -271,7 +272,8 @@ try {
   assert(meta.drawLabel === '直接出题', 'draw label')
   const hostWheel = await host.page.$('[data-draw-wheel]')
   assert(hostWheel, 'host 转盘抽题')
-  assert(!meta.hasRedraw, 'no 重抽')
+  assert(!meta.hasRedraw, 'no 换一题 while drawing')
+  assert(meta.hasSkipDrawer, 'host 跳过当前抽题人')
   assert(meta.hasSetDrawer, 'host 指定抽题人')
   assert(!meta.hasStart, 'no undercover 开始游戏')
   assert(!meta.hasWord, 'no SeatPrivate word')
@@ -318,6 +320,7 @@ try {
         .querySelector('[data-draw-wheel]')
         ?.getAttribute('data-draw-wheel-self'),
       hasRedraw: !!document.querySelector('[data-redraw]'),
+      hasSkipDrawer: !!document.querySelector('[data-skip-drawer]'),
       hasSetDrawer: !!document.querySelector('[data-set-drawer]'),
       hasWord: body.includes('你的词'),
       waiting: body.includes('等待 桌主A 抽题'),
@@ -331,7 +334,8 @@ try {
   assert(guestMeta.drawSelf === 'false', 'guest is not drawer')
   assert(guestMeta.hasWheel, 'guest sees 转盘抽题')
   assert(guestMeta.wheelSelf === 'false', 'guest wheel not self')
-  assert(!guestMeta.hasRedraw, 'guest has no redraw button')
+  assert(!guestMeta.hasRedraw, 'guest has no 换一题 while drawing')
+  assert(!guestMeta.hasSkipDrawer, 'guest has no 跳过当前抽题人')
   assert(!guestMeta.hasSetDrawer, 'guest has no 指定抽题人')
   assert(!guestMeta.hasWord, 'guest no private word')
   assert(guestMeta.waiting, 'guest waiting copy')
@@ -391,14 +395,17 @@ try {
   assert(hostPrompt.id === guestPrompt.id, 'dual-end prompt id')
   assert(hostPrompt.type === guestPrompt.type, 'dual-end prompt type')
   assert(hostPrompt.text === guestPrompt.text, 'dual-end prompt text')
-  assert((await stageOf(host.page)) === '轮到 桌主A 答', 'host answering copy')
-  assert((await stageOf(guest.page)) === '轮到 桌主A 答', 'guest answering copy')
+  assert((await stageOf(host.page)) === '轮到 玩家B 答', 'host default next answers')
+  assert((await stageOf(guest.page)) === '轮到 玩家B 答', 'guest default next answers')
   const snap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
   const snapParty = snap.data?.room?.party
   const snapPrompt = snapParty?.prompt
   assert(snapParty?.phase === 'answering', 'GET phase answering')
   assert(snapParty?.drawerSeatId, 'GET drawerSeatId')
-  assert(snapParty?.answererSeatId === snapParty.drawerSeatId, 'GET answerer=drawer')
+  assert(
+    snapParty?.answererSeatId === guestSession.seatId,
+    'GET default answerer = next online',
+  )
   assert(snapPrompt?.id === hostPrompt.id, 'GET prompt id')
   assert(snapPrompt.text === hostPrompt.text, 'GET prompt text')
   assert(snapPrompt.displayType === hostPrompt.type, 'GET displayType')
@@ -407,9 +414,13 @@ try {
   const hostHasAdvance = await host.page.$('[data-advance]')
   const hostHasSetAnswerer = await host.page.$('[data-set-answerer]')
   const hostHasSetDrawer = await host.page.$('[data-set-drawer]')
+  const hostHasRedraw = await host.page.$('[data-redraw]')
+  const guestHasRedraw = await guest.page.$('[data-redraw]')
   assert(!hostHasDraw, 'no 直接出题 while answering')
   assert(hostHasAdvance, 'host 过题')
   assert(hostHasSetAnswerer, 'host 指定答题人')
+  assert(hostHasRedraw, 'host 换一题')
+  assert(!guestHasRedraw, 'guest cannot 换一题')
   assert(!hostHasSetDrawer, 'no 指定抽题人 while answering')
   await host.page.screenshot({
     path: `${ART}/truth-dare-host-draw.png`,
@@ -420,6 +431,53 @@ try {
     fullPage: true,
   })
   console.log('PASS: drawer draw — dual-end same type+text')
+
+  await clickText(host.page, '换一题')
+  await host.page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.toast')].some((el) =>
+        (el.textContent || '').includes('已换题'),
+      ),
+    { timeout: 8000 },
+  )
+  await host.page.waitForFunction(
+    (oldId) => {
+      const id = document.querySelector('[data-prompt-area]')?.getAttribute('data-prompt-id')
+      return id && id !== oldId
+    },
+    {},
+    hostPrompt.id,
+  )
+  await guest.page.waitForFunction(
+    (oldId) => {
+      const id = document.querySelector('[data-prompt-area]')?.getAttribute('data-prompt-id')
+      return id && id !== oldId
+    },
+    {},
+    hostPrompt.id,
+  )
+  const redrawHost = await promptOf(host.page)
+  const redrawGuest = await promptOf(guest.page)
+  assert(redrawHost.id && redrawHost.id !== hostPrompt.id, 'redraw new id')
+  assert(redrawHost.id === redrawGuest.id, 'redraw dual-end id')
+  assert(redrawHost.text === redrawGuest.text, 'redraw dual-end text')
+  assert(redrawHost.type === redrawGuest.type, 'redraw dual-end type')
+  const afterRedrawSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
+  assert(afterRedrawSnap.data.room.party.prompt.id === redrawHost.id, 'GET redraw id')
+  assert(afterRedrawSnap.data.room.party.redrawUsedThisTurn === true, 'GET redraw used')
+  await clickText(host.page, '换一题')
+  await host.page.waitForFunction(
+    () =>
+      [...document.querySelectorAll('.toast')].some((el) =>
+        (el.textContent || '').includes('本轮不能再换了'),
+      ),
+    { timeout: 8000 },
+  )
+  assert((await promptOf(host.page)).id === redrawHost.id, 'limit keeps prompt')
+  hostPrompt.id = redrawHost.id
+  hostPrompt.text = redrawHost.text
+  hostPrompt.type = redrawHost.type
+  console.log('PASS: answering redraw once, then limit')
 
   await clickText(host.page, '指定答题人')
   await host.page.waitForSelector('[data-answerer-picker]')
@@ -491,6 +549,27 @@ try {
     afterAdvance.data.room.party.drawerSeatId === guestSession.seatId,
     'GET next drawer',
   )
+  const hist = afterAdvance.data.room.party.promptHistory || []
+  assert(hist.length === 1, 'GET history 1')
+  assert(hist[0].id === hostPrompt.id, 'history id')
+  assert(hist[0].text === hostPrompt.text, 'history text')
+  assert(hist[0].answererNickname === '玩家B', 'history nick')
+  const hostHist = await host.page.$eval(
+    '[data-history-item][data-history-latest="true"]',
+    (el) => el.textContent || '',
+  )
+  const guestHist = await guest.page.$eval(
+    '[data-history-item][data-history-latest="true"]',
+    (el) => el.textContent || '',
+  )
+  const lateHist = await late.page.$eval(
+    '[data-history-item][data-history-latest="true"]',
+    (el) => el.textContent || '',
+  )
+  assert(hostHist.includes(hostPrompt.text), 'host history text')
+  assert(guestHist.includes(hostPrompt.text), 'guest history text')
+  assert(lateHist.includes(hostPrompt.text), 'late history text')
+  assert(hostHist.includes('玩家B'), 'host history nick')
   const hostHasDrawAfter = await host.page.$('[data-draw]')
   const guestDrawSelf = await guest.page.$eval(
     '[data-draw]',
@@ -506,7 +585,27 @@ try {
     path: `${ART}/truth-dare-guest-advance.png`,
     fullPage: true,
   })
-  console.log('PASS: advance — prompt cleared, next drawing')
+  console.log('PASS: advance — prompt cleared, next drawing, history kept')
+
+  await clickText(host.page, '跳过当前抽题人')
+  await host.page.waitForFunction(
+    () =>
+      (document.querySelector('[data-stage-copy]')?.textContent || '').includes(
+        '等待 晚进 抽题',
+      ),
+  )
+  await guest.page.waitForFunction(
+    () =>
+      (document.querySelector('[data-stage-copy]')?.textContent || '').includes(
+        '等待 晚进 抽题',
+      ),
+  )
+  await late.page.waitForFunction(
+    () =>
+      document.querySelector('[data-draw]')?.getAttribute('data-draw-self') ===
+      'true',
+  )
+  console.log('PASS: skip-drawer while drawing')
 
   await clickText(host.page, '指定抽题人')
   await host.page.waitForSelector('[data-drawer-picker]')
@@ -562,14 +661,19 @@ try {
   assert(wheelHostPrompt.id === wheelGuestPrompt.id, 'wheel dual-end id')
   assert(wheelHostPrompt.type === wheelGuestPrompt.type, 'wheel dual-end type')
   assert(wheelHostPrompt.text === wheelGuestPrompt.text, 'wheel dual-end text')
-  assert((await stageOf(wheelHost.page)) === '轮到 桌主W 答', 'wheel host answering')
-  assert((await stageOf(wheelGuest.page)) === '轮到 桌主W 答', 'wheel guest answering')
+  // Authority is relay-settled prompt+phase only. Wheel overlay may still spin.
+  assert((await stageOf(wheelHost.page)) === '轮到 玩家W 答', 'wheel host default next')
+  assert((await stageOf(wheelGuest.page)) === '轮到 玩家W 答', 'wheel guest default next')
   const wheelSnap = await fetch(`${RELAY_URL}/rooms/${wheelCode}`).then((r) =>
     r.json(),
   )
   const wheelParty = wheelSnap.data?.room?.party
   assert(wheelParty?.phase === 'answering', 'wheel GET answering')
-  assert(wheelParty?.answererSeatId === wheelParty?.drawerSeatId, 'wheel answerer=drawer')
+  assert(
+    wheelParty?.answererSeatId &&
+      wheelParty.answererSeatId !== wheelParty.drawerSeatId,
+    'wheel default answerer = next online',
+  )
   assert(wheelParty?.prompt?.id === wheelHostPrompt.id, 'wheel GET id')
   assert(wheelParty?.prompt?.text === wheelHostPrompt.text, 'wheel GET text')
   assert(wheelParty?.prompt?.displayType === wheelHostPrompt.type, 'wheel GET type')

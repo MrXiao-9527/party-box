@@ -26,6 +26,7 @@ import {
   getSeatPrivate as localGetSeatPrivate,
   drawPrompt as localDrawPrompt,
   redrawPrompt as localRedrawPrompt,
+  skipDrawer as localSkipDrawer,
   setDrawer as localSetDrawer,
   setAnswerer as localSetAnswerer,
   advancePrompt as localAdvancePrompt,
@@ -63,6 +64,7 @@ import {
   relayGetSeatPrivate,
   relayDrawPrompt,
   relayRedrawPrompt,
+  relaySkipDrawer,
   relaySetDrawer,
   relaySetAnswerer,
   relayAdvancePrompt,
@@ -331,9 +333,21 @@ export async function redrawPrompt(
   roomCode: string,
   fromSeatId: string,
   seatToken?: string,
+  type?: string,
 ): Promise<{ data: PersistedRoom } | { error: string }> {
-  if (!isRelayEnabled()) return localRedrawPrompt(roomCode, fromSeatId, seatToken)
-  return relayRedrawPrompt(roomCode, fromSeatId, seatToken)
+  if (!isRelayEnabled()) {
+    return localRedrawPrompt(roomCode, fromSeatId, seatToken, type)
+  }
+  return relayRedrawPrompt(roomCode, fromSeatId, seatToken, type)
+}
+
+export async function skipDrawer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localSkipDrawer(roomCode, fromSeatId, seatToken)
+  return relaySkipDrawer(roomCode, fromSeatId, seatToken)
 }
 
 export async function setDrawer(

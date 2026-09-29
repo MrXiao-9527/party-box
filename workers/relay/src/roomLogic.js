@@ -22,13 +22,19 @@ import {
   pickPrompt,
   ensureTruthDareTurn,
   nextDrawerSeatId,
+  nextAnswererSeatId,
   isTruthDarePhase,
+  asTypeChoice,
+  promptHistoryOf,
+  appendPromptHistory,
+  nicknameOf,
 } from './truthDare.js'
 
 export const MIN_SEATS = 2
 export const MAX_SEATS = 8
 export const DEFAULT_DENOMS = [1, 5, 10, 25, 100]
 export const PROMPT_RECENT_K = 8
+export const PROMPT_HISTORY_N = 5
 export const PAIR_RECENT_K = 48
 
 export const ACK_REASONS = {
@@ -59,6 +65,8 @@ export const ACK_REASONS = {
   NOT_ALIVE_VOTER: '已出局或未发词，无法投票',
   BAD_VOTE_TARGET: '只能投其他存活席',
   NOT_REVEALED: '揭晓后才能开下一局',
+  REDRAW_USED: '本轮不能再换了',
+  WAIT_ONLINE: '等人',
 }
 
 export function normalizeMaxSeats(raw) {
@@ -161,6 +169,8 @@ function publicPartyPrompt(raw) {
   const drawnAt =
     typeof raw.drawnAt === 'number' ? raw.drawnAt : Number(raw.drawnAt)
   if (Number.isFinite(drawnAt) && drawnAt > 0) prompt.drawnAt = drawnAt
+  const typeChoice = asTypeChoice(raw.typeChoice)
+  if (typeChoice) prompt.typeChoice = typeChoice
   return prompt
 }
 
@@ -185,15 +195,18 @@ function recentPairIdsOf(raw) {
 function truthDareStubOf(src) {
   const prompt = publicPartyPrompt(src?.prompt)
   const recent = recentPromptIdsOf(src?.recentPromptIds)
+  const history = promptHistoryOf(src?.promptHistory)
   const phase = asTruthDarePhase(src?.phase) || (prompt ? 'answering' : 'idle')
   const stub = {
     gameId: 'truthDare',
     phase,
     drawerSeatId: seatIdOrNull(src?.drawerSeatId),
     answererSeatId: seatIdOrNull(src?.answererSeatId),
+    redrawUsedThisTurn: phase === 'answering' && !!src?.redrawUsedThisTurn,
   }
   if (prompt) stub.prompt = prompt
   if (recent) stub.recentPromptIds = recent
+  if (history.length) stub.promptHistory = history
   return stub
 }
 
@@ -1127,12 +1140,17 @@ export function createRoomStore() {
       recentIds: party.recentPromptIds || [],
     })
     if (!picked) return { error: ACK_REASONS.INVALID }
+    const answerer =
+      nextAnswererSeatId(existing.room.members, party.drawerSeatId) ||
+      party.drawerSeatId
     return writeTruthDare(existing, {
       phase: 'answering',
       drawerSeatId: party.drawerSeatId,
-      answererSeatId: party.drawerSeatId,
+      answererSeatId: answerer,
       prompt: { ...picked.prompt, drawnAt: Date.now() },
       recentPromptIds: picked.recentPromptIds,
+      redrawUsedThisTurn: false,
+      promptHistory: party.promptHistory,
     })
   }
 
@@ -1150,12 +1168,63 @@ export function createRoomStore() {
     return applyTruthDareDraw(existing, party)
   }
 
-  function redrawPrompt(roomCode, fromSeatId, seatToken) {
+  function redrawPrompt(roomCode, fromSeatId, seatToken, type) {
     const existing = get(roomCode)
     const seatErr = partySeatError(existing, fromSeatId, seatToken)
     if (seatErr) return { error: seatErr }
-    // Slice A lock: answering has no 换题; drawing draws once via draw.
-    return { error: ACK_REASONS.INVALID }
+    const party = truthDareParty(existing)
+    if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'answering' || !party.prompt) {
+      return { error: ACK_REASONS.INVALID }
+    }
+    const isHost = fromSeatId === existing.room.hostSeatId
+    const isDrawer = fromSeatId === party.drawerSeatId
+    if (!isHost && !isDrawer) return { error: ACK_REASONS.INVALID }
+    if (party.redrawUsedThisTurn) return { error: ACK_REASONS.REDRAW_USED }
+    const choice =
+      asTypeChoice(type) ||
+      asTypeChoice(party.prompt.typeChoice) ||
+      party.prompt.displayType
+    const picked = pickPrompt({
+      recentIds: party.recentPromptIds || [],
+      previousId: party.prompt.id,
+      previousText: party.prompt.text,
+      mustChange: true,
+      type: choice,
+    })
+    if (!picked) return { error: ACK_REASONS.INVALID }
+    return writeTruthDare(existing, {
+      phase: 'answering',
+      drawerSeatId: party.drawerSeatId,
+      answererSeatId: party.answererSeatId,
+      prompt: {
+        ...picked.prompt,
+        drawnAt: Date.now(),
+        typeChoice: asTypeChoice(choice) || picked.prompt.typeChoice,
+      },
+      recentPromptIds: picked.recentPromptIds,
+      redrawUsedThisTurn: true,
+      promptHistory: party.promptHistory,
+    })
+  }
+
+  function skipDrawer(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = truthDareParty(existing)
+    if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'drawing') return { error: ACK_REASONS.INVALID }
+    const next = nextDrawerSeatId(existing.room.members, party.drawerSeatId)
+    if (!next) return { error: ACK_REASONS.WAIT_ONLINE }
+    return writeTruthDare(existing, {
+      phase: 'drawing',
+      drawerSeatId: next,
+      answererSeatId: null,
+      recentPromptIds: party.recentPromptIds,
+      promptHistory: party.promptHistory,
+      redrawUsedThisTurn: false,
+    })
   }
 
   function setDrawer(roomCode, fromSeatId, seatToken, targetSeatId) {
@@ -1171,6 +1240,8 @@ export function createRoomStore() {
       drawerSeatId: targetSeatId,
       answererSeatId: null,
       recentPromptIds: party.recentPromptIds,
+      promptHistory: party.promptHistory,
+      redrawUsedThisTurn: false,
     })
   }
 
@@ -1191,6 +1262,8 @@ export function createRoomStore() {
       answererSeatId: targetSeatId,
       prompt: party.prompt,
       recentPromptIds: party.recentPromptIds,
+      redrawUsedThisTurn: !!party.redrawUsedThisTurn,
+      promptHistory: party.promptHistory,
     })
   }
 
@@ -1208,11 +1281,22 @@ export function createRoomStore() {
       existing.room.members,
       party.drawerSeatId,
     )
+    const history = appendPromptHistory(party.promptHistory, {
+      id: party.prompt.id,
+      displayType: party.prompt.displayType,
+      text: party.prompt.text,
+      answererSeatId: party.answererSeatId || '',
+      answererNickname: nicknameOf(existing.room.members, party.answererSeatId),
+      redrawn: !!party.redrawUsedThisTurn,
+      closedAt: Date.now(),
+    })
     return writeTruthDare(existing, {
       phase: 'drawing',
       drawerSeatId: nextDrawer,
       answererSeatId: null,
       recentPromptIds: party.recentPromptIds,
+      promptHistory: history,
+      redrawUsedThisTurn: false,
     })
   }
 
@@ -1703,6 +1787,7 @@ export function createRoomStore() {
     getSeatPrivate,
     drawPrompt,
     redrawPrompt,
+    skipDrawer,
     setDrawer,
     setAnswerer,
     advancePrompt,

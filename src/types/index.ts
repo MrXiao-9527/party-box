@@ -28,6 +28,11 @@ export const PROMPT_TYPE_LABEL: Record<PromptDisplayType, string> = {
 /** Recent-K window for truth/dare draws (PRD Q2). */
 export const PROMPT_RECENT_K = 8
 
+/** Closed-prompt near-history on the public snapshot (enhance Q2). */
+export const PROMPT_HISTORY_N = 5
+
+export type PromptTypeChoice = PromptDisplayType | 'random'
+
 /** Near-K window for undercover pair deals (PRD §7). */
 export const PAIR_RECENT_K = 48
 
@@ -37,6 +42,18 @@ export interface PartyPrompt {
   displayType: PromptDisplayType
   text: string
   drawnAt?: number
+  typeChoice?: PromptTypeChoice
+}
+
+/** Closed prompt on public near-history (not current authority). */
+export interface PromptHistoryEntry {
+  id: string
+  displayType: PromptDisplayType
+  text: string
+  answererSeatId: string
+  answererNickname: string
+  redrawn: boolean
+  closedAt: number
 }
 
 /** Omitted / unknown → undercover (first-knife index path). */
@@ -102,6 +119,10 @@ export interface PartyStub {
   drawerSeatId?: string | null
   /** truthDare: current answerer (set while answering). */
   answererSeatId?: string | null
+  /** truthDare: this answering turn already used 换一题. */
+  redrawUsedThisTurn?: boolean
+  /** truthDare: closed prompts, newest first, max 5. */
+  promptHistory?: PromptHistoryEntry[]
 }
 
 export type ChipOpType =
@@ -431,6 +452,11 @@ function asPromptDisplayType(raw: unknown): PromptDisplayType | undefined {
   return undefined
 }
 
+function asTypeChoice(raw: unknown): PromptTypeChoice | undefined {
+  if (raw === 'truth' || raw === 'dare' || raw === 'random') return raw
+  return undefined
+}
+
 function publicPartyPrompt(raw: unknown): PartyPrompt | undefined {
   if (!raw || typeof raw !== 'object') return undefined
   const p = raw as {
@@ -438,6 +464,7 @@ function publicPartyPrompt(raw: unknown): PartyPrompt | undefined {
     displayType?: unknown
     text?: unknown
     drawnAt?: unknown
+    typeChoice?: unknown
   }
   const id = typeof p.id === 'string' ? p.id.trim() : ''
   const text = typeof p.text === 'string' ? p.text.trim() : ''
@@ -447,7 +474,39 @@ function publicPartyPrompt(raw: unknown): PartyPrompt | undefined {
   const drawnAt =
     typeof p.drawnAt === 'number' ? p.drawnAt : Number(p.drawnAt)
   if (Number.isFinite(drawnAt) && drawnAt > 0) prompt.drawnAt = drawnAt
+  const typeChoice = asTypeChoice(p.typeChoice)
+  if (typeChoice) prompt.typeChoice = typeChoice
   return prompt
+}
+
+function promptHistoryOf(raw: unknown): PromptHistoryEntry[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const out: PromptHistoryEntry[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    const id = typeof row.id === 'string' ? row.id.trim() : ''
+    const text = typeof row.text === 'string' ? row.text.trim() : ''
+    const displayType = asPromptDisplayType(row.displayType)
+    if (!id || !text || !displayType) continue
+    const closedAt =
+      typeof row.closedAt === 'number' ? row.closedAt : Number(row.closedAt)
+    out.push({
+      id,
+      displayType,
+      text,
+      answererSeatId:
+        typeof row.answererSeatId === 'string' ? row.answererSeatId.trim() : '',
+      answererNickname:
+        typeof row.answererNickname === 'string'
+          ? row.answererNickname.trim()
+          : '',
+      redrawn: !!row.redrawn,
+      closedAt: Number.isFinite(closedAt) && closedAt > 0 ? closedAt : 0,
+    })
+    if (out.length >= PROMPT_HISTORY_N) break
+  }
+  return out.length ? out : undefined
 }
 
 function recentPromptIdsOf(raw: unknown): string[] | undefined {
@@ -471,15 +530,18 @@ function recentPairIdsOf(raw: unknown): string[] | undefined {
 function truthDareStubOf(src: Record<string, unknown> | null): PartyStub {
   const prompt = publicPartyPrompt(src?.prompt)
   const recent = recentPromptIdsOf(src?.recentPromptIds)
+  const history = promptHistoryOf(src?.promptHistory)
   const phase = asTruthDarePhase(src?.phase) || (prompt ? 'answering' : 'idle')
   const stub: PartyStub = {
     gameId: 'truthDare',
     phase,
     drawerSeatId: seatIdOrNull(src?.drawerSeatId),
     answererSeatId: seatIdOrNull(src?.answererSeatId),
+    redrawUsedThisTurn: phase === 'answering' && !!src?.redrawUsedThisTurn,
   }
   if (prompt) stub.prompt = prompt
   if (recent) stub.recentPromptIds = recent
+  if (history) stub.promptHistory = history
   return stub
 }
 
@@ -604,6 +666,8 @@ export const ACK_REASONS = {
   NOT_ALIVE_VOTER: '已出局或未发词，无法投票',
   BAD_VOTE_TARGET: '只能投其他存活席',
   NOT_REVEALED: '揭晓后才能开下一局',
+  REDRAW_USED: '本轮不能再换了',
+  WAIT_ONLINE: '等人',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */
