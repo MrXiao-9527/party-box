@@ -1155,6 +1155,8 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     if (!roomCode || !session?.name) return
     if (session.roomCode.toUpperCase() !== roomCode.toUpperCase()) return
     const onPageHide = () => {
+      // Best-effort: tab close often cancels this fetch. Relay WS close
+      // is the authority that marks the seat offline.
       void setMemberConnected(roomCode, session.seatId, false)
     }
     window.addEventListener('pagehide', onPageHide)

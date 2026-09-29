@@ -128,6 +128,37 @@ function afterMutation(data) {
   broadcast(data.room.roomCode, data)
 }
 
+function socketsForSeat(roomCode, seatId, exceptWs) {
+  const set = subscribers.get(roomCode.toUpperCase())
+  if (!set || !seatId) return []
+  return [...set].filter(
+    (ws) =>
+      ws !== exceptWs &&
+      ws.seatId === seatId &&
+      (ws.readyState === 0 || ws.readyState === 1),
+  )
+}
+
+/** Rejoin after WS drop. restoreSeat keeps paused host disconnected. */
+function onlineFromSocket(roomCode, seatId) {
+  const room = store.get(roomCode)
+  const member = room?.room.members.find((m) => m.seatId === seatId)
+  if (!member || member.connected) return room
+  const data = store.restoreSeat(roomCode, seatId)
+  if (data) afterMutation(data)
+  return data || room
+}
+
+function offlineIfUnsocketed(roomCode, seatId, exceptWs) {
+  if (!roomCode || !seatId) return
+  if (socketsForSeat(roomCode, seatId, exceptWs).length) return
+  const room = store.get(roomCode)
+  const member = room?.room.members.find((m) => m.seatId === seatId)
+  if (!member?.connected) return
+  const data = store.setMemberConnected(roomCode, seatId, false)
+  if (data) afterMutation(data)
+}
+
 async function handle(req, res) {
   setCors(req, res)
   if (req.method === 'OPTIONS') {
@@ -514,12 +545,13 @@ wss.on('connection', (ws, req) => {
   }
   set.add(ws)
 
-  const data = store.get(roomCode)
+  let data = store.get(roomCode)
   const seatId = url.searchParams.get('seatId') || ''
   const seatToken = url.searchParams.get('seatToken') || ''
   if (seatId && seatToken && data?.seatTokens?.[seatId] === seatToken) {
     ws.seatId = seatId
     ws.seatToken = seatToken
+    data = onlineFromSocket(roomCode, seatId) || data
   }
   ws.send(JSON.stringify({ type: 'room', data: publicPersisted(data) }))
   sendPrivate(ws, data)
@@ -527,6 +559,7 @@ wss.on('connection', (ws, req) => {
   ws.on('close', () => {
     set.delete(ws)
     if (set.size === 0) subscribers.delete(roomCode)
+    offlineIfUnsocketed(roomCode, ws.seatId, ws)
   })
 })
 
