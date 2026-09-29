@@ -689,11 +689,16 @@ export function RoomPage() {
             isHost={roomApi.isHost}
             drawing={roomApi.starting}
             onDraw={denyIfReadOnly(roomApi.drawPrompt)}
+            onRedraw={denyIfReadOnly(roomApi.redrawPrompt)}
             onAdvance={denyIfReadOnly(roomApi.advancePrompt)}
             onSetDrawer={denyIfReadOnly(roomApi.setDrawer)}
             onSetAnswerer={denyIfReadOnly(roomApi.setAnswerer)}
+            onSkipDrawer={denyIfReadOnly(roomApi.skipDrawer)}
             onDeniedDraw={denyIfReadOnly(() =>
               roomApi.pushToast(ACK_REASONS.NOT_YOUR_TURN),
+            )}
+            onDeniedRedraw={denyIfReadOnly(() =>
+              roomApi.pushToast(ACK_REASONS.REDRAW_USED),
             )}
           />
         ) : (

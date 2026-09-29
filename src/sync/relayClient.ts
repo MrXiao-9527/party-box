@@ -510,7 +510,13 @@ export async function relayCastVoteUndercover(
 
 async function relayTruthDareAction(
   roomCode: string,
-  action: 'draw' | 'redraw' | 'set-drawer' | 'set-answerer' | 'advance',
+  action:
+    | 'draw'
+    | 'redraw'
+    | 'skip-drawer'
+    | 'set-drawer'
+    | 'set-answerer'
+    | 'advance',
   body: Record<string, unknown>,
 ): Promise<{ data: PersistedRoom } | { error: string }> {
   const result = await api<{ data: PersistedRoom }>(
@@ -546,8 +552,21 @@ export async function relayRedrawPrompt(
   roomCode: string,
   fromSeatId: string,
   seatToken?: string,
+  type?: string,
 ): Promise<{ data: PersistedRoom } | { error: string }> {
-  return relayTruthDareAction(roomCode, 'redraw', { fromSeatId, seatToken })
+  return relayTruthDareAction(roomCode, 'redraw', {
+    fromSeatId,
+    seatToken,
+    type,
+  })
+}
+
+export async function relaySkipDrawer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayTruthDareAction(roomCode, 'skip-drawer', { fromSeatId, seatToken })
 }
 
 export async function relaySetDrawer(

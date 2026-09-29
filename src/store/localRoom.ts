@@ -13,7 +13,15 @@ import {
   checkUndercoverWinner,
   VOTE_ERR,
 } from '../games/undercover/speak'
-import { pickPrompt, ensureTruthDareTurn, nextDrawerSeatId } from '../games/truthDare/draw'
+import {
+  pickPrompt,
+  ensureTruthDareTurn,
+  nextDrawerSeatId,
+  nextAnswererSeatId,
+  asTypeChoice,
+  appendPromptHistory,
+  nicknameOf,
+} from '../games/truthDare/draw'
 import {
   ACK_REASONS,
   DEFAULT_DENOMS,
@@ -1495,12 +1503,17 @@ export function drawPrompt(
   // mode=direct|wheel: same pickPrompt write; wheel animation is client-only.
   const picked = pickPrompt({ recentIds: party.recentPromptIds ?? [] })
   if (!picked) return { error: ACK_REASONS.INVALID }
+  const answerer =
+    nextAnswererSeatId(existing!.room.members, party.drawerSeatId) ||
+    party.drawerSeatId
   return applyLocalTruthDareParty(existing!, {
     phase: 'answering',
     drawerSeatId: party.drawerSeatId,
-    answererSeatId: party.drawerSeatId,
+    answererSeatId: answerer,
     prompt: { ...picked.prompt, drawnAt: Date.now() },
     recentPromptIds: picked.recentPromptIds,
+    redrawUsedThisTurn: false,
+    promptHistory: party.promptHistory,
   })
 }
 
@@ -1508,11 +1521,73 @@ export function redrawPrompt(
   roomCode: string,
   fromSeatId: string,
   seatToken?: string,
+  type?: string,
 ): { data: PersistedRoom } | { error: string } {
   const existing = loadRoom(roomCode)
   const seatErr = partySeatError(existing, fromSeatId, seatToken)
   if (seatErr) return { error: seatErr }
-  return { error: ACK_REASONS.INVALID }
+  const party = truthDarePartyOf(existing!)
+  if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'answering' || !party.prompt) {
+    return { error: ACK_REASONS.INVALID }
+  }
+  const isHost = fromSeatId === existing!.room.hostSeatId
+  const isDrawer = fromSeatId === party.drawerSeatId
+  if (!isHost && !isDrawer) return { error: ACK_REASONS.INVALID }
+  if (party.redrawUsedThisTurn) return { error: ACK_REASONS.REDRAW_USED }
+  const choice =
+    asTypeChoice(type) ||
+    asTypeChoice(party.prompt.typeChoice) ||
+    party.prompt.displayType
+  const picked = pickPrompt({
+    recentIds: party.recentPromptIds ?? [],
+    previousId: party.prompt.id,
+    previousText: party.prompt.text,
+    mustChange: true,
+    type: choice,
+  })
+  if (!picked) return { error: ACK_REASONS.INVALID }
+  return applyLocalTruthDareParty(existing!, {
+    phase: 'answering',
+    drawerSeatId: party.drawerSeatId,
+    answererSeatId: party.answererSeatId,
+    prompt: {
+      ...picked.prompt,
+      drawnAt: Date.now(),
+      typeChoice: asTypeChoice(choice) || picked.prompt.typeChoice,
+    },
+    recentPromptIds: picked.recentPromptIds,
+    redrawUsedThisTurn: true,
+    promptHistory: party.promptHistory,
+  })
+}
+
+export function skipDrawer(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
+  if (!isPartyGame(existing.room)) return { error: ACK_REASONS.INVALID }
+  if (fromSeatId !== existing.room.hostSeatId) return { error: ACK_REASONS.NOT_HOST }
+  const secrets = loadSecrets(existing.room.roomCode)
+  if (!seatToken || secrets.seatTokens[fromSeatId] !== seatToken) {
+    return { error: ACK_REASONS.INVALID }
+  }
+  const party = truthDarePartyOf(existing)
+  if (party.gameId !== 'truthDare') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'drawing') return { error: ACK_REASONS.INVALID }
+  const next = nextDrawerSeatId(existing.room.members, party.drawerSeatId || '')
+  if (!next) return { error: ACK_REASONS.WAIT_ONLINE }
+  return applyLocalTruthDareParty(existing, {
+    phase: 'drawing',
+    drawerSeatId: next,
+    answererSeatId: null,
+    recentPromptIds: party.recentPromptIds,
+    promptHistory: party.promptHistory,
+    redrawUsedThisTurn: false,
+  })
 }
 
 export function setDrawer(
@@ -1538,6 +1613,8 @@ export function setDrawer(
     drawerSeatId: targetSeatId,
     answererSeatId: null,
     recentPromptIds: party.recentPromptIds,
+    promptHistory: party.promptHistory,
+    redrawUsedThisTurn: false,
   })
 }
 
@@ -1563,6 +1640,8 @@ export function setAnswerer(
     answererSeatId: targetSeatId,
     prompt: party.prompt,
     recentPromptIds: party.recentPromptIds,
+    redrawUsedThisTurn: !!party.redrawUsedThisTurn,
+    promptHistory: party.promptHistory,
   })
 }
 
@@ -1580,10 +1659,21 @@ export function advancePrompt(
   const isHost = fromSeatId === existing!.room.hostSeatId
   const isAnswerer = fromSeatId === party.answererSeatId
   if (!isHost && !isAnswerer) return { error: ACK_REASONS.INVALID }
+  const history = appendPromptHistory(party.promptHistory, {
+    id: party.prompt!.id,
+    displayType: party.prompt!.displayType,
+    text: party.prompt!.text,
+    answererSeatId: party.answererSeatId || '',
+    answererNickname: nicknameOf(existing!.room.members, party.answererSeatId),
+    redrawn: !!party.redrawUsedThisTurn,
+    closedAt: Date.now(),
+  })
   return applyLocalTruthDareParty(existing!, {
     phase: 'drawing',
     drawerSeatId: nextDrawerSeatId(existing!.room.members, party.drawerSeatId || ''),
     answererSeatId: null,
     recentPromptIds: party.recentPromptIds,
+    promptHistory: history,
+    redrawUsedThisTurn: false,
   })
 }

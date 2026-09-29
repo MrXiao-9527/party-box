@@ -16,8 +16,11 @@ import {
   allPrompts,
   pickPrompt,
   RECENT_K,
+  HISTORY_N,
   nextDrawerSeatId,
+  nextAnswererSeatId,
   ensureTruthDareTurn,
+  appendPromptHistory,
 } from '../server/truthDare.mjs'
 import { publicPayloadLeaks } from '../server/undercover.mjs'
 
@@ -153,7 +156,7 @@ function partyOf(store, code) {
   const party = partyStubOf(drawn.data.room.party)
   assert(party.phase === 'answering', 'draw → answering')
   assert(party.drawerSeatId === hostSeat, 'drawer unchanged')
-  assert(party.answererSeatId === hostSeat, 'default answerer = drawer')
+  assert(party.answererSeatId === guest.session.seatId, 'default answerer = next online')
   const prompt = party.prompt
   assert(prompt?.id && prompt.text, 'public prompt')
   assert(prompt.displayType === 'truth' || prompt.displayType === 'dare', 'frozen type')
@@ -166,7 +169,7 @@ function partyOf(store, code) {
   const pubParty = partyStubOf(pub.room.party)
   assert(pubParty.phase === 'answering', 'public phase')
   assert(pubParty.drawerSeatId === hostSeat, 'public drawer')
-  assert(pubParty.answererSeatId === hostSeat, 'public answerer')
+  assert(pubParty.answererSeatId === guest.session.seatId, 'public answerer = next')
   assert(pubParty.prompt?.id === prompt.id, 'public id')
   assert(pubParty.prompt.text === prompt.text, 'public text')
   assert(!('partyPrivates' in pub), 'no SeatPrivate on public')
@@ -182,10 +185,32 @@ function partyOf(store, code) {
   const still = partyOf(store, code).prompt
   assert(still.id === prompt.id && still.text === prompt.text, 'reject does not mutate')
 
+  const guestRedraw = store.redrawPrompt(
+    code,
+    guest.session.seatId,
+    guest.session.seatToken,
+  )
+  assert(guestRedraw.error === ACK_REASONS.INVALID, 'answerer cannot redraw')
+  assert(partyOf(store, code).prompt.id === prompt.id, 'guest redraw keeps prompt')
+
   const redrew = store.redrawPrompt(code, hostSeat, hostTok)
-  assert(redrew.error === ACK_REASONS.INVALID, 'no redraw in slice A')
-  const afterRedraw = partyOf(store, code).prompt
-  assert(afterRedraw.id === prompt.id, 'redraw rejected keeps prompt')
+  assert(!('error' in redrew), `redraw ${redrew.error || ''}`)
+  const afterRedraw = partyOf(store, code)
+  assert(afterRedraw.phase === 'answering', 'redraw stays answering')
+  assert(afterRedraw.prompt.id !== prompt.id, 'redraw changes prompt')
+  assert(afterRedraw.redrawUsedThisTurn === true, 'redraw marks used')
+  assert(afterRedraw.answererSeatId === guest.session.seatId, 'redraw keeps answerer')
+  assert(
+    (afterRedraw.recentPromptIds || []).includes(afterRedraw.prompt.id),
+    'redraw id in near-K',
+  )
+  const pubR = partyStubOf(publicPersisted(redrew.data).room.party)
+  assert(pubR.prompt.id === afterRedraw.prompt.id, 'redraw public id')
+  assert(pubR.prompt.text === afterRedraw.prompt.text, 'redraw public text')
+
+  const again = store.redrawPrompt(code, hostSeat, hostTok)
+  assert(again.error === ACK_REASONS.REDRAW_USED, 'second redraw blocked')
+  assert(partyOf(store, code).prompt.id === afterRedraw.prompt.id, 'limit keeps prompt')
 }
 
 {
@@ -217,7 +242,7 @@ function partyOf(store, code) {
   )
   assert(!('error' in drawn), 'named drawer can draw')
   assert(partyOf(store, code).phase === 'answering', 'named draw answering')
-  assert(partyOf(store, code).answererSeatId === guest.session.seatId, 'answerer=drawer')
+  assert(partyOf(store, code).answererSeatId === hostSeat, 'answerer=next after drawer')
 
   const duringAnswer = store.setDrawer(code, hostSeat, hostTok, hostSeat)
   assert(duringAnswer.error === ACK_REASONS.INVALID, 'set-drawer only in drawing')
@@ -239,7 +264,7 @@ function partyOf(store, code) {
     a.session.seatId,
   )
   assert(outsider.error === ACK_REASONS.INVALID, 'non drawer/host cannot set-answerer')
-  assert(partyOf(store, code).answererSeatId === hostSeat, 'answerer unchanged')
+  assert(partyOf(store, code).answererSeatId === a.session.seatId, 'answerer unchanged')
 
   const offline = store.setAnswerer(code, hostSeat, hostTok, 'seat_missing')
   assert(offline.error === ACK_REASONS.INVALID, 'offline/missing target')
@@ -280,10 +305,15 @@ function partyOf(store, code) {
   assert(!next.prompt, 'advance clears prompt (no grey)')
   assert(next.answererSeatId == null, 'advance clears answerer')
   assert(next.drawerSeatId === a.session.seatId, 'next drawer after host')
+  assert(next.redrawUsedThisTurn === false, 'advance clears redraw flag')
   assert(
     JSON.stringify(next.recentPromptIds || []) === JSON.stringify(recent || []),
     'recent-K kept',
   )
+  assert(Array.isArray(next.promptHistory) && next.promptHistory.length === 1, 'history 1')
+  assert(next.promptHistory[0].id === promptId, 'history id')
+  assert(next.promptHistory[0].text, 'history text')
+  assert(next.promptHistory[0].answererNickname === '甲', 'history nick solidified')
   const pub = partyStubOf(publicPersisted(advanced.data).room.party)
   assert(!pub.prompt, 'public has no leftover prompt')
   assert(pub.phase === 'drawing', 'public drawing')
@@ -313,7 +343,7 @@ function partyOf(store, code) {
   assert(afterOffline.phase === 'answering', 'drawer offline keeps answering')
   assert(afterOffline.prompt.id === before.prompt.id, 'drawer offline keeps prompt')
   assert(afterOffline.answererSeatId === a.session.seatId, 'answerer kept')
-  assert(afterOffline.drawerSeatId === a.session.seatId, 'drawer skipped to next online')
+  assert(afterOffline.drawerSeatId === hostSeat, 'answering keeps offline drawer')
 
   const picked = store.pickNewHost(code, b.session.seatId, a.session.seatId)
   assert(!('error' in picked), `pick-host ${picked.error || ''}`)
@@ -488,6 +518,132 @@ function partyOf(store, code) {
   assert(!recent.includes(picked.prompt.id), 'real bank avoids recent-K')
   assert(picked.recentPromptIds.length === 8, 'recent window still K=8')
   assert(picked.recentPromptIds[7] === picked.prompt.id, 'new id appended')
+}
+
+{
+  const dare = pickPrompt({ type: 'dare', rng: () => 0 })
+  assert(dare?.prompt.displayType === 'dare', 'type dare')
+  const truth = pickPrompt({ type: 'truth', rng: () => 0 })
+  assert(truth?.prompt.displayType === 'truth', 'type truth')
+}
+
+{
+  const members = [
+    { seatId: 'a', connected: true, name: '甲' },
+    { seatId: 'b', connected: true, name: '乙' },
+    { seatId: 'c', connected: false, name: '丙' },
+  ]
+  assert(nextAnswererSeatId(members, 'a') === 'b', 'default answerer next')
+  assert(nextAnswererSeatId(members, 'b') === 'a', 'wrap skips offline')
+  assert(
+    nextAnswererSeatId([{ seatId: 'solo', connected: true }], 'solo') === 'solo',
+    'solo default self',
+  )
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  store.joinRoom(code, '甲')
+  assert(!('error' in store.drawPrompt(code, hostSeat, hostTok)), 'draw typed redraw')
+  const before = partyOf(store, code).prompt
+  const typed = store.redrawPrompt(code, hostSeat, hostTok, 'dare')
+  assert(!('error' in typed), `typed redraw ${typed.error || ''}`)
+  const after = partyOf(store, code)
+  assert(after.prompt.displayType === 'dare', 'reselect dare')
+  assert(after.prompt.id !== before.id, 'typed redraw changed')
+  assert(after.prompt.typeChoice === 'dare', 'typeChoice stored')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const a = store.joinRoom(code, '甲')
+  for (let i = 0; i < 6; i++) {
+    assert(!('error' in store.drawPrompt(code, hostSeat, hostTok)), `draw ${i}`)
+    const adv = store.advancePrompt(code, hostSeat, hostTok)
+    assert(!('error' in adv), `advance ${i}`)
+    store.setDrawer(code, hostSeat, hostTok, hostSeat)
+  }
+  const hist = partyOf(store, code).promptHistory || []
+  assert(hist.length === HISTORY_N, `history cap ${hist.length}`)
+  const late = store.joinRoom(code, '晚进')
+  const lateHist = partyStubOf(publicPersisted(late.data).room.party).promptHistory
+  assert(lateHist?.length === HISTORY_N, 'late-join history')
+  assert(lateHist[0].text && lateHist[0].answererNickname, 'late-join last prompt')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const a = store.joinRoom(code, '甲')
+  const guestSkip = store.skipDrawer(
+    code,
+    a.session.seatId,
+    a.session.seatToken,
+  )
+  assert(guestSkip.error === ACK_REASONS.NOT_HOST, 'non-host cannot skip-drawer')
+  const skipped = store.skipDrawer(code, hostSeat, hostTok)
+  assert(!('error' in skipped), `skip-drawer ${skipped.error || ''}`)
+  assert(partyOf(store, code).phase === 'drawing', 'skip stays drawing')
+  assert(partyOf(store, code).drawerSeatId === a.session.seatId, 'skip → next online')
+
+  store.drawPrompt(code, a.session.seatId, a.session.seatToken)
+  const duringAnswer = store.skipDrawer(code, hostSeat, hostTok)
+  assert(duringAnswer.error === ACK_REASONS.INVALID, 'skip-drawer only drawing')
+  assert(partyOf(store, code).prompt, 'skip during answering keeps prompt')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const a = store.joinRoom(code, '甲')
+  store.setMemberConnected(code, hostSeat, false)
+  const drawing = partyOf(store, code)
+  assert(drawing.phase === 'drawing', 'drawing after host offline')
+  assert(!drawing.prompt, 'no prompt')
+  assert(drawing.drawerSeatId === a.session.seatId, 'drawing skips offline drawer')
+  assert(drawing.drawerSeatId !== hostSeat, 'next-draw not ghost')
+
+  store.setDrawer(code, hostSeat, hostTok, a.session.seatId)
+  store.drawPrompt(code, a.session.seatId, a.session.seatToken)
+  const promptId = partyOf(store, code).prompt.id
+  store.setMemberConnected(code, a.session.seatId, false)
+  const answering = partyOf(store, code)
+  assert(answering.phase === 'answering', 'answering drawer offline keeps phase')
+  assert(answering.prompt.id === promptId, 'answering drawer offline keeps prompt')
+  assert(answering.drawerSeatId === a.session.seatId, 'answering keeps offline drawer')
+  const hostRedraw = store.redrawPrompt(code, hostSeat, hostTok)
+  assert(!('error' in hostRedraw), 'host can redraw while drawer offline')
+  const hostAdv = store.advancePrompt(code, hostSeat, hostTok)
+  assert(!('error' in hostAdv), 'host can advance while drawer offline')
+}
+
+{
+  let hist = []
+  for (let i = 0; i < 6; i++) {
+    hist = appendPromptHistory(hist, {
+      id: `h${i}`,
+      displayType: 'truth',
+      text: `旧题${i}`,
+      answererSeatId: 's1',
+      answererNickname: '固化名',
+      redrawn: i === 1,
+      closedAt: i + 1,
+    })
+  }
+  assert(hist.length === 5, 'append cap 5')
+  assert(hist[0].id === 'h5', 'newest first')
+  assert(hist[4].id === 'h1', 'oldest kept of last 5')
+  assert(!hist.some((h) => h.id === 'h0'), 'drops 6th')
+}
+
+{
+  const store = createRoomStore()
+  const { code, hostSeat, hostTok } = openTruthDare(store)
+  const ghost = store.drawPrompt(code, hostSeat, hostTok)
+  assert(!('error' in ghost), 'solo draw')
+  assert(partyOf(store, code).answererSeatId === hostSeat, 'solo default self')
 }
 
 console.log('OK test-truth-dare')

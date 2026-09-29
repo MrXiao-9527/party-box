@@ -346,7 +346,23 @@ export class RoomDurableObject {
 
       if (request.method === 'POST' && action === 'redraw') {
         const body = await request.json()
-        const result = this.store.redrawPrompt(code, body.fromSeatId, body.seatToken)
+        const result = this.store.redrawPrompt(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.type,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'skip-drawer') {
+        const body = await request.json()
+        const result = this.store.skipDrawer(code, body.fromSeatId, body.seatToken)
         if ('error' in result) {
           return Response.json(result, { status: 400 })
         }

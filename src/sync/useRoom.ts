@@ -42,6 +42,7 @@ import {
   castVoteUndercover as castVoteUndercoverApi,
   drawPrompt as drawPromptApi,
   redrawPrompt as redrawPromptApi,
+  skipDrawer as skipDrawerApi,
   setDrawer as setDrawerApi,
   setAnswerer as setAnswererApi,
   advancePrompt as advancePromptApi,
@@ -789,6 +790,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
         | { error: string }
       >,
       failCopy: string,
+      okCopy?: string,
     ) => {
       if (!roomCode || !session) {
         pushToast(failCopy)
@@ -805,6 +807,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
             return
           }
           applySyncedRoom(result.data, { force: true })
+          if (okCopy) pushToast(okCopy)
           if ('private' in result) {
             privateRoundRef.current =
               partyStubOf(result.data.room.party).round ?? 1
@@ -942,14 +945,30 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     )
   }, [roomCode, session, runPartyHostAction, pushToast])
 
-  const redrawPrompt = useCallback(() => {
+  const redrawPrompt = useCallback(
+    (type?: 'truth' | 'dare' | 'random') => {
+      if (!session) {
+        pushToast('换题失败，请重试')
+        return
+      }
+      runPartyHostAction(
+        () =>
+          redrawPromptApi(roomCode!, session.seatId, session.seatToken, type),
+        '换题失败，请重试',
+        '已换题',
+      )
+    },
+    [roomCode, session, runPartyHostAction, pushToast],
+  )
+
+  const skipDrawer = useCallback(() => {
     if (!session) {
-      pushToast('重抽失败，请重试')
+      pushToast('跳过抽题人失败，请重试')
       return
     }
     runPartyHostAction(
-      () => redrawPromptApi(roomCode!, session.seatId, session.seatToken),
-      '重抽失败，请重试',
+      () => skipDrawerApi(roomCode!, session.seatId, session.seatToken),
+      '跳过抽题人失败，请重试',
     )
   }, [roomCode, session, runPartyHostAction, pushToast])
 
@@ -1205,6 +1224,7 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     castVoteUndercover,
     drawPrompt,
     redrawPrompt,
+    skipDrawer,
     setDrawer,
     setAnswerer,
     advancePrompt,
