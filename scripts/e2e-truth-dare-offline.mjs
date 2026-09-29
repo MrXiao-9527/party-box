@@ -1,6 +1,7 @@
 /**
- * Gate ④: close a player's tab → seat goes 离线; next-draw / default-answerer
- * skip the ghost. Spawns vite + node relay.
+ * Gate ④ + refresh grace: close a player's tab → seat goes 离线 after 8s;
+ * next-draw / default-answerer skip the ghost. Refresh within grace keeps drawer.
+ * Spawns vite + node relay.
  *
  * Run: npm run test:e2e-truth-dare-offline
  */
@@ -220,6 +221,46 @@ try {
       ),
   )
 
+  await p2.page.reload({ waitUntil: 'domcontentloaded' })
+  await p2.page.waitForFunction(
+    () =>
+      !!document.querySelector('[data-mode="partyGame"][data-game-id="truthDare"]') &&
+      !document.querySelector('.nickname-card'),
+    { timeout: 15000 },
+  )
+  await host.page.waitForFunction(
+    () =>
+      (document.querySelector('[data-stage-copy]')?.textContent || '').includes(
+        '等待 玩家B 抽题',
+      ),
+    { timeout: 10000 },
+  )
+  await p2.page.waitForFunction(
+    () =>
+      (document.querySelector('[data-stage-copy]')?.textContent || '').includes(
+        '等待 玩家B 抽题',
+      ),
+    { timeout: 10000 },
+  )
+  const afterReloadHost = await memberOf(host.page, '玩家B')
+  const afterReloadSelf = await memberOf(p2.page, '玩家B')
+  assert(afterReloadHost.online && afterReloadHost.isDrawer, 'host: B still drawer after refresh')
+  assert(afterReloadSelf.online && afterReloadSelf.isDrawer, 'B: still drawer after refresh')
+  assert((await stageOf(host.page)) === '等待 玩家B 抽题', 'host stage still B after refresh')
+  assert((await stageOf(p3.page)) === '等待 玩家B 抽题', 'C stage still B after refresh')
+  const afterReloadSnap = await fetch(`${RELAY_URL}/rooms/${code}`).then((r) => r.json())
+  const bSeatReload = afterReloadSnap.data.room.members.find((m) => m.name === '玩家B')
+  assert(bSeatReload?.connected === true, 'GET B connected after refresh')
+  assert(
+    afterReloadSnap.data.room.party.drawerSeatId === bSeatReload.seatId,
+    'GET drawer still B after refresh',
+  )
+  await host.page.screenshot({
+    path: `${ART}/truth-dare-refresh-keeps-drawer.png`,
+    fullPage: true,
+  })
+  console.log('PASS: drawer refresh within grace keeps draw rights')
+
   await p2.page.close()
   await host.page.waitForFunction(
     () => {
@@ -230,7 +271,7 @@ try {
       })
       return !!li?.querySelector('.offline-dot')
     },
-    { timeout: 8000 },
+    { timeout: 20000 },
   )
   await p3.page.waitForFunction(
     () => {
@@ -241,7 +282,7 @@ try {
       })
       return !!li?.querySelector('.offline-dot')
     },
-    { timeout: 8000 },
+    { timeout: 20000 },
   )
   const hostB = await memberOf(host.page, '玩家B')
   const p3B = await memberOf(p3.page, '玩家B')

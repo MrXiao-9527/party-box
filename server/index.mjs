@@ -15,7 +15,13 @@
 
 import http from 'node:http'
 import { WebSocketServer } from 'ws'
-import { createRoomStore, ACK_REASONS, publicPersisted } from './roomLogic.mjs'
+import {
+  createRoomStore,
+  ACK_REASONS,
+  publicPersisted,
+  partyStubOf,
+  DISCONNECT_GRACE_MS,
+} from './roomLogic.mjs'
 import { dataDir, loadSnapshot, saveSnapshot, snapshotPath } from './persist.mjs'
 
 const PORT = Number(process.env.PORT || 45322)
@@ -139,8 +145,57 @@ function socketsForSeat(roomCode, seatId, exceptWs) {
   )
 }
 
+/** @type {Map<string, ReturnType<typeof setTimeout>>} */
+const disconnectGraceTimers = new Map()
+
+function graceKey(roomCode, seatId) {
+  return `${String(roomCode || '').toUpperCase()}:${seatId}`
+}
+
+function isTruthDareRoom(data) {
+  return !!data && partyStubOf(data.room?.party).gameId === 'truthDare'
+}
+
+function clearDisconnectGrace(roomCode, seatId) {
+  const key = graceKey(roomCode, seatId)
+  const timer = disconnectGraceTimers.get(key)
+  if (!timer) return
+  clearTimeout(timer)
+  disconnectGraceTimers.delete(key)
+}
+
+function clearRoomDisconnectGrace(roomCode) {
+  const prefix = `${String(roomCode || '').toUpperCase()}:`
+  for (const [key, timer] of disconnectGraceTimers) {
+    if (!key.startsWith(prefix)) continue
+    clearTimeout(timer)
+    disconnectGraceTimers.delete(key)
+  }
+}
+
+function markOfflineIfUnsocketed(roomCode, seatId) {
+  if (!roomCode || !seatId) return
+  if (socketsForSeat(roomCode, seatId).length) return
+  const room = store.get(roomCode)
+  const member = room?.room.members.find((m) => m.seatId === seatId)
+  if (!member?.connected) return
+  const data = store.setMemberConnected(roomCode, seatId, false)
+  if (data) afterMutation(data)
+}
+
+function scheduleDisconnectGrace(roomCode, seatId) {
+  clearDisconnectGrace(roomCode, seatId)
+  const key = graceKey(roomCode, seatId)
+  const timer = setTimeout(() => {
+    disconnectGraceTimers.delete(key)
+    markOfflineIfUnsocketed(roomCode, seatId)
+  }, DISCONNECT_GRACE_MS)
+  disconnectGraceTimers.set(key, timer)
+}
+
 /** Rejoin after WS drop. restoreSeat keeps paused host disconnected. */
 function onlineFromSocket(roomCode, seatId) {
+  clearDisconnectGrace(roomCode, seatId)
   const room = store.get(roomCode)
   const member = room?.room.members.find((m) => m.seatId === seatId)
   if (!member || member.connected) return room
@@ -155,8 +210,13 @@ function offlineIfUnsocketed(roomCode, seatId, exceptWs) {
   const room = store.get(roomCode)
   const member = room?.room.members.find((m) => m.seatId === seatId)
   if (!member?.connected) return
-  const data = store.setMemberConnected(roomCode, seatId, false)
-  if (data) afterMutation(data)
+  // Truth-dare: delay offline + pointer skip so a refresh can reclaim.
+  // Other games keep last-auth-WS-close → immediate connected=false.
+  if (isTruthDareRoom(room)) {
+    scheduleDisconnectGrace(roomCode, seatId)
+    return
+  }
+  markOfflineIfUnsocketed(roomCode, seatId)
 }
 
 async function handle(req, res) {
@@ -215,6 +275,7 @@ async function handle(req, res) {
 
       if (req.method === 'DELETE' && !action) {
         store.del(code)
+        clearRoomDisconnectGrace(code)
         schedulePersist()
         broadcast(code, null)
         sendJson(res, 200, { ok: true })
@@ -262,6 +323,7 @@ async function handle(req, res) {
 
       if (req.method === 'POST' && action === 'member-connected') {
         const body = await readBody(req)
+        if (body.seatId) clearDisconnectGrace(code, body.seatId)
         const data = store.setMemberConnected(code, body.seatId, !!body.connected)
         if (!data) {
           sendJson(res, 404, { error: ACK_REASONS.ROOM_MISSING })

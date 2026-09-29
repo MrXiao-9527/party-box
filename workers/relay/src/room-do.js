@@ -9,6 +9,8 @@ import {
   parseRoomCreate,
   emptyPersistedRoom,
   publicPersisted,
+  partyStubOf,
+  DISCONNECT_GRACE_MS,
 } from './roomLogic.js'
 
 export class RoomDurableObject {
@@ -17,6 +19,8 @@ export class RoomDurableObject {
     this.env = env
     this.store = createRoomStore()
     this.loaded = false
+    /** @type {Map<string, number>} */
+    this.disconnectGraceGen = new Map()
   }
 
   async ensureLoaded() {
@@ -146,6 +150,7 @@ export class RoomDurableObject {
 
       if (request.method === 'DELETE' && !action) {
         this.store.del(code)
+        this.clearRoomDisconnectGrace(code)
         await this.persist(null)
         this.broadcast(null)
         return Response.json({ ok: true })
@@ -189,6 +194,7 @@ export class RoomDurableObject {
 
       if (request.method === 'POST' && action === 'member-connected') {
         const body = await request.json()
+        if (body.seatId) this.clearDisconnectGrace(code, body.seatId)
         const data = this.store.setMemberConnected(code, body.seatId, !!body.connected)
         if (!data) {
           return Response.json({ error: ACK_REASONS.ROOM_MISSING }, { status: 404 })
@@ -465,10 +471,54 @@ export class RoomDurableObject {
 
   /** Rejoin after WS drop. restoreSeat keeps paused host disconnected. */
   async onlineFromSocket(code, seatId) {
+    this.clearDisconnectGrace(code, seatId)
     const room = this.store.get(code)
     const member = room?.room.members.find((m) => m.seatId === seatId)
     if (!member || member.connected) return room
     return this.persistPresence(this.store.restoreSeat(code, seatId))
+  }
+
+  graceKey(code, seatId) {
+    return `${String(code || '').toUpperCase()}:${seatId}`
+  }
+
+  clearDisconnectGrace(code, seatId) {
+    if (!code || !seatId) return
+    const key = this.graceKey(code, seatId)
+    this.disconnectGraceGen.set(key, (this.disconnectGraceGen.get(key) || 0) + 1)
+  }
+
+  clearRoomDisconnectGrace(code) {
+    const prefix = `${String(code || '').toUpperCase()}:`
+    for (const key of [...this.disconnectGraceGen.keys()]) {
+      if (!key.startsWith(prefix)) continue
+      this.disconnectGraceGen.set(key, (this.disconnectGraceGen.get(key) || 0) + 1)
+    }
+  }
+
+  scheduleTruthDareDisconnectGrace(code, seatId) {
+    const key = this.graceKey(code, seatId)
+    const gen = (this.disconnectGraceGen.get(key) || 0) + 1
+    this.disconnectGraceGen.set(key, gen)
+    const run = this.flushDisconnectGrace(code, seatId, gen)
+    if (typeof this.state.waitUntil === 'function') {
+      this.state.waitUntil(run)
+    }
+  }
+
+  async flushDisconnectGrace(code, seatId, gen) {
+    await new Promise((r) => setTimeout(r, DISCONNECT_GRACE_MS))
+    if (this.disconnectGraceGen.get(this.graceKey(code, seatId)) !== gen) return
+    await this.offlineIfUnsocketedNow(code, seatId)
+  }
+
+  async offlineIfUnsocketedNow(code, seatId) {
+    if (!code || !seatId) return
+    if (this.seatHasOtherSocket(seatId)) return
+    const room = this.store.get(code)
+    const member = room?.room.members.find((m) => m.seatId === seatId)
+    if (!member?.connected) return
+    await this.persistPresence(this.store.setMemberConnected(code, seatId, false))
   }
 
   async offlineIfUnsocketed(code, seatId, exceptWs) {
@@ -477,11 +527,16 @@ export class RoomDurableObject {
     const room = this.store.get(code)
     const member = room?.room.members.find((m) => m.seatId === seatId)
     if (!member?.connected) return
+    if (partyStubOf(room.room.party).gameId === 'truthDare') {
+      this.scheduleTruthDareDisconnectGrace(code, seatId)
+      return
+    }
     await this.persistPresence(this.store.setMemberConnected(code, seatId, false))
   }
 
   // Tab close / navigate sends WS close (browser 1001). That is the
   // presence signal — pagehide HTTP is best-effort and often cancelled.
+  // Truth-dare waits DISCONNECT_GRACE_MS so a refresh can reclaim pointers.
   async webSocketClose(ws) {
     await this.ensureLoaded()
     const att = this.seatAttachment(ws)
