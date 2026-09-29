@@ -173,6 +173,9 @@ assert(kept.room.mode === 'chip', 'legacy create is chip')
   const td = parseRoomCreate({ mode: 'partyGame', gameId: 'truthDare', maxSeats: 4 })
   assert(td.ok && td.party.gameId === 'truthDare', 'truthDare gameId')
   assert(td.maxSeats === 4, 'truthDare seats')
+  const mc = parseRoomCreate({ mode: 'partyGame', gameId: 'miss-card', maxSeats: 6 })
+  assert(mc.ok && mc.party.gameId === 'miss-card', 'miss-card gameId')
+  assert(mc.party.phase === 'lobby', 'miss-card lobby')
   const unknown = parseRoomCreate({ mode: 'partyGame', gameId: 'foo' })
   assert(unknown.ok && unknown.party.gameId === 'undercover', 'unknown → undercover')
 }
@@ -244,6 +247,29 @@ assert(kept.room.mode === 'chip', 'legacy create is chip')
   assert(j1.data.room.members.length === 2, 'truthDare two seats')
   const j2 = store.joinRoom(tdCode, '乙')
   assert(j2.error === '本桌已满（最多2人）', 'truthDare full copy')
+}
+
+{
+  const mc = store.createEmptyHostRoom({
+    mode: 'partyGame',
+    maxSeats: 2,
+    gameId: 'miss-card',
+  })
+  assert(!('error' in mc), 'miss-card create ok')
+  assert(mc.data.room.party.gameId === 'miss-card', 'persist miss-card')
+  assert(mc.data.room.party.phase === 'lobby', 'miss-card lobby')
+  const mcCode = mc.data.room.roomCode
+  const host = store.claimHostSeat(mcCode, mc.session.seatId, '桌主')
+  assert(host && host.room.party.gameId === 'miss-card', 'claim keeps miss-card')
+  assert(host.room.party.phase === 'lobby', 'claim stays lobby')
+  const j1 = store.joinRoom(mcCode, '甲')
+  assert(!('error' in j1), 'miss-card second seat')
+  const started = store.startMissCard(mcCode, mc.session.seatId, mc.session.seatToken)
+  assert(!('error' in started), 'start miss-card')
+  assert(started.data.room.party.phase === 'playing', 'playing after start')
+  assert(started.data.room.party.deck.length === 52, '52 cards')
+  const guestStart = store.startMissCard(mcCode, j1.session.seatId, j1.session.seatToken)
+  assert(guestStart.error === ACK_REASONS.NOT_HOST, 'guest cannot start')
 }
 
 console.log('OK test-room-create')

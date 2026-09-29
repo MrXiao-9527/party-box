@@ -176,7 +176,7 @@ try {
     els.map((el) => el.getAttribute('data-tool')),
   )
   assert(
-    toolIds.join(',') === 'chip,undercover,truthDare',
+    toolIds.join(',') === 'chip,undercover,truthDare,miss-card',
     `tool cards ${toolIds}`,
   )
   await home.page.screenshot({
@@ -269,6 +269,29 @@ try {
   })
   await td.ctx.close()
   console.log('PASS: ② truthDare create gameId=truthDare')
+
+  // ② Miss-card create payload
+  const mcCreates = []
+  const mc = await newDevice(browser, mcCreates)
+  await mc.page.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await mc.page.waitForSelector('[data-tool="miss-card"]')
+  await mc.page.click('[data-tool="miss-card"]')
+  await mc.page.waitForSelector('[data-tool-page="miss-card"]')
+  await confirmCreateParty(mc.page, { maxSeats: '6', gameId: 'miss-card' })
+  await mc.page.waitForSelector('.nickname-card input')
+  const mcBody = mcCreates[0]
+  assert(mcBody, 'miss-card POST /rooms')
+  assert(mcBody.mode === 'partyGame', `miss-card mode ${mcBody.mode}`)
+  assert(mcBody.gameId === 'miss-card', `miss-card gameId ${mcBody.gameId}`)
+  assert(Number(mcBody.maxSeats) === 6, `miss-card seats ${mcBody.maxSeats}`)
+  await nickEnter(mc.page, '桌主M')
+  await mc.page.waitForSelector('[data-mode="partyGame"][data-game-id="miss-card"]')
+  await mc.page.screenshot({
+    path: `${ART}/home-tools-misscard-lobby.png`,
+    fullPage: true,
+  })
+  await mc.ctx.close()
+  console.log('PASS: ② miss-card create gameId=miss-card')
 
   // ③ old /tools/chips redirect must not create
   const redirCreates = []

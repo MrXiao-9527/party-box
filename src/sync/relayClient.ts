@@ -603,6 +603,115 @@ export async function relayAdvancePrompt(
   return relayTruthDareAction(roomCode, 'advance', { fromSeatId, seatToken })
 }
 
+async function relayMissAction(
+  roomCode: string,
+  action:
+    | 'start-miss-card'
+    | 'draw-card'
+    | 'pick-target'
+    | 'complete-turn'
+    | 'set-k-cups'
+    | 'apply-k'
+    | 'use-toilet'
+    | 'reshuffle'
+    | 'end-game'
+    | 'skip-drawer',
+  body: Record<string, unknown>,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  const result = await api<{ data: PersistedRoom }>(
+    `/rooms/${encodeURIComponent(roomCode)}/${action}`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    },
+  )
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return { error: errorFromBody(result.body, ACK_REASONS.INVALID) }
+  }
+  return { data: cache(result.body.data) ?? result.body.data }
+}
+
+export async function relayStartMissCard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'start-miss-card', { fromSeatId, seatToken })
+}
+
+export async function relayDrawMissCard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'draw-card', { fromSeatId, seatToken })
+}
+
+export async function relayPickMissTarget(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  targetSeatId: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'pick-target', {
+    fromSeatId,
+    seatToken,
+    targetSeatId,
+  })
+}
+
+export async function relayCompleteMissTurn(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'complete-turn', { fromSeatId, seatToken })
+}
+
+export async function relaySetMissKCups(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  cups: number,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'set-k-cups', { fromSeatId, seatToken, cups })
+}
+
+export async function relayApplyMissK(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'apply-k', { fromSeatId, seatToken })
+}
+
+export async function relayUseMissToilet(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'use-toilet', { fromSeatId, seatToken })
+}
+
+export async function relayReshuffleMissCard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'reshuffle', { fromSeatId, seatToken })
+}
+
+export async function relayEndMissCard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  return relayMissAction(roomCode, 'end-game', { fromSeatId, seatToken })
+}
+
 /** Live room subscription; writes through to localStorage cache. */
 export function subscribeRelayRoom(
   roomCode: string,

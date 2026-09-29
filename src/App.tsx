@@ -5,6 +5,7 @@ import { StubToolPage } from './pages/StubTool'
 import { ToolChipPage } from './pages/ToolChip'
 import { ToolUndercoverPage } from './pages/ToolUndercover'
 import { ToolTruthDarePage } from './pages/ToolTruthDare'
+import { ToolMissCardPage } from './pages/ToolMissCard'
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/tools/chips" element={<Navigate to="/tools/chip" replace />} />
         <Route path="/tools/undercover" element={<ToolUndercoverPage />} />
         <Route path="/tools/truthDare" element={<ToolTruthDarePage />} />
+        <Route path="/tools/miss-card" element={<ToolMissCardPage />} />
         <Route path="/tools/random" element={<StubToolPage tool="random" />} />
         <Route path="/tools/timer" element={<StubToolPage tool="timer" />} />
         <Route path="/tools/split" element={<StubToolPage tool="split" />} />

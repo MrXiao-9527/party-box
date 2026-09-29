@@ -11,6 +11,7 @@ import {
   publicPersisted,
   partyStubOf,
   DISCONNECT_GRACE_MS,
+  parsePartyGameId,
 } from './roomLogic.js'
 
 export class RoomDurableObject {
@@ -21,6 +22,39 @@ export class RoomDurableObject {
     this.loaded = false
     /** @type {Map<string, number>} */
     this.disconnectGraceGen = new Map()
+    /** room:seat → timeout */
+    this.missCardGrace = new Map()
+  }
+
+  clearMissCardGrace(roomCode, seatId) {
+    const key = this.graceKey(roomCode, seatId)
+    const t = this.missCardGrace.get(key)
+    if (t) {
+      clearTimeout(t)
+      this.missCardGrace.delete(key)
+    }
+  }
+
+  scheduleMissCardGrace(roomCode, seatId) {
+    if (!roomCode || !seatId) return
+    const room = this.store.get(roomCode)
+    if (parsePartyGameId(room?.room?.party?.gameId) !== 'miss-card') return
+    this.clearMissCardGrace(roomCode, seatId)
+    const key = this.graceKey(roomCode, seatId)
+    const t = setTimeout(() => {
+      this.missCardGrace.delete(key)
+      void this.flushMissCardSkip(roomCode, seatId)
+    }, DISCONNECT_GRACE_MS)
+    this.missCardGrace.set(key, t)
+  }
+
+  async flushMissCardSkip(roomCode, seatId) {
+    await this.ensureLoaded()
+    const next = this.store.skipMissCardIfOffline(roomCode, seatId)
+    if (next) {
+      await this.persist(next)
+      this.broadcast(next)
+    }
   }
 
   async ensureLoaded() {
@@ -199,6 +233,8 @@ export class RoomDurableObject {
         if (!data) {
           return Response.json({ error: ACK_REASONS.ROOM_MISSING }, { status: 404 })
         }
+        if (body.connected) this.clearMissCardGrace(code, body.seatId)
+        else this.scheduleMissCardGrace(code, body.seatId)
         await this.persist(data)
         this.broadcast(data)
         return Response.json({ data: publicPersisted(data) })
@@ -246,6 +282,7 @@ export class RoomDurableObject {
         if (!data) {
           return Response.json({ error: ACK_REASONS.ROOM_MISSING }, { status: 404 })
         }
+        this.clearMissCardGrace(code, body.seatId)
         await this.persist(data)
         this.broadcast(data)
         return Response.json({ data: publicPersisted(data) })
@@ -373,6 +410,7 @@ export class RoomDurableObject {
         if ('error' in result) {
           return Response.json(result, { status: 400 })
         }
+        this.clearMissCardGrace(code, body.fromSeatId)
         await this.persist(result.data)
         this.broadcast(result.data)
         return Response.json({ data: publicPersisted(result.data) })
@@ -413,6 +451,119 @@ export class RoomDurableObject {
       if (request.method === 'POST' && action === 'advance') {
         const body = await request.json()
         const result = this.store.advancePrompt(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'start-miss-card') {
+        const body = await request.json()
+        const result = this.store.startMissCard(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'draw-card') {
+        const body = await request.json()
+        const result = this.store.drawCard(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'pick-target') {
+        const body = await request.json()
+        const result = this.store.pickTarget(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.targetSeatId,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'complete-turn') {
+        const body = await request.json()
+        const result = this.store.completeTurn(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'set-k-cups') {
+        const body = await request.json()
+        const result = this.store.setMissKCups(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.cups,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'apply-k') {
+        const body = await request.json()
+        const result = this.store.applyMissK(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'use-toilet') {
+        const body = await request.json()
+        const result = this.store.spendMissToilet(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'reshuffle') {
+        const body = await request.json()
+        const result = this.store.reshuffleMissCard(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'end-game') {
+        const body = await request.json()
+        const result = this.store.endMissCard(code, body.fromSeatId, body.seatToken)
         if ('error' in result) {
           return Response.json(result, { status: 400 })
         }
@@ -475,6 +626,7 @@ export class RoomDurableObject {
     const room = this.store.get(code)
     const member = room?.room.members.find((m) => m.seatId === seatId)
     if (!member || member.connected) return room
+    this.clearMissCardGrace(code, seatId)
     return this.persistPresence(this.store.restoreSeat(code, seatId))
   }
 
@@ -532,6 +684,7 @@ export class RoomDurableObject {
       return
     }
     await this.persistPresence(this.store.setMemberConnected(code, seatId, false))
+    this.scheduleMissCardGrace(code, seatId)
   }
 
   // Tab close / navigate sends WS close (browser 1001). That is the

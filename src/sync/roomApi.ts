@@ -30,6 +30,15 @@ import {
   setDrawer as localSetDrawer,
   setAnswerer as localSetAnswerer,
   advancePrompt as localAdvancePrompt,
+  startMissCard as localStartMissCard,
+  drawMissCard as localDrawMissCard,
+  pickMissTarget as localPickMissTarget,
+  completeMissTurn as localCompleteMissTurn,
+  setMissKCups as localSetMissKCups,
+  applyMissK as localApplyMissK,
+  spendMissToilet as localSpendMissToilet,
+  reshuffleMissCard as localReshuffleMissCard,
+  endMissCard as localEndMissCard,
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
@@ -68,6 +77,15 @@ import {
   relaySetDrawer,
   relaySetAnswerer,
   relayAdvancePrompt,
+  relayStartMissCard,
+  relayDrawMissCard,
+  relayPickMissTarget,
+  relayCompleteMissTurn,
+  relaySetMissKCups,
+  relayApplyMissK,
+  relayUseMissToilet,
+  relayReshuffleMissCard,
+  relayEndMissCard,
 } from './relayClient'
 
 export { isRelayEnabled, loadRoom, RelayNetworkError }
@@ -381,6 +399,95 @@ export async function advancePrompt(
 ): Promise<{ data: PersistedRoom } | { error: string }> {
   if (!isRelayEnabled()) return localAdvancePrompt(roomCode, fromSeatId, seatToken)
   return relayAdvancePrompt(roomCode, fromSeatId, seatToken)
+}
+
+export async function startMissCard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localStartMissCard(roomCode, fromSeatId, seatToken)
+  return relayStartMissCard(roomCode, fromSeatId, seatToken)
+}
+
+export async function drawMissCard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localDrawMissCard(roomCode, fromSeatId, seatToken)
+  return relayDrawMissCard(roomCode, fromSeatId, seatToken)
+}
+
+export async function pickMissTarget(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  targetSeatId: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localPickMissTarget(roomCode, fromSeatId, seatToken, targetSeatId)
+  }
+  return relayPickMissTarget(roomCode, fromSeatId, seatToken, targetSeatId)
+}
+
+export async function completeMissTurn(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localCompleteMissTurn(roomCode, fromSeatId, seatToken)
+  return relayCompleteMissTurn(roomCode, fromSeatId, seatToken)
+}
+
+export async function setMissKCups(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  cups: number,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localSetMissKCups(roomCode, fromSeatId, seatToken, cups)
+  }
+  return relaySetMissKCups(roomCode, fromSeatId, seatToken, cups)
+}
+
+export async function applyMissK(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localApplyMissK(roomCode, fromSeatId, seatToken)
+  return relayApplyMissK(roomCode, fromSeatId, seatToken)
+}
+
+export async function spendMissToilet(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localSpendMissToilet(roomCode, fromSeatId, seatToken)
+  return relayUseMissToilet(roomCode, fromSeatId, seatToken)
+}
+
+export async function reshuffleMissCard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localReshuffleMissCard(roomCode, fromSeatId, seatToken)
+  }
+  return relayReshuffleMissCard(roomCode, fromSeatId, seatToken)
+}
+
+export async function endMissCard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) return localEndMissCard(roomCode, fromSeatId, seatToken)
+  return relayEndMissCard(roomCode, fromSeatId, seatToken)
 }
 
 export async function deleteRoom(roomCode: string): Promise<void> {
