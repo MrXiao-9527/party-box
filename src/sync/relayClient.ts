@@ -4,6 +4,10 @@
  */
 
 import type { SeatPrivate } from '../games/undercover/deal'
+import type { WerewolfSeatPrivate } from '../games/werewolfDeal/roles'
+import type { WerewolfBoard, WerewolfDealStage } from '../types'
+
+type AnySeatPrivate = SeatPrivate | WerewolfSeatPrivate
 import type { ChipAck, ChipOp, Phase, RoomCreateInput, TableSnapshot } from '../types'
 import { ACK_REASONS } from '../types'
 import type { PersistedRoom, Session } from '../store/localRoom'
@@ -397,8 +401,8 @@ export async function relayGetSeatPrivate(
   roomCode: string,
   seatId: string,
   seatToken?: string,
-): Promise<{ private: SeatPrivate | null; hasWord: boolean } | { error: string }> {
-  const result = await api<{ private: SeatPrivate | null; hasWord: boolean }>(
+): Promise<{ private: AnySeatPrivate | null; hasWord: boolean } | { error: string }> {
+  const result = await api<{ private: AnySeatPrivate | null; hasWord: boolean }>(
     `/rooms/${encodeURIComponent(roomCode)}/seat-private`,
     {
       method: 'POST',
@@ -712,6 +716,106 @@ export async function relayEndMissCard(
   return relayMissAction(roomCode, 'end-game', { fromSeatId, seatToken })
 }
 
+async function relayWerewolfAction<T>(
+  roomCode: string,
+  action: string,
+  body: Record<string, unknown>,
+): Promise<T | { error: string }> {
+  const result = await api<T>(`/rooms/${encodeURIComponent(roomCode)}/${action}`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+  if (!result.ok) {
+    if (result.status >= 500 || result.status === 0) {
+      throw new RelayNetworkError()
+    }
+    return { error: errorFromBody(result.body, ACK_REASONS.INVALID) }
+  }
+  return result.body
+}
+
+export async function relayTweakWerewolfBoard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  board: WerewolfBoard,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  const result = await relayWerewolfAction<{ data: PersistedRoom }>(
+    roomCode,
+    'tweak-board',
+    { fromSeatId, seatToken, board },
+  )
+  if ('error' in result) return result
+  return { data: cache(result.data) ?? result.data }
+}
+
+export async function relayResetWerewolfBoard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  const result = await relayWerewolfAction<{ data: PersistedRoom }>(
+    roomCode,
+    'reset-board',
+    { fromSeatId, seatToken },
+  )
+  if ('error' in result) return result
+  return { data: cache(result.data) ?? result.data }
+}
+
+export async function relayDealWerewolf(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<
+  | { data: PersistedRoom; private: AnySeatPrivate | null }
+  | { error: string }
+> {
+  const result = await relayWerewolfAction<{
+    data: PersistedRoom
+    private: AnySeatPrivate | null
+  }>(roomCode, 'deal', { fromSeatId, seatToken })
+  if ('error' in result) return result
+  return {
+    data: cache(result.data) ?? result.data,
+    private: result.private ?? null,
+  }
+}
+
+export async function relayRedealWerewolf(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<
+  | { data: PersistedRoom; private: AnySeatPrivate | null }
+  | { error: string }
+> {
+  const result = await relayWerewolfAction<{
+    data: PersistedRoom
+    private: AnySeatPrivate | null
+  }>(roomCode, 'redeal', { fromSeatId, seatToken })
+  if ('error' in result) return result
+  return {
+    data: cache(result.data) ?? result.data,
+    private: result.private ?? null,
+  }
+}
+
+export async function relaySetWerewolfStage(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  stage: WerewolfDealStage,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  const result = await relayWerewolfAction<{ data: PersistedRoom }>(
+    roomCode,
+    'set-stage',
+    { fromSeatId, seatToken, stage },
+  )
+  if ('error' in result) return result
+  return { data: cache(result.data) ?? result.data }
+}
+
 /** Live room subscription; writes through to localStorage cache. */
 export function subscribeRelayRoom(
   roomCode: string,
@@ -719,7 +823,7 @@ export function subscribeRelayRoom(
   opts?: {
     seatId?: string
     seatToken?: string
-    onPrivate?: (priv: SeatPrivate | null) => void
+    onPrivate?: (priv: AnySeatPrivate | null) => void
   },
 ): () => void {
   const code = roomCode.toUpperCase()
@@ -740,7 +844,7 @@ export function subscribeRelayRoom(
         const msg = JSON.parse(String(ev.data)) as {
           type: string
           data?: PersistedRoom | null
-          private?: SeatPrivate | null
+          private?: AnySeatPrivate | null
         }
         if (msg.type === 'seatPrivate') {
           opts?.onPrivate?.(msg.private ?? null)

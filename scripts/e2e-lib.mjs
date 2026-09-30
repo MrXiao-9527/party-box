@@ -53,7 +53,9 @@ export async function gotoTool(page, tool) {
         ? '/tools/undercover'
         : tool === 'miss-card'
           ? '/tools/miss-card'
-          : '/tools/chip'
+          : tool === 'werewolf-deal'
+            ? '/tools/werewolf-deal'
+            : '/tools/chip'
   let here = ''
   try {
     here = new URL(page.url()).pathname
@@ -79,7 +81,9 @@ export async function openPartyCreate(page, gameId) {
       ? 'truthDare'
       : gameId === 'miss-card'
         ? 'miss-card'
-        : 'undercover'
+        : gameId === 'werewolf-deal'
+          ? 'werewolf-deal'
+          : 'undercover'
   await gotoTool(page, tool)
   if (!(await page.$(`[data-create-party][data-game-id="${tool}"] [name="maxSeats"]`))) {
     await clickText(page, '开一桌')

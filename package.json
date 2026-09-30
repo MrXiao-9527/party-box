@@ -36,7 +36,9 @@
     "test:e2e-create-snapshot": "node scripts/e2e-create-snapshot.mjs",
     "test:e2e-open-table-ux": "node scripts/e2e-open-table-ux.mjs",
     "test:e2e-deeplink": "node scripts/e2e-deeplink-join.mjs",
-    "test:e2e-home-tools": "node scripts/e2e-home-tools.mjs"
+    "test:e2e-home-tools": "node scripts/e2e-home-tools.mjs",
+    "test:werewolf-deal": "node scripts/test-werewolf-deal.mjs",
+    "test:e2e-party-werewolf-deal": "node scripts/e2e-party-werewolf-deal.mjs"
   },
   "dependencies": {
     "react": "^19.2.8",

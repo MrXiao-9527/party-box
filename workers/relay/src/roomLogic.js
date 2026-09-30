@@ -44,9 +44,28 @@ import {
   assignTurnIfVacant,
   MISS_ACK,
 } from './missCard.js'
+import {
+  WEREWOLF_GAME_ID,
+  WEREWOLF_MAX_SEATS,
+  WW_ACK,
+  boardOf,
+  clearToLobby,
+  compositionOf,
+  dealRefusal,
+  dealRoles,
+  dealSeatIds,
+  isWerewolfPrivate,
+  isWerewolfStage,
+  lobbyParty,
+  nextDealId,
+  sanitizeWerewolfPrivate,
+  syncWerewolfOnMembers,
+  werewolfStubOf,
+} from './werewolfDeal.js'
 
 export const MIN_SEATS = 2
 export const MAX_SEATS = 8
+export { WEREWOLF_MAX_SEATS }
 export const DEFAULT_DENOMS = [1, 5, 10, 25, 100]
 export const PROMPT_RECENT_K = 8
 export const PROMPT_HISTORY_N = 5
@@ -90,11 +109,21 @@ export const ACK_REASONS = {
   NEED_SET_K: '请先设定杯数',
   DECK_EMPTY: '牌已抽完',
   PICK_ONLINE: '只能指定在线的人',
+  BOARD_MISMATCH: WW_ACK.BOARD_MISMATCH,
+  NO_WOLF: WW_ACK.NO_WOLF,
+  NO_GOOD: WW_ACK.NO_GOOD,
+  BOARD_LOCKED: WW_ACK.BOARD_LOCKED,
+  NEED_TWO_SEATED: WW_ACK.NEED_TWO_SEATED,
+  SEATS_RANGE_WEREWOLF: WW_ACK.SEATS_RANGE,
+  NOT_DEALT: WW_ACK.NOT_DEALT,
+  NOT_IN_LOBBY: WW_ACK.NOT_IN_LOBBY,
 }
 
 export function normalizeMaxSeats(raw) {
   const n = typeof raw === 'number' ? raw : Number(raw)
-  if (!Number.isInteger(n) || n < MIN_SEATS || n > MAX_SEATS) return MAX_SEATS
+  if (!Number.isInteger(n) || n < MIN_SEATS || n > WEREWOLF_MAX_SEATS) {
+    return MAX_SEATS
+  }
   return n
 }
 
@@ -110,6 +139,7 @@ export function parseRoomMode(raw) {
 export function parsePartyGameId(raw) {
   if (raw === 'truthDare') return 'truthDare'
   if (raw === 'miss-card') return 'miss-card'
+  if (raw === 'werewolf-deal') return 'werewolf-deal'
   return 'undercover'
 }
 
@@ -241,6 +271,7 @@ export function partyStubOf(raw) {
   const gameId = parsePartyGameId(src?.gameId)
   if (gameId === 'truthDare') return truthDareStubOf(src)
   if (gameId === 'miss-card') return missCardStubOf(src)
+  if (gameId === 'werewolf-deal') return werewolfStubOf(src)
   const phase = asPartyPhase(src?.phase)
   const stub = { gameId, phase }
   if (phase === 'lobby') return stub
@@ -318,6 +349,11 @@ function sanitizePrivates(raw) {
   const out = {}
   for (const [seatId, p] of Object.entries(raw)) {
     if (!p || typeof p !== 'object') continue
+    if (isWerewolfPrivate(p)) {
+      const ww = sanitizeWerewolfPrivate(seatId, p)
+      if (ww) out[seatId] = ww
+      continue
+    }
     if (typeof p.word !== 'string' || !p.word) continue
     out[seatId] = {
       seatId,
@@ -368,14 +404,22 @@ function optionalPositiveInt(raw) {
 export function parseRoomCreate(input = {}) {
   const src = input && typeof input === 'object' ? input : {}
   const mode = parseRoomMode(src.mode)
+  const partyPreview = mode === 'partyGame' ? partyStubOf(src) : null
+  const seatCap =
+    partyPreview?.gameId === 'werewolf-deal' ? WEREWOLF_MAX_SEATS : MAX_SEATS
   const seatsRaw = src.maxSeats
   const seatsMissing =
     seatsRaw === undefined || seatsRaw === null || seatsRaw === ''
   let maxSeats = MAX_SEATS
   if (!seatsMissing) {
     const n = typeof seatsRaw === 'number' ? seatsRaw : Number(seatsRaw)
-    if (!Number.isInteger(n) || n < MIN_SEATS || n > MAX_SEATS) {
-      return { error: ACK_REASONS.SEATS_RANGE }
+    if (!Number.isInteger(n) || n < MIN_SEATS || n > seatCap) {
+      return {
+        error:
+          seatCap === WEREWOLF_MAX_SEATS
+            ? ACK_REASONS.SEATS_RANGE_WEREWOLF
+            : ACK_REASONS.SEATS_RANGE,
+      }
     }
     maxSeats = n
   }
@@ -595,10 +639,14 @@ function normalize(data) {
     members: data.room.members.slice(0, maxSeats),
   }
   if (mode === 'partyGame') {
-    room.party = ensureTruthDareTurn(
+    let party = ensureTruthDareTurn(
       partyStubOf(data.room.party || data.room),
       room.members,
     )
+    if (party.gameId === WEREWOLF_GAME_ID) {
+      party = syncWerewolfOnMembers(party, room.members)
+    }
+    room.party = party
   } else {
     delete room.party
   }
@@ -1127,6 +1175,109 @@ export function createRoomStore() {
     }
     const priv = existing.partyPrivates?.[seatId] || null
     return { private: priv, hasWord: !!priv }
+  }
+
+  function werewolfParty(existing) {
+    return syncWerewolfOnMembers(
+      werewolfStubOf(existing.room.party),
+      existing.room.members,
+    )
+  }
+
+  function writeWerewolf(existing, party, partyPrivates) {
+    const data = set({
+      ...existing,
+      room: {
+        ...existing.room,
+        party,
+      },
+      table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+      partyPrivates: partyPrivates ?? existing.partyPrivates ?? {},
+    })
+    return { data }
+  }
+
+  function tweakWerewolfBoard(roomCode, fromSeatId, seatToken, rawBoard) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = werewolfParty(existing)
+    if (party.gameId !== WEREWOLF_GAME_ID) return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'lobby') return { error: ACK_REASONS.BOARD_LOCKED }
+    const board = boardOf(rawBoard)
+    const next = {
+      ...party,
+      board,
+      boardTweaked: true,
+      roleComposition: compositionOf(board),
+    }
+    return writeWerewolf(existing, next)
+  }
+
+  function resetWerewolfBoard(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = werewolfParty(existing)
+    if (party.gameId !== WEREWOLF_GAME_ID) return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'lobby') return { error: ACK_REASONS.BOARD_LOCKED }
+    return writeWerewolf(
+      existing,
+      lobbyParty(existing.room.members, null, party.dealSeq),
+    )
+  }
+
+  function dealWerewolf(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = werewolfParty(existing)
+    if (party.gameId !== WEREWOLF_GAME_ID) return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'lobby') return { error: ACK_REASONS.ALREADY_STARTED }
+    const seatIds = dealSeatIds(existing.room.members)
+    const refuse = dealRefusal(party.board, seatIds.length)
+    if (refuse) return { error: refuse }
+    const dealId = nextDealId(existing.partyPrivates, party.dealSeq)
+    const dealt = dealRoles(seatIds, party.board, Math.random, dealId)
+    if (dealt.error) return { error: dealt.error }
+    const partyPrivates = {}
+    for (const p of dealt.privates) partyPrivates[p.seatId] = p
+    const next = {
+      gameId: WEREWOLF_GAME_ID,
+      phase: 'dealt',
+      stage: 'idle',
+      seatCount: seatIds.length,
+      board: party.board,
+      boardTweaked: !!party.boardTweaked,
+      roleComposition: compositionOf(party.board),
+      dealtSeatIds: seatIds,
+      dealSeq: dealt.dealId,
+    }
+    const data = writeWerewolf(existing, next, partyPrivates).data
+    return { data, private: data.partyPrivates?.[fromSeatId] || null }
+  }
+
+  function redealWerewolf(roomCode, fromSeatId, seatToken) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = werewolfParty(existing)
+    if (party.gameId !== WEREWOLF_GAME_ID) return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'dealt') return { error: ACK_REASONS.NOT_DEALT }
+    const cleared = clearToLobby(party, existing.room.members)
+    const data = writeWerewolf(existing, cleared, {}).data
+    return { data, private: null }
+  }
+
+  function setWerewolfStage(roomCode, fromSeatId, seatToken, rawStage) {
+    const existing = get(roomCode)
+    const hostErr = partyHostError(existing, fromSeatId, seatToken)
+    if (hostErr) return { error: hostErr }
+    const party = werewolfParty(existing)
+    if (party.gameId !== WEREWOLF_GAME_ID) return { error: ACK_REASONS.INVALID }
+    if (party.phase !== 'dealt') return { error: ACK_REASONS.NOT_DEALT }
+    if (!isWerewolfStage(rawStage)) return { error: ACK_REASONS.INVALID }
+    return writeWerewolf(existing, { ...party, stage: rawStage })
   }
 
   function partySeatError(existing, fromSeatId, seatToken) {
@@ -1987,6 +2138,11 @@ export function createRoomStore() {
     speakDoneUndercover,
     castVoteUndercover,
     getSeatPrivate,
+    tweakWerewolfBoard,
+    resetWerewolfBoard,
+    dealWerewolf,
+    redealWerewolf,
+    setWerewolfStage,
     drawPrompt,
     redrawPrompt,
     skipDrawer,

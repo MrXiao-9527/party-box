@@ -167,6 +167,7 @@ try {
   assert(homeText.includes('筹码桌'), 'card 筹码桌')
   assert(homeText.includes('谁是卧底'), 'card 谁是卧底')
   assert(homeText.includes('真心话大冒险'), 'card 真心话大冒险')
+  assert(homeText.includes('狼人杀发牌'), 'card 狼人杀发牌')
   assert(homeText.includes('加入'), 'secondary 加入')
   const createBtns = await homeCreateButtons(home.page)
   assert(createBtns.length === 0, `home has no 开一桌/局桌 buttons, got ${createBtns}`)
@@ -176,7 +177,7 @@ try {
     els.map((el) => el.getAttribute('data-tool')),
   )
   assert(
-    toolIds.join(',') === 'chip,undercover,truthDare,miss-card',
+    toolIds.join(',') === 'chip,undercover,truthDare,miss-card,werewolf-deal',
     `tool cards ${toolIds}`,
   )
   await home.page.screenshot({
@@ -292,6 +293,29 @@ try {
   })
   await mc.ctx.close()
   console.log('PASS: ② miss-card create gameId=miss-card')
+
+  // ② Werewolf-deal create payload
+  const wwCreates = []
+  const ww = await newDevice(browser, wwCreates)
+  await ww.page.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await ww.page.waitForSelector('[data-tool="werewolf-deal"]')
+  await ww.page.click('[data-tool="werewolf-deal"]')
+  await ww.page.waitForSelector('[data-tool-page="werewolf-deal"]')
+  await confirmCreateParty(ww.page, { maxSeats: '10', gameId: 'werewolf-deal' })
+  await ww.page.waitForSelector('.nickname-card input')
+  const wwBody = wwCreates[0]
+  assert(wwBody, 'werewolf-deal POST /rooms')
+  assert(wwBody.mode === 'partyGame', `werewolf mode ${wwBody.mode}`)
+  assert(wwBody.gameId === 'werewolf-deal', `werewolf gameId ${wwBody.gameId}`)
+  assert(Number(wwBody.maxSeats) === 10, `werewolf seats ${wwBody.maxSeats}`)
+  await nickEnter(ww.page, '桌主W')
+  await ww.page.waitForSelector('[data-mode="partyGame"][data-game-id="werewolf-deal"]')
+  await ww.page.screenshot({
+    path: `${ART}/home-tools-werewolf-lobby.png`,
+    fullPage: true,
+  })
+  await ww.ctx.close()
+  console.log('PASS: ② werewolf-deal create gameId=werewolf-deal')
 
   // ③ old /tools/chips redirect must not create
   const redirCreates = []

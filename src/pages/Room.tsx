@@ -8,6 +8,8 @@ import { Lobby } from './Lobby'
 import { PartyLobby } from './PartyLobby'
 import { TruthDareLobby } from './TruthDareLobby'
 import { MissCardRoom } from './MissCardRoom'
+import { WerewolfDealRoom } from './WerewolfDealRoom'
+import { isWerewolfPrivate } from '../games/werewolfDeal/roles'
 import { ChipTable } from './ChipTable'
 import { PausedTable } from './PausedTable'
 import { Settlement } from './Settlement'
@@ -35,6 +37,7 @@ import {
   isPartyGame,
   isTruthDareGame,
   isMissCardGame,
+  isWerewolfDealGame,
   normalizeMaxSeats,
   parseRoomCode,
   tableFullReason,
@@ -671,6 +674,7 @@ export function RoomPage() {
   const party = isPartyGame(roomApi.room)
   const truthDare = isTruthDareGame(roomApi.room)
   const missCard = isMissCardGame(roomApi.room)
+  const werewolfDeal = isWerewolfDealGame(roomApi.room)
 
   return (
     <>
@@ -685,7 +689,22 @@ export function RoomPage() {
       )}
       {debug}
       {party && roomApi.session ? (
-        missCard ? (
+        werewolfDeal ? (
+          <WerewolfDealRoom
+            room={roomApi.room}
+            session={roomApi.session}
+            isHost={roomApi.isHost}
+            busy={roomApi.starting}
+            seatPrivate={
+              isWerewolfPrivate(roomApi.seatPrivate) ? roomApi.seatPrivate : null
+            }
+            onTweak={denyIfReadOnly(roomApi.tweakWerewolfBoard)}
+            onResetBoard={denyIfReadOnly(roomApi.resetWerewolfBoard)}
+            onDeal={denyIfReadOnly(roomApi.dealWerewolf)}
+            onRedeal={denyIfReadOnly(roomApi.redealWerewolf)}
+            onSetStage={denyIfReadOnly(roomApi.setWerewolfStage)}
+          />
+        ) : missCard ? (
           <MissCardRoom
             room={roomApi.room}
             session={roomApi.session}
@@ -731,7 +750,11 @@ export function RoomPage() {
             session={roomApi.session}
             isHost={roomApi.isHost}
             starting={roomApi.starting}
-            seatPrivate={roomApi.seatPrivate}
+            seatPrivate={
+              roomApi.seatPrivate && 'word' in roomApi.seatPrivate
+                ? roomApi.seatPrivate
+                : null
+            }
             onStart={denyIfReadOnly(roomApi.startUndercover)}
             onReveal={denyIfReadOnly(roomApi.revealUndercover)}
             onNextRound={denyIfReadOnly(roomApi.nextRoundUndercover)}

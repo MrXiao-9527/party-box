@@ -143,14 +143,16 @@ export function PartyCreateForm({
   busy,
   createError,
   onSubmit,
+  defaultMaxSeats = '8',
 }: {
   gameId: PartyGameId
   hint: string
   busy: boolean
   createError: string
   onSubmit: (maxSeats: string) => void
+  defaultMaxSeats?: string
 }) {
-  const [maxSeats, setMaxSeats] = useState('8')
+  const [maxSeats, setMaxSeats] = useState(defaultMaxSeats)
 
   return (
     <form

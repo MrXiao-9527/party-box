@@ -362,6 +362,85 @@ export class RoomDurableObject {
         return Response.json({ data: publicPersisted(result.data) })
       }
 
+      if (request.method === 'POST' && action === 'tweak-board') {
+        const body = await request.json()
+        const result = this.store.tweakWerewolfBoard(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.board,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'reset-board') {
+        const body = await request.json()
+        const result = this.store.resetWerewolfBoard(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
+      if (request.method === 'POST' && action === 'deal') {
+        const body = await request.json()
+        const result = this.store.dealWerewolf(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({
+          data: publicPersisted(result.data),
+          private: result.private,
+        })
+      }
+
+      if (request.method === 'POST' && action === 'redeal') {
+        const body = await request.json()
+        const result = this.store.redealWerewolf(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({
+          data: publicPersisted(result.data),
+          private: result.private,
+        })
+      }
+
+      if (request.method === 'POST' && action === 'set-stage') {
+        const body = await request.json()
+        const result = this.store.setWerewolfStage(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.stage,
+        )
+        if ('error' in result) {
+          return Response.json(result, { status: 400 })
+        }
+        await this.persist(result.data)
+        this.broadcast(result.data)
+        return Response.json({ data: publicPersisted(result.data) })
+      }
+
       if (request.method === 'POST' && action === 'seat-private') {
         const body = await request.json()
         const result = this.store.getSeatPrivate(code, body.seatId, body.seatToken)
@@ -679,7 +758,8 @@ export class RoomDurableObject {
     const room = this.store.get(code)
     const member = room?.room.members.find((m) => m.seatId === seatId)
     if (!member?.connected) return
-    if (partyStubOf(room.room.party).gameId === 'truthDare') {
+    const gameId = partyStubOf(room.room.party).gameId
+    if (gameId === 'truthDare' || gameId === 'werewolf-deal') {
       this.scheduleTruthDareDisconnectGrace(code, seatId)
       return
     }
