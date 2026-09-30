@@ -183,6 +183,10 @@ function isTruthDareRoom(data) {
   return !!data && partyStubOf(data.room?.party).gameId === 'truthDare'
 }
 
+function isWerewolfDealRoom(data) {
+  return !!data && partyStubOf(data.room?.party).gameId === 'werewolf-deal'
+}
+
 function clearDisconnectGrace(roomCode, seatId) {
   const key = graceKey(roomCode, seatId)
   const timer = disconnectGraceTimers.get(key)
@@ -238,9 +242,9 @@ function offlineIfUnsocketed(roomCode, seatId, exceptWs) {
   const room = store.get(roomCode)
   const member = room?.room.members.find((m) => m.seatId === seatId)
   if (!member?.connected) return
-  // Truth-dare: delay offline + pointer skip so a refresh can reclaim.
-  // Other games keep last-auth-WS-close → immediate connected=false.
-  if (isTruthDareRoom(room)) {
+  // Truth-dare / werewolf-deal: delay offline so a refresh still occupies
+  // the seat within DISCONNECT_GRACE_MS (deal seats are not online-only).
+  if (isTruthDareRoom(room) || isWerewolfDealRoom(room)) {
     scheduleDisconnectGrace(roomCode, seatId)
     return
   }
@@ -491,6 +495,82 @@ async function handle(req, res) {
           body.fromSeatId,
           body.seatToken,
           body.targetSeatId,
+        )
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'tweak-board') {
+        const body = await readBody(req)
+        const result = store.tweakWerewolfBoard(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.board,
+        )
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'reset-board') {
+        const body = await readBody(req)
+        const result = store.resetWerewolfBoard(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, { data: publicPersisted(result.data) })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'deal') {
+        const body = await readBody(req)
+        const result = store.dealWerewolf(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, {
+          data: publicPersisted(result.data),
+          private: result.private,
+        })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'redeal') {
+        const body = await readBody(req)
+        const result = store.redealWerewolf(code, body.fromSeatId, body.seatToken)
+        if ('error' in result) {
+          sendJson(res, 400, result)
+          return
+        }
+        afterMutation(result.data)
+        sendJson(res, 200, {
+          data: publicPersisted(result.data),
+          private: result.private,
+        })
+        return
+      }
+
+      if (req.method === 'POST' && action === 'set-stage') {
+        const body = await readBody(req)
+        const result = store.setWerewolfStage(
+          code,
+          body.fromSeatId,
+          body.seatToken,
+          body.stage,
         )
         if ('error' in result) {
           sendJson(res, 400, result)

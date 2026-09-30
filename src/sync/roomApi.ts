@@ -39,11 +39,17 @@ import {
   spendMissToilet as localSpendMissToilet,
   reshuffleMissCard as localReshuffleMissCard,
   endMissCard as localEndMissCard,
+  tweakWerewolfBoard as localTweakWerewolfBoard,
+  resetWerewolfBoard as localResetWerewolfBoard,
+  dealWerewolf as localDealWerewolf,
+  redealWerewolf as localRedealWerewolf,
+  setWerewolfStage as localSetWerewolfStage,
   type PersistedRoom,
   type Session,
 } from '../store/localRoom'
 import type { SeatPrivate } from '../games/undercover/deal'
-import type { Phase, RoomCreateInput } from '../types'
+import type { WerewolfSeatPrivate } from '../games/werewolfDeal/roles'
+import type { Phase, RoomCreateInput, WerewolfBoard, WerewolfDealStage } from '../types'
 import { ACK_REASONS } from '../types'
 import {
   clearHadSeat,
@@ -86,7 +92,14 @@ import {
   relayUseMissToilet,
   relayReshuffleMissCard,
   relayEndMissCard,
+  relayTweakWerewolfBoard,
+  relayResetWerewolfBoard,
+  relayDealWerewolf,
+  relayRedealWerewolf,
+  relaySetWerewolfStage,
 } from './relayClient'
+
+type AnySeatPrivate = SeatPrivate | WerewolfSeatPrivate
 
 export { isRelayEnabled, loadRoom, RelayNetworkError }
 
@@ -284,7 +297,7 @@ export async function fetchSeatPrivate(
   roomCode: string,
   seatId: string,
   seatToken?: string,
-): Promise<{ private: SeatPrivate | null; hasWord: boolean } | { error: string }> {
+): Promise<{ private: AnySeatPrivate | null; hasWord: boolean } | { error: string }> {
   if (!isRelayEnabled()) return localGetSeatPrivate(roomCode, seatId, seatToken)
   return relayGetSeatPrivate(roomCode, seatId, seatToken)
 }
@@ -488,6 +501,65 @@ export async function endMissCard(
 ): Promise<{ data: PersistedRoom } | { error: string }> {
   if (!isRelayEnabled()) return localEndMissCard(roomCode, fromSeatId, seatToken)
   return relayEndMissCard(roomCode, fromSeatId, seatToken)
+}
+
+export async function tweakWerewolfBoard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  board: WerewolfBoard,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localTweakWerewolfBoard(roomCode, fromSeatId, seatToken, board)
+  }
+  return relayTweakWerewolfBoard(roomCode, fromSeatId, seatToken, board)
+}
+
+export async function resetWerewolfBoard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localResetWerewolfBoard(roomCode, fromSeatId, seatToken)
+  }
+  return relayResetWerewolfBoard(roomCode, fromSeatId, seatToken)
+}
+
+export async function dealWerewolf(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<
+  | { data: PersistedRoom; private: AnySeatPrivate | null }
+  | { error: string }
+> {
+  if (!isRelayEnabled()) return localDealWerewolf(roomCode, fromSeatId, seatToken)
+  return relayDealWerewolf(roomCode, fromSeatId, seatToken)
+}
+
+export async function redealWerewolf(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): Promise<
+  | { data: PersistedRoom; private: AnySeatPrivate | null }
+  | { error: string }
+> {
+  if (!isRelayEnabled()) return localRedealWerewolf(roomCode, fromSeatId, seatToken)
+  return relayRedealWerewolf(roomCode, fromSeatId, seatToken)
+}
+
+export async function setWerewolfStage(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  stage: WerewolfDealStage,
+): Promise<{ data: PersistedRoom } | { error: string }> {
+  if (!isRelayEnabled()) {
+    return localSetWerewolfStage(roomCode, fromSeatId, seatToken, stage)
+  }
+  return relaySetWerewolfStage(roomCode, fromSeatId, seatToken, stage)
 }
 
 export async function deleteRoom(roomCode: string): Promise<void> {

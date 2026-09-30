@@ -8,6 +8,8 @@ import {
   type Session,
 } from '../store/localRoom'
 import type { SeatPrivate } from '../games/undercover/deal'
+import type { WerewolfSeatPrivate } from '../games/werewolfDeal/roles'
+import type { WerewolfBoard, WerewolfDealStage } from '../types'
 import type {
   ChipOp,
   ChipOpType,
@@ -55,6 +57,11 @@ import {
   spendMissToilet as spendMissToiletApi,
   reshuffleMissCard as reshuffleMissCardApi,
   endMissCard as endMissCardApi,
+  tweakWerewolfBoard as tweakWerewolfBoardApi,
+  resetWerewolfBoard as resetWerewolfBoardApi,
+  dealWerewolf as dealWerewolfApi,
+  redealWerewolf as redealWerewolfApi,
+  setWerewolfStage as setWerewolfStageApi,
   syncRoomFromRelay,
   wasInRoomLocally,
 } from './roomApi'
@@ -138,9 +145,11 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     () => transport.getConnectionState(),
   )
   const [starting, setStarting] = useState(false)
-  const [seatPrivate, setSeatPrivate] = useState<SeatPrivate | null>(null)
+  const [seatPrivate, setSeatPrivate] = useState<
+    SeatPrivate | WerewolfSeatPrivate | null
+  >(null)
   const startingRef = useRef(false)
-  const privateRoundRef = useRef<number | null>(null)
+  const privateRoundRef = useRef<number | string | null>(null)
   const snapshotRef = useRef<TableSnapshot | null>(null)
   const roomRef = useRef<RoomState | null>(null)
   /** Drop same-key denom taps while awaiting ack. */
@@ -764,6 +773,34 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
   useEffect(() => {
     if (!roomCode || !session?.seatId) return
     const party = partyStubOf(room?.party)
+    if (party.gameId === 'werewolf-deal') {
+      if (party.phase !== 'dealt') {
+        privateRoundRef.current = null
+        if (seatPrivate) setSeatPrivate(null)
+        return
+      }
+      if (!(party.dealtSeatIds || []).includes(session.seatId)) {
+        privateRoundRef.current = null
+        if (seatPrivate) setSeatPrivate(null)
+        return
+      }
+      const mark = (party.dealtSeatIds || []).join(',')
+      if (
+        seatPrivate &&
+        seatPrivate.seatId === session.seatId &&
+        privateRoundRef.current === mark
+      ) {
+        return
+      }
+      void fetchSeatPrivate(roomCode, session.seatId, session.seatToken).then(
+        (result) => {
+          if ('error' in result) return
+          privateRoundRef.current = mark
+          setSeatPrivate(result.private)
+        },
+      )
+      return
+    }
     if (party.gameId !== 'undercover' || !isUndercoverPrivatePhase(party.phase)) {
       privateRoundRef.current = null
       if (seatPrivate) setSeatPrivate(null)
@@ -1133,6 +1170,120 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     )
   }, [roomCode, session, runPartyHostAction, pushToast])
 
+  const runWerewolfAction = useCallback(
+    (
+      action: () => Promise<
+        | { data: PersistedRoom; private?: SeatPrivate | WerewolfSeatPrivate | null }
+        | { error: string }
+      >,
+      failCopy: string,
+    ) => {
+      if (!roomCode || !session) {
+        pushToast(failCopy)
+        return
+      }
+      if (startingRef.current) return
+      startingRef.current = true
+      setStarting(true)
+      void (async () => {
+        try {
+          const result = await action()
+          if ('error' in result) {
+            pushToast(result.error)
+            return
+          }
+          applySyncedRoom(result.data, { force: true })
+          if ('private' in result) {
+            setSeatPrivate(result.private ?? null)
+          }
+        } catch (e) {
+          pushToast(
+            e instanceof RelayNetworkError
+              ? ACK_REASONS.RELAY_UNREACHABLE
+              : failCopy,
+          )
+        } finally {
+          startingRef.current = false
+          setStarting(false)
+        }
+      })()
+    },
+    [roomCode, session, applySyncedRoom, pushToast],
+  )
+
+  const tweakWerewolfBoard = useCallback(
+    (board: WerewolfBoard) => {
+      if (!session) {
+        pushToast(ACK_REASONS.NOT_HOST)
+        return
+      }
+      runWerewolfAction(
+        () =>
+          tweakWerewolfBoardApi(
+            roomCode!,
+            session.seatId,
+            session.seatToken,
+            board,
+          ),
+        ACK_REASONS.INVALID,
+      )
+    },
+    [roomCode, session, runWerewolfAction, pushToast],
+  )
+
+  const resetWerewolfBoard = useCallback(() => {
+    if (!session) {
+      pushToast(ACK_REASONS.NOT_HOST)
+      return
+    }
+    runWerewolfAction(
+      () => resetWerewolfBoardApi(roomCode!, session.seatId, session.seatToken),
+      ACK_REASONS.INVALID,
+    )
+  }, [roomCode, session, runWerewolfAction, pushToast])
+
+  const dealWerewolf = useCallback(() => {
+    if (!session) {
+      pushToast('发牌失败，请重试')
+      return
+    }
+    runWerewolfAction(
+      () => dealWerewolfApi(roomCode!, session.seatId, session.seatToken),
+      '发牌失败，请重试',
+    )
+  }, [roomCode, session, runWerewolfAction, pushToast])
+
+  const redealWerewolf = useCallback(() => {
+    if (!session) {
+      pushToast('重发失败，请重试')
+      return
+    }
+    runWerewolfAction(
+      () => redealWerewolfApi(roomCode!, session.seatId, session.seatToken),
+      '重发失败，请重试',
+    )
+  }, [roomCode, session, runWerewolfAction, pushToast])
+
+  const setWerewolfStage = useCallback(
+    (stage: WerewolfDealStage) => {
+      if (!session) {
+        pushToast(ACK_REASONS.NOT_HOST)
+        return
+      }
+      runWerewolfAction(
+        () =>
+          setWerewolfStageApi(
+            roomCode!,
+            session.seatId,
+            session.seatToken,
+            stage,
+          ),
+        ACK_REASONS.INVALID,
+      )
+    },
+    [roomCode, session, runWerewolfAction, pushToast],
+  )
+
   const startPlaying = useCallback(() => {
     if (!roomCode || !session) {
       pushToast('开桌失败，请重开一桌或检查网络')
@@ -1361,6 +1512,11 @@ export function useRoom(roomCode: string | undefined, transport: ChipTransport =
     spendMissToilet,
     reshuffleMissCard,
     endMissCard,
+    tweakWerewolfBoard,
+    resetWerewolfBoard,
+    dealWerewolf,
+    redealWerewolf,
+    setWerewolfStage,
     signalHostDisconnect,
     resumeTable,
     claimHost,

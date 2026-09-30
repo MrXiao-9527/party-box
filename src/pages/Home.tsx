@@ -32,6 +32,12 @@ const TOOLS = [
     title: PARTY_GAME_LABEL['miss-card'],
     subtitle: '十三钗 · 轮流抽牌出令',
   },
+  {
+    id: 'werewolf-deal',
+    path: '/tools/werewolf-deal',
+    title: PARTY_GAME_LABEL['werewolf-deal'],
+    subtitle: '按人数配板，私密看自己',
+  },
 ] as const
 
 export function HomePage() {

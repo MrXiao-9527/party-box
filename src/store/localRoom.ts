@@ -1,4 +1,16 @@
 import { dealRound, WORDBANK, type SeatPrivate } from '../games/undercover/deal'
+import type { WerewolfSeatPrivate } from '../games/werewolfDeal/roles'
+import {
+  clearToLobby,
+  dealRefusal,
+  dealRoles,
+  dealSeatIds,
+  lobbyParty,
+  nextDealId,
+  syncWerewolfOnMembers,
+} from '../games/werewolfDeal/engine'
+import { boardOf } from '../games/werewolfDeal/roles'
+import type { WerewolfBoard, WerewolfDealStage } from '../types'
 import {
   applyDisconnectSkip,
   applyRejoinSpeakTail,
@@ -71,8 +83,10 @@ export interface Session {
   seatToken?: string
 }
 
+type AnySeatPrivate = SeatPrivate | WerewolfSeatPrivate
+
 interface PartySecrets {
-  partyPrivates: Record<string, SeatPrivate>
+  partyPrivates: Record<string, AnySeatPrivate>
   seatTokens: Record<string, string>
 }
 
@@ -147,12 +161,37 @@ function nextSnapshotAt(existing: PersistedRoom): number {
   return Math.max((existing.table.snapshotAt ?? 0) + 1, Date.now())
 }
 
+function syncLocalWerewolf(
+  raw: RoomState['party'],
+  members: { seatId?: string }[],
+): RoomState['party'] {
+  const party = partyStubOf(raw)
+  if (party.gameId !== 'werewolf-deal') return raw
+  return syncWerewolfOnMembers(
+    {
+      gameId: 'werewolf-deal',
+      phase: party.phase === 'dealt' ? 'dealt' : 'lobby',
+      stage:
+        party.stage === 'night' || party.stage === 'day' || party.stage === 'vote'
+          ? party.stage
+          : 'idle',
+      seatCount: party.seatCount ?? members.length,
+      board: boardOf(party.board),
+      boardTweaked: !!party.boardTweaked,
+      roleComposition: party.roleComposition ?? [],
+      dealtSeatIds: party.dealtSeatIds ?? [],
+    },
+    members,
+  )
+}
+
 function appendLocalPartySeat(
   raw: RoomState['party'],
   seatId: string,
   hasWord: boolean,
 ): RoomState['party'] {
   const party = partyStubOf(raw)
+  if (party.gameId === 'werewolf-deal') return raw
   if (party.gameId !== 'undercover' || !isUndercoverDealtPhase(party.phase)) {
     return raw
   }
@@ -418,14 +457,17 @@ export function claimHostSeat(
     return null
   }
 
+  const members = [
+    { seatId, name, isHost: true, connected: true },
+    ...room.members.map((m) => ({ ...m, isHost: false })),
+  ]
+  const party = syncLocalWerewolf(room.party, members)
   const data: PersistedRoom = {
     room: {
       ...room,
       hostSeatId: seatId,
-      members: [
-        { seatId, name, isHost: true, connected: true },
-        ...room.members.map((m) => ({ ...m, isHost: false })),
-      ],
+      members,
+      ...(party ? { party } : {}),
     },
     table: {
       snapshotAt: nextSnapshotAt(existing),
@@ -513,15 +555,19 @@ export function joinRoom(
 
   const seatId = uid('seat')
   const seatToken = uid('tok')
-  const party = appendLocalPartySeat(existing.room.party, seatId, false)
+  const members = [
+    ...existing.room.members,
+    { seatId, name, isHost: false, connected: true },
+  ]
+  const party = syncLocalWerewolf(
+    appendLocalPartySeat(existing.room.party, seatId, false),
+    members,
+  )
   const data: PersistedRoom = {
     room: {
       ...existing.room,
       ...(party ? { party } : {}),
-      members: [
-        ...existing.room.members,
-        { seatId, name, isHost: false, connected: true },
-      ],
+      members,
     },
     table: {
       ...existing.table,
@@ -574,6 +620,7 @@ export function fillSeatsToMax(roomCode: string): PersistedRoom | { error: strin
       party = appendLocalPartySeat(party, s.seatId, false) ?? party
     }
   }
+  party = syncLocalWerewolf(party, members)
   const data: PersistedRoom = {
     room: { ...existing.room, members, ...(party ? { party } : {}) },
     table: { ...existing.table, seats, snapshotAt: nextSnapshotAt(existing) },
@@ -1172,7 +1219,7 @@ function hydrateLocalReveal(
 ) {
   const seats = members.map((m) => {
     const priv = secrets.partyPrivates[m.seatId]
-    if (priv?.word) {
+    if (priv && 'word' in priv && priv.word) {
       return {
         seatId: m.seatId,
         hasWord: true,
@@ -1190,7 +1237,15 @@ function hydrateLocalReveal(
   const winner =
     party.winner === 'civilian' || party.winner === 'undercover'
       ? party.winner
-      : checkUndercoverWinner(eliminatedSeatIds, secrets.partyPrivates, aliveIds)
+      : checkUndercoverWinner(
+          eliminatedSeatIds,
+          Object.fromEntries(
+            Object.entries(secrets.partyPrivates).filter(
+              (entry): entry is [string, SeatPrivate] => 'word' in entry[1],
+            ),
+          ),
+          aliveIds,
+        )
   return {
     gameId: party.gameId || 'undercover',
     phase: 'revealed' as const,
@@ -1214,7 +1269,15 @@ function nextLocalUndercoverParty(
   if (next.phase === 'voting' && canSettleVotes(next, members)) {
     next = partyStubOf({
       ...next,
-      ...settleVoteParty(next, members, secrets.partyPrivates),
+      ...settleVoteParty(
+        next,
+        members,
+        Object.fromEntries(
+          Object.entries(secrets.partyPrivates).filter(
+            (entry): entry is [string, SeatPrivate] => 'word' in entry[1],
+          ),
+        ),
+      ),
     })
   }
   if (next.phase === 'revealed') {
@@ -1448,7 +1511,7 @@ export function getSeatPrivate(
   roomCode: string,
   seatId: string,
   seatToken?: string,
-): { private: SeatPrivate | null; hasWord: boolean } | { error: string } {
+): { private: AnySeatPrivate | null; hasWord: boolean } | { error: string } {
   const existing = loadRoom(roomCode)
   if (!existing) return { error: ACK_REASONS.ROOM_MISSING }
   const secrets = loadSecrets(roomCode)
@@ -1896,4 +1959,149 @@ export function endMissCard(
   const result = endMissEngine(party)
   if (result.error) return { error: result.error }
   return applyLocalMissParty(existing!, result.party)
+}
+
+function applyLocalWerewolf(
+  existing: PersistedRoom,
+  party: ReturnType<typeof lobbyParty>,
+  partyPrivates?: Record<string, AnySeatPrivate>,
+): PersistedRoom {
+  const secrets = loadSecrets(existing.room.roomCode)
+  if (partyPrivates) {
+    saveSecrets(existing.room.roomCode, { ...secrets, partyPrivates })
+  }
+  return saveRoom({
+    room: { ...existing.room, party },
+    table: { ...existing.table, snapshotAt: nextSnapshotAt(existing) },
+  })
+}
+
+export function tweakWerewolfBoard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  rawBoard: WerewolfBoard,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  const hostErr = localMissHostError(existing, fromSeatId, seatToken)
+  if (hostErr) return { error: hostErr }
+  const party = partyStubOf(existing!.room.party)
+  if (party.gameId !== 'werewolf-deal') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'lobby') return { error: ACK_REASONS.BOARD_LOCKED }
+  const next = lobbyParty(existing!.room.members, rawBoard)
+  return { data: applyLocalWerewolf(existing!, next) }
+}
+
+export function resetWerewolfBoard(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  const hostErr = localMissHostError(existing, fromSeatId, seatToken)
+  if (hostErr) return { error: hostErr }
+  const party = partyStubOf(existing!.room.party)
+  if (party.gameId !== 'werewolf-deal') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'lobby') return { error: ACK_REASONS.BOARD_LOCKED }
+  return { data: applyLocalWerewolf(existing!, lobbyParty(existing!.room.members)) }
+}
+
+export function dealWerewolf(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+):
+  | { data: PersistedRoom; private: AnySeatPrivate | null }
+  | { error: string } {
+  const existing = loadRoom(roomCode)
+  const hostErr = localMissHostError(existing, fromSeatId, seatToken)
+  if (hostErr) return { error: hostErr }
+  const party = partyStubOf(existing!.room.party)
+  if (party.gameId !== 'werewolf-deal') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'lobby') return { error: ACK_REASONS.ALREADY_STARTED }
+  const seatIds = dealSeatIds(existing!.room.members)
+  const refuse = dealRefusal(party.board, seatIds.length)
+  if (refuse) return { error: refuse }
+  const secrets = loadSecrets(roomCode)
+  const dealId = nextDealId(
+    secrets.partyPrivates as Record<string, { dealId?: string }>,
+    party.dealSeq,
+  )
+  const dealt = dealRoles(seatIds, party.board, Math.random, dealId)
+  if ('error' in dealt) return { error: dealt.error }
+  const partyPrivates: Record<string, AnySeatPrivate> = {}
+  for (const p of dealt.privates) partyPrivates[p.seatId] = p
+  const next = {
+    gameId: 'werewolf-deal' as const,
+    phase: 'dealt' as const,
+    stage: 'idle' as const,
+    seatCount: seatIds.length,
+    board: boardOf(party.board),
+    boardTweaked: !!party.boardTweaked,
+    roleComposition: party.roleComposition ?? [],
+    dealtSeatIds: seatIds,
+    dealSeq: dealt.dealId,
+  }
+  const data = applyLocalWerewolf(existing!, next, partyPrivates)
+  return { data, private: partyPrivates[fromSeatId] || null }
+}
+
+export function redealWerewolf(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken?: string,
+):
+  | { data: PersistedRoom; private: AnySeatPrivate | null }
+  | { error: string } {
+  const existing = loadRoom(roomCode)
+  const hostErr = localMissHostError(existing, fromSeatId, seatToken)
+  if (hostErr) return { error: hostErr }
+  const party = partyStubOf(existing!.room.party)
+  if (party.gameId !== 'werewolf-deal') return { error: ACK_REASONS.INVALID }
+  // Board vs seats never blocks redeal (PRD v0.1.2 §5.1.5): wipe → lobby + idle.
+  if (party.phase !== 'dealt') return { error: ACK_REASONS.NOT_DEALT }
+  const cleared = clearToLobby(
+    {
+      gameId: 'werewolf-deal',
+      phase: 'dealt',
+      stage: 'idle',
+      seatCount: party.seatCount ?? existing!.room.members.length,
+      board: boardOf(party.board),
+      boardTweaked: !!party.boardTweaked,
+      roleComposition: party.roleComposition ?? [],
+      dealtSeatIds: [],
+      dealSeq: party.dealSeq,
+    },
+    existing!.room.members,
+  )
+  const data = applyLocalWerewolf(existing!, cleared, {})
+  return { data, private: null }
+}
+
+export function setWerewolfStage(
+  roomCode: string,
+  fromSeatId: string,
+  seatToken: string | undefined,
+  stage: WerewolfDealStage,
+): { data: PersistedRoom } | { error: string } {
+  const existing = loadRoom(roomCode)
+  const hostErr = localMissHostError(existing, fromSeatId, seatToken)
+  if (hostErr) return { error: hostErr }
+  const party = partyStubOf(existing!.room.party)
+  if (party.gameId !== 'werewolf-deal') return { error: ACK_REASONS.INVALID }
+  if (party.phase !== 'dealt') return { error: ACK_REASONS.NOT_DEALT }
+  if (stage !== 'idle' && stage !== 'night' && stage !== 'day' && stage !== 'vote') {
+    return { error: ACK_REASONS.INVALID }
+  }
+  const next = {
+    gameId: 'werewolf-deal' as const,
+    phase: 'dealt' as const,
+    stage,
+    seatCount: party.seatCount ?? existing!.room.members.length,
+    board: boardOf(party.board),
+    boardTweaked: !!party.boardTweaked,
+    roleComposition: party.roleComposition ?? [],
+    dealtSeatIds: party.dealtSeatIds ?? [],
+  }
+  return { data: applyLocalWerewolf(existing!, next) }
 }

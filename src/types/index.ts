@@ -19,7 +19,7 @@ export type MissCardPhase =
   | 'deckEmpty'
   | 'ended'
 
-export type PartyGameId = 'undercover' | 'truthDare' | 'miss-card'
+export type PartyGameId = 'undercover' | 'truthDare' | 'miss-card' | 'werewolf-deal'
 
 export type MissCardRank =
   | 'A'
@@ -58,6 +58,7 @@ export const PARTY_GAME_LABEL: Record<PartyGameId, string> = {
   undercover: '谁是卧底',
   truthDare: '真心话大冒险',
   'miss-card': '小姐牌',
+  'werewolf-deal': '狼人杀发牌',
 }
 
 export const MISS_CARD_HISTORY_N = 5
@@ -102,6 +103,7 @@ export interface PromptHistoryEntry {
 export function parsePartyGameId(raw: unknown): PartyGameId {
   if (raw === 'truthDare') return 'truthDare'
   if (raw === 'miss-card') return 'miss-card'
+  if (raw === 'werewolf-deal') return 'werewolf-deal'
   return 'undercover'
 }
 
@@ -131,10 +133,35 @@ export interface PartyPublicSeat {
   role?: UndercoverRole
 }
 
+export type WerewolfDealPhase = 'lobby' | 'dealt'
+export type WerewolfDealStage = 'idle' | 'night' | 'day' | 'vote'
+export type WerewolfRoleId =
+  | 'werewolf'
+  | 'villager'
+  | 'seer'
+  | 'witch'
+  | 'hunter'
+  | 'guard'
+
+export interface WerewolfBoard {
+  werewolf: number
+  villager: number
+  seer: number
+  witch: number
+  hunter: number
+  guard: number
+}
+
+export interface WerewolfRoleCount {
+  roleId: WerewolfRoleId
+  label: string
+  count: number
+}
+
 /** Public party fields. Word/role text only when phase is revealed. */
 export interface PartyStub {
   gameId: PartyGameId
-  phase: PartyPhase | TruthDarePhase | MissCardPhase
+  phase: PartyPhase | TruthDarePhase | MissCardPhase | WerewolfDealPhase
   pairId?: string
   undercoverCount?: number
   round?: number
@@ -203,6 +230,20 @@ export interface PartyStub {
   kSetThisTurn?: boolean
   /** miss-card: skip toast payload, dual-end. */
   skipNotice?: { text: string; at: number } | null
+  /** werewolf-deal: public stage prompt only. */
+  stage?: WerewolfDealStage
+  /** werewolf-deal: seated count including grace occupants. */
+  seatCount?: number
+  /** werewolf-deal: current board (auto or tweaked). */
+  board?: WerewolfBoard
+  /** werewolf-deal: host changed counts vs auto board. */
+  boardTweaked?: boolean
+  /** werewolf-deal: public role×count. Never seat→role. */
+  roleComposition?: WerewolfRoleCount[]
+  /** werewolf-deal: seats that received a card this deal. */
+  dealtSeatIds?: string[]
+  /** werewolf-deal: last deal id (opaque counter, not who-is-who). */
+  dealSeq?: string
 }
 
 export type ChipOpType =
@@ -396,6 +437,8 @@ export interface TableSnapshot {
 
 export const MIN_SEATS = 2
 export const MAX_SEATS = 8
+/** werewolf-deal table cap only; other tools stay 2–8. */
+export const WEREWOLF_MAX_SEATS = 10
 export const DEFAULT_DENOMS = [1, 5, 10, 25, 100] as const
 
 /** Locked QR / copy-link origin — never window origin, never trycloudflare. */
@@ -406,9 +449,15 @@ export function roomJoinUrl(roomCode: string): string {
   return `${JOIN_ORIGIN}/r/${code}`
 }
 
+export function seatCapForGame(gameId: unknown): number {
+  return gameId === 'werewolf-deal' ? WEREWOLF_MAX_SEATS : MAX_SEATS
+}
+
 export function normalizeMaxSeats(raw: unknown): number {
   const n = typeof raw === 'number' ? raw : Number(raw)
-  if (!Number.isInteger(n) || n < MIN_SEATS || n > MAX_SEATS) return MAX_SEATS
+  if (!Number.isInteger(n) || n < MIN_SEATS || n > WEREWOLF_MAX_SEATS) {
+    return MAX_SEATS
+  }
   return n
 }
 
@@ -756,6 +805,108 @@ function missCardStubOf(src: Record<string, unknown> | null): PartyStub {
   }
 }
 
+const WEREWOLF_ROLE_IDS: WerewolfRoleId[] = [
+  'werewolf',
+  'villager',
+  'seer',
+  'witch',
+  'hunter',
+  'guard',
+]
+
+const WEREWOLF_ROLE_LABEL: Record<WerewolfRoleId, string> = {
+  werewolf: '狼人',
+  villager: '平民',
+  seer: '预言家',
+  witch: '女巫',
+  hunter: '猎人',
+  guard: '守卫',
+}
+
+function emptyWerewolfBoard(): WerewolfBoard {
+  return {
+    werewolf: 0,
+    villager: 0,
+    seer: 0,
+    witch: 0,
+    hunter: 0,
+    guard: 0,
+  }
+}
+
+function werewolfBoardOf(raw: unknown): WerewolfBoard {
+  const src = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const out = emptyWerewolfBoard()
+  for (const id of WEREWOLF_ROLE_IDS) {
+    const n = typeof src[id] === 'number' ? src[id] : Number(src[id])
+    out[id] = Number.isInteger(n) && n > 0 ? n : 0
+  }
+  return out
+}
+
+function werewolfCompositionOf(board: WerewolfBoard): WerewolfRoleCount[] {
+  return WEREWOLF_ROLE_IDS.filter((id) => board[id] > 0).map((id) => ({
+    roleId: id,
+    label: WEREWOLF_ROLE_LABEL[id],
+    count: board[id],
+  }))
+}
+
+function werewolfCompositionStub(raw: unknown, board: WerewolfBoard): WerewolfRoleCount[] {
+  if (!Array.isArray(raw)) return werewolfCompositionOf(board)
+  const out: WerewolfRoleCount[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const row = item as Record<string, unknown>
+    const roleId = WEREWOLF_ROLE_IDS.includes(row.roleId as WerewolfRoleId)
+      ? (row.roleId as WerewolfRoleId)
+      : null
+    if (!roleId || seen.has(roleId)) continue
+    const n = typeof row.count === 'number' ? row.count : Number(row.count)
+    if (!Number.isInteger(n) || n <= 0) continue
+    seen.add(roleId)
+    out.push({ roleId, label: WEREWOLF_ROLE_LABEL[roleId], count: n })
+  }
+  return out.length ? out : werewolfCompositionOf(board)
+}
+
+function asWerewolfStage(raw: unknown): WerewolfDealStage {
+  if (raw === 'night' || raw === 'day' || raw === 'vote' || raw === 'idle') {
+    return raw
+  }
+  return 'idle'
+}
+
+function werewolfStubOf(src: Record<string, unknown> | null): PartyStub {
+  const board = werewolfBoardOf(src?.board)
+  const phase: WerewolfDealPhase = src?.phase === 'dealt' ? 'dealt' : 'lobby'
+  const seatRaw =
+    typeof src?.seatCount === 'number' ? src.seatCount : Number(src?.seatCount)
+  const seatCount =
+    Number.isInteger(seatRaw) && seatRaw >= 0
+      ? seatRaw
+      : WEREWOLF_ROLE_IDS.reduce((n, id) => n + board[id], 0)
+  const stub: PartyStub = {
+    gameId: 'werewolf-deal',
+    phase,
+    stage: asWerewolfStage(src?.stage),
+    seatCount,
+    board,
+    boardTweaked: !!src?.boardTweaked,
+    roleComposition: werewolfCompositionStub(src?.roleComposition, board),
+    dealtSeatIds: phase === 'dealt' ? stringIdList(src?.dealtSeatIds) : [],
+  }
+  const dealSeq =
+    typeof src?.dealSeq === 'string' && src.dealSeq.trim()
+      ? src.dealSeq.trim()
+      : typeof src?.dealSeq === 'number'
+        ? String(src.dealSeq)
+        : ''
+  if (dealSeq) stub.dealSeq = dealSeq
+  return stub
+}
+
 function truthDareStubOf(src: Record<string, unknown> | null): PartyStub {
   const prompt = publicPartyPrompt(src?.prompt)
   const recent = recentPromptIdsOf(src?.recentPromptIds)
@@ -780,6 +931,7 @@ export function partyStubOf(raw: unknown): PartyStub {
   const gameId = parsePartyGameId(src?.gameId)
   if (gameId === 'truthDare') return truthDareStubOf(src)
   if (gameId === 'miss-card') return missCardStubOf(src)
+  if (gameId === 'werewolf-deal') return werewolfStubOf(src)
   const phase = asPartyPhase(src?.phase)
   const stub: PartyStub = { gameId, phase }
   if (phase === 'lobby') return stub
@@ -831,6 +983,12 @@ export function isMissCardGame(
   room: { mode?: unknown; party?: unknown } | null | undefined,
 ): boolean {
   return isPartyGame(room) && partyStubOf(room?.party).gameId === 'miss-card'
+}
+
+export function isWerewolfDealGame(
+  room: { mode?: unknown; party?: unknown } | null | undefined,
+): boolean {
+  return isPartyGame(room) && partyStubOf(room?.party).gameId === 'werewolf-deal'
 }
 
 export function isTruthDareGame(
@@ -913,6 +1071,14 @@ export const ACK_REASONS = {
   NEED_SET_K: '请先设定杯数',
   DECK_EMPTY: '牌已抽完',
   PICK_ONLINE: '只能指定在线的人',
+  BOARD_MISMATCH: '人数与板子对不上',
+  NO_WOLF: '狼人不能为 0',
+  NO_GOOD: '好人不能为 0',
+  BOARD_LOCKED: '发牌后不能改角色数量',
+  NEED_TWO_SEATED: '至少 2 人入座才能发牌',
+  SEATS_RANGE_WEREWOLF: '人数须为2–10',
+  NOT_DEALT: '发牌后才能切换阶段',
+  NOT_IN_LOBBY: '未发牌时才能改板',
 } as const
 
 /** A-Z / 0-9 only, always UPPERCASE. */
@@ -961,6 +1127,10 @@ export function parseRoomCreate(
   const src = input && typeof input === 'object' ? input : {}
   const mode = parseRoomMode(src.mode)
   const party = mode === 'partyGame' ? partyStubOf(src) : undefined
+  const seatCap =
+    mode === 'partyGame' && party?.gameId === 'werewolf-deal'
+      ? WEREWOLF_MAX_SEATS
+      : MAX_SEATS
 
   const seatsRaw = src.maxSeats
   const seatsMissing =
@@ -968,8 +1138,14 @@ export function parseRoomCreate(
   let maxSeats = MAX_SEATS
   if (!seatsMissing) {
     const n = typeof seatsRaw === 'number' ? seatsRaw : Number(seatsRaw)
-    if (!Number.isInteger(n) || n < MIN_SEATS || n > MAX_SEATS) {
-      return { ok: false, error: ACK_REASONS.SEATS_RANGE }
+    if (!Number.isInteger(n) || n < MIN_SEATS || n > seatCap) {
+      return {
+        ok: false,
+        error:
+          seatCap === WEREWOLF_MAX_SEATS
+            ? ACK_REASONS.SEATS_RANGE_WEREWOLF
+            : ACK_REASONS.SEATS_RANGE,
+      }
     }
     maxSeats = n
   }
