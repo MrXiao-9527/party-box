@@ -2058,6 +2058,7 @@ export function redealWerewolf(
   if (hostErr) return { error: hostErr }
   const party = partyStubOf(existing!.room.party)
   if (party.gameId !== 'werewolf-deal') return { error: ACK_REASONS.INVALID }
+  // Board vs seats never blocks redeal (PRD v0.1.2 §5.1.5): wipe → lobby + idle.
   if (party.phase !== 'dealt') return { error: ACK_REASONS.NOT_DEALT }
   const cleared = clearToLobby(
     {

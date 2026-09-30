@@ -252,6 +252,118 @@ function joinN(store, code, n) {
 }
 
 {
+  // PRD v0.1.2 §5.1.5: tweaked + dealt + late join must not deadlock.
+  const { store, code, host, tok } = hostRoom(createRoomStore())
+  const guest = joinN(store, code, 1)[0]
+  const tweaked = store.tweakWerewolfBoard(code, host.seatId, tok, {
+    werewolf: 1,
+    villager: 0,
+    seer: 1,
+    witch: 0,
+    hunter: 0,
+    guard: 0,
+  })
+  assert(!('error' in tweaked), 'legal tweak 2')
+  const dealt = store.dealWerewolf(code, host.seatId, tok)
+  assert(!('error' in dealt), 'deal tweaked 2')
+  const dealId1 = dealt.private.dealId
+  const night = store.setWerewolfStage(code, host.seatId, tok, 'night')
+  assert(!('error' in night), 'night')
+  const late = store.joinRoom(code, '晚进死锁')
+  assert(!('error' in late), 'late join')
+  const mid = partyStubOf(store.get(code).room.party)
+  assert(mid.phase === 'dealt' && mid.seatCount === 3, 'drift 3 vs tweaked 2')
+  assert(mid.board.seer === 1 && mid.board.villager === 0, 'tweak kept while dealt')
+  assert(mid.stage === 'night', 'still night')
+  assert(mid.boardTweaked === true, 'flag while dealt')
+
+  const dealAgain = store.dealWerewolf(code, host.seatId, tok)
+  assert(dealAgain.error === ACK_REASONS.ALREADY_STARTED, 'no deal while dealt')
+  const tweakWhileDealt = store.tweakWerewolfBoard(code, host.seatId, tok, {
+    werewolf: 1,
+    villager: 1,
+    seer: 1,
+    witch: 0,
+    hunter: 0,
+    guard: 0,
+  })
+  assert(tweakWhileDealt.error === ACK_REASONS.BOARD_LOCKED, 'tweak locked while dealt')
+  const resetWhileDealt = store.resetWerewolfBoard(code, host.seatId, tok)
+  assert(resetWhileDealt.error === ACK_REASONS.BOARD_LOCKED, 'reset locked while dealt')
+
+  const red = store.redealWerewolf(code, host.seatId, tok)
+  assert(!('error' in red), `redeal never refuses ${red.error || ''}`)
+  assert(red.error !== ACK_REASONS.BOARD_MISMATCH, 'redeal is not a board gate')
+  assert(red.private === null, 'caller private cleared')
+  const lobby = partyStubOf(red.data.room.party)
+  assert(lobby.phase === 'lobby', 'lobby after wipe')
+  assert(lobby.stage === 'idle', 'idle not night')
+  assert(lobby.dealtSeatIds.length === 0, 'no dealt ids')
+  assert(lobby.boardTweaked === true, 'keep tweak across wipe')
+  assert(lobby.board.seer === 1 && lobby.board.villager === 0, 'keep board')
+  assert(lobby.seatCount === 3, '3 seats')
+  assert(store.getSeatPrivate(code, host.seatId, tok).private === null, 'host card gone')
+  assert(
+    store.getSeatPrivate(code, guest.seatId, guest.seatToken).private === null,
+    'guest card gone',
+  )
+  assert(
+    store.getSeatPrivate(code, late.session.seatId, late.session.seatToken).private ===
+      null,
+    'late still no card',
+  )
+  assert(!publicPayloadLeaks(publicPersisted(red.data)), 'public clean after wipe')
+
+  const refuse = store.dealWerewolf(code, host.seatId, tok)
+  assert(refuse.error === ACK_REASONS.BOARD_MISMATCH, 'deal gated until board fixed')
+
+  const fixTweak = store.tweakWerewolfBoard(code, host.seatId, tok, {
+    werewolf: 1,
+    villager: 1,
+    seer: 1,
+    witch: 0,
+    hunter: 0,
+    guard: 0,
+  })
+  assert(!('error' in fixTweak), 'can tweak after redeal')
+  const dealt2 = store.dealWerewolf(code, host.seatId, tok)
+  assert(!('error' in dealt2), `deal after tweak-fix ${dealt2.error || ''}`)
+  const after2 = partyStubOf(dealt2.data.room.party)
+  assert(after2.dealtSeatIds.length === 3, '3 cards after tweak-fix')
+  assert(dealt2.private?.dealId && dealt2.private.dealId !== dealId1, 'new dealId')
+}
+
+{
+  // PRD v0.1.2 §5.1.5 unlock via reset-board after tweaked wipe.
+  const { store, code, host, tok } = hostRoom(createRoomStore())
+  joinN(store, code, 1)
+  store.tweakWerewolfBoard(code, host.seatId, tok, {
+    werewolf: 1,
+    villager: 0,
+    seer: 1,
+    witch: 0,
+    hunter: 0,
+    guard: 0,
+  })
+  const dealt = store.dealWerewolf(code, host.seatId, tok)
+  assert(!('error' in dealt), 'deal tweaked 2')
+  store.joinRoom(code, '丁')
+  const red = store.redealWerewolf(code, host.seatId, tok)
+  assert(!('error' in red), 'redeal')
+  assert(partyStubOf(red.data.room.party).boardTweaked === true, 'still tweaked')
+  const reset = store.resetWerewolfBoard(code, host.seatId, tok)
+  assert(!('error' in reset), 'reset after wipe')
+  const auto = partyStubOf(reset.data.room.party)
+  assert(auto.phase === 'lobby' && auto.stage === 'idle', 'still lobby idle')
+  assert(auto.boardTweaked === false, 'flag cleared')
+  assert(sumBoard(auto.board) === 3, 'auto 3')
+  assert(auto.board.werewolf === 1 && auto.board.villager === 1 && auto.board.seer === 1, 'default 3')
+  const dealt3 = store.dealWerewolf(code, host.seatId, tok)
+  assert(!('error' in dealt3), `deal after reset-fix ${dealt3.error || ''}`)
+  assert(partyStubOf(dealt3.data.room.party).dealtSeatIds.length === 3, '3 cards after reset')
+}
+
+{
   const wolf9 = createRoomStore().createEmptyHostRoom({
     mode: 'partyGame',
     gameId: 'werewolf-deal',

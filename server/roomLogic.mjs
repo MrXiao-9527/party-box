@@ -1263,6 +1263,8 @@ export function createRoomStore() {
     if (hostErr) return { error: hostErr }
     const party = werewolfParty(existing)
     if (party.gameId !== WEREWOLF_GAME_ID) return { error: ACK_REASONS.INVALID }
+    // Only NOT_HOST / INVALID / NOT_DEALT. Board vs seats never blocks redeal
+    // (PRD v0.1.2 §5.1.5 / §3.8 / §7⑦): wipe all cards → lobby + idle.
     if (party.phase !== 'dealt') return { error: ACK_REASONS.NOT_DEALT }
     const cleared = clearToLobby(party, existing.room.members)
     const data = writeWerewolf(existing, cleared, {}).data

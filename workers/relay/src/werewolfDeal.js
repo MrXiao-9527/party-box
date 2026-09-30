@@ -364,6 +364,7 @@ export function lobbyParty(members, tweakedBoard, dealSeq) {
   return next
 }
 
+/** PRD v0.1.2 §5.1.5 / §3.8 / §7⑦: wipe cards → lobby + idle. Never refuse. */
 export function clearToLobby(party, members) {
   const prev = werewolfStubOf(party)
   const seatCount = dealSeats(members).length

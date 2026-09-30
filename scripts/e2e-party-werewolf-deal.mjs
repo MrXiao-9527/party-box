@@ -180,6 +180,15 @@ try {
   await host.page.waitForFunction(
     () => document.querySelector('[data-can-deal]')?.getAttribute('data-can-deal') === 'true',
   )
+  // Legal 2-seat tweak (狼+预言家) so post-deal late join can hit §5.1.5.
+  await host.page.click('[data-tweak="villager"][data-dir="dec"]')
+  await host.page.click('[data-tweak="seer"][data-dir="inc"]')
+  await host.page.waitForFunction(
+    () =>
+      document.querySelector('[data-board-tweaked]')?.getAttribute('data-board-tweaked') ===
+        'true' &&
+      document.querySelector('[data-can-deal]')?.getAttribute('data-can-deal') === 'true',
+  )
   await host.page.click('[data-deal]')
   await host.page.waitForSelector('[data-private-role]')
   await guest.page.waitForSelector('[data-private-role]')
@@ -236,6 +245,7 @@ try {
   assert(nightText.includes('天黑了'), 'night copy')
   assert(!nightText.includes('查验面板') && !nightText.includes('用药'), 'no skill panel')
 
+  assert(!(await host.page.$('[data-werewolf-board]')), 'steppers hidden while dealt')
   await host.page.click('[data-redeal]')
   await host.page.waitForSelector('[data-redeal-confirm]')
   await host.page.click('[data-confirm-redeal]')
@@ -249,12 +259,28 @@ try {
   assert(!(await guest.page.$('[data-private-role]')), 'guest old card gone')
   const after = await pageText(host.page)
   assert(after.includes('未开始') || after.includes('大厅'), `back lobby ${after}`)
-  await host.page.screenshot({ path: `${ART}/werewolf-redeal-lobby.png`, fullPage: true })
+  const tweakedAfter = await host.page.$eval('[data-board-tweaked]', (el) =>
+    el.getAttribute('data-board-tweaked'),
+  )
+  assert(tweakedAfter === 'true', 'redeal keeps tweak')
+  const gateAfter = await host.page.$eval('[data-deal-gate]', (el) => el.getAttribute('data-deal-gate'))
+  assert(gateAfter.includes('对不上'), `mismatch gate ${gateAfter}`)
+  const dealDisabledAfter = await host.page.$eval('[data-deal]', (el) => el.disabled)
+  assert(dealDisabledAfter, 'deal still gated after wipe')
+  assert(await host.page.$('[data-werewolf-board]'), 'steppers editable after wipe')
+  assert(await host.page.$('[data-reset-board]'), 'reset-board after wipe — not stuck')
+  await host.page.screenshot({ path: `${ART}/werewolf-redeal-mismatch-lobby.png`, fullPage: true })
 
+  await host.page.click('[data-reset-board]')
+  await host.page.waitForFunction(
+    () => document.querySelector('[data-can-deal]')?.getAttribute('data-can-deal') === 'true',
+  )
   await host.page.click('[data-deal]')
   await host.page.waitForSelector('[data-private-role]')
   const newHostRole = await ownRole(host.page)
-  assert(newHostRole, 'redeal then deal new card')
+  assert(newHostRole, 'reset-board then deal new card')
+  await late.page.waitForSelector('[data-private-role]')
+  assert(await late.page.$('[data-private-role]'), 'late seated now gets a card on new deal')
 
   await host.ctx.close()
   await guest.ctx.close()
